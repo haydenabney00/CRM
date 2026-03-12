@@ -4185,609 +4185,1112 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
 // ── Underwriting Tab (FIXED VERSION) ────────────────────────────────────────────
 // ── INSTITUTIONAL-GRADE INVESTMENT ANALYSIS & DEAL MODELER (Cushman/CBRE/JLL Style) ────────────────────────────────────────────
 
+// ── Underwriting Tab — Institutional Grade ────────────────────────────────────
+// Real IRR (Newton-Raphson), Rent Roll driven, Sensitivity Tables, Lease-up modeling
+
+function calcIRR(cashFlows) {
+  // Newton-Raphson IRR calculation
+  let rate = 0.1;
+  for (let i = 0; i < 100; i++) {
+    let npv = 0, dnpv = 0;
+    for (let t = 0; t < cashFlows.length; t++) {
+      npv  += cashFlows[t] / Math.pow(1 + rate, t);
+      dnpv -= t * cashFlows[t] / Math.pow(1 + rate, t + 1);
+    }
+    if (Math.abs(dnpv) < 1e-10) break;
+    const newRate = rate - npv / dnpv;
+    if (Math.abs(newRate - rate) < 1e-8) { rate = newRate; break; }
+    rate = newRate;
+  }
+  return isFinite(rate) ? rate * 100 : null;
+}
+
+function calcAnnualDebtService(loanAmount, annualRate, amortYears, ioYears = 0) {
+  if (loanAmount <= 0 || annualRate <= 0) return { payment: 0, io: 0 };
+  const monthlyRate = annualRate / 100 / 12;
+  const ioPayment = loanAmount * monthlyRate * 12;
+  if (amortYears <= 0) return { payment: ioPayment, io: ioPayment };
+  const n = amortYears * 12;
+  const monthly = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, n)) / (Math.pow(1 + monthlyRate, n) - 1);
+  return { payment: monthly * 12, io: ioPayment };
+}
+
+function buildProjection(uwData, projYears) {
+  const sqft = parseFloat(uwData.sqft) || 1;
+  const purchasePrice = parseFloat(uwData.purchasePrice) || 0;
+  const closingCosts  = parseFloat(uwData.closingCosts)  || 0;
+  const capReserves   = parseFloat(uwData.capReserves)   || 0;
+  const totalCost     = purchasePrice + closingCosts + capReserves;
+
+  // Financing
+  const loanAmt    = parseFloat(uwData.loanAmount)   || 0;
+  const loanRate   = parseFloat(uwData.loanRate)      || 0;
+  const amortYrs   = parseInt(uwData.amortYears)      || 25;
+  const ioYrs      = parseInt(uwData.ioYears)         || 0;
+  const equity     = totalCost - loanAmt;
+  const { payment: fullADS, io: ioADS } = calcAnnualDebtService(loanAmt, loanRate, amortYrs);
+
+  // Rent Roll → Year 1 GPR
+  const rentRoll = uwData.rentRoll || [];
+  const vacancyRate   = parseFloat(uwData.vacancyRate)   || 5;
+  const otherIncome   = parseFloat(uwData.otherIncome)   || 0;
+  const rentGrowth    = parseFloat(uwData.rentGrowth)    || 2.5;
+  const opexGrowth    = parseFloat(uwData.opexGrowth)    || 2.0;
+  const exitCapRate   = parseFloat(uwData.exitCapRate)   || 7.0;
+  const saleExpPct    = parseFloat(uwData.saleExpenses)  || 1.0;
+
+  // Year 1 GPR from rent roll
+  const leaseUpPeriod = parseInt(uwData.leaseUpPeriod) || 0; // months to stabilize vacant space
+  const baseGPR = rentRoll.reduce((s, t) => {
+    const sf = parseFloat(t.sqft) || 0;
+    const rent = parseFloat(t.rentPerSqft) || 0;
+    return s + sf * rent;
+  }, 0);
+
+  // Operating expenses
+  const opex = {
+    tax:        parseFloat(uwData.realEstateTax) || 0,
+    insurance:  parseFloat(uwData.insurance)     || 0,
+    utilities:  parseFloat(uwData.utilities)     || 0,
+    repairs:    parseFloat(uwData.repairs)        || 0,
+    management: parseFloat(uwData.management)    || 0,
+    cam:        parseFloat(uwData.cam)            || 0,
+    reserves:   parseFloat(uwData.reserves)      || 0,
+    other:      parseFloat(uwData.otherOpex)     || 0,
+  };
+  const totalBaseOpex = Object.values(opex).reduce((s, v) => s + v, 0);
+
+  // TI/LC (tenant improvements & leasing commissions)
+  const tiLcPerSf = parseFloat(uwData.tiLcPerSf) || 0;
+  const tiLcTotal = tiLcPerSf * sqft;
+
+  const years = [];
+  let remainingBalance = loanAmt;
+  const cashFlows = [-equity]; // Year 0 = equity out
+
+  for (let yr = 1; yr <= projYears; yr++) {
+    const isIO = yr <= ioYrs;
+    const ads = isIO ? ioADS : fullADS;
+
+    // Grow rents
+    const gpr = baseGPR * Math.pow(1 + rentGrowth / 100, yr - 1);
+
+    // Lease-up adjustment: ramp vacancy down over leaseUpPeriod
+    let effectiveVacancy = vacancyRate;
+    if (leaseUpPeriod > 0 && yr === 1) {
+      // Year 1: blended vacancy (assume full vacant first N months)
+      const startVac = parseFloat(uwData.currentVacancy) || vacancyRate;
+      effectiveVacancy = ((startVac * leaseUpPeriod / 12) + (vacancyRate * (1 - leaseUpPeriod / 12)));
+    }
+
+    const vacLoss = gpr * effectiveVacancy / 100;
+    const egi = gpr + otherIncome - vacLoss;
+    const yearOpex = totalBaseOpex * Math.pow(1 + opexGrowth / 100, yr - 1);
+    const noi = egi - yearOpex;
+
+    // Principal paydown (simplified)
+    const yearInterest = isIO ? remainingBalance * (loanRate / 100) : remainingBalance * (loanRate / 100);
+    const yearADS = ads;
+    const yearPrincipal = isIO ? 0 : Math.max(0, yearADS - yearInterest);
+    remainingBalance = Math.max(0, remainingBalance - yearPrincipal);
+
+    const cf = noi - yearADS;
+    cashFlows.push(cf);
+
+    years.push({
+      yr, gpr, vacLoss, effectiveVacancy, egi, yearOpex, noi,
+      ads: yearADS, interest: yearInterest, principal: yearPrincipal,
+      cf, remainingBalance, isIO,
+      capRateOnCost: totalCost > 0 ? noi / totalCost * 100 : 0,
+    });
+  }
+
+  // Exit
+  const exitNOI = years[projYears - 1]?.noi || 0;
+  const exitValue = exitNOI / (exitCapRate / 100);
+  const saleExpenses = exitValue * saleExpPct / 100;
+  const exitProceedsGross = exitValue - saleExpenses;
+  const exitProceedsNet = exitProceedsGross - remainingBalance;
+
+  cashFlows[cashFlows.length - 1] += exitProceedsNet; // Add exit proceeds to final year CF
+
+  const cumulativeCF = years.reduce((s, y) => s + y.cf, 0);
+  const totalReturn = cumulativeCF + exitProceedsNet;
+  const equityMultiple = equity > 0 ? (equity + totalReturn) / equity : 0;
+  const irr = calcIRR(cashFlows);
+
+  // Year 1 metrics
+  const y1 = years[0] || {};
+  const capRate = purchasePrice > 0 ? (y1.noi || 0) / purchasePrice * 100 : 0;
+  const capRateOnCost = totalCost > 0 ? (y1.noi || 0) / totalCost * 100 : 0;
+  const dscr = fullADS > 0 ? (y1.noi || 0) / fullADS : 0;
+  const coc = equity > 0 ? (y1.cf || 0) / equity * 100 : 0;
+  const ltv = purchasePrice > 0 ? loanAmt / purchasePrice * 100 : 0;
+  const ltc = totalCost > 0 ? loanAmt / totalCost * 100 : 0;
+
+  return {
+    years, cashFlows, equity, totalCost, loanAmt,
+    capRate, capRateOnCost, dscr, coc, ltv, ltc,
+    exitValue, exitProceedsNet, totalReturn, equityMultiple, irr,
+    fullADS, ioADS, tiLcTotal,
+    pricePerSqft: purchasePrice / sqft,
+    rentPerSqft: baseGPR / sqft,
+    y1,
+  };
+}
+
+function buildSensitivityTable(uwData, projYears, rowField, colField, rowValues, colValues) {
+  return rowValues.map(rv => ({
+    rowVal: rv,
+    cols: colValues.map(cv => {
+      const modified = { ...uwData, [rowField]: rv, [colField]: cv };
+      const r = buildProjection(modified, projYears);
+      return { colVal: cv, irr: r.irr, coc: r.y1?.cf / r.equity * 100, em: r.equityMultiple };
+    })
+  }));
+}
+
 function UnderwritingTab() {
   const [uwData, setUwData] = useState({
-    // PROPERTY INFO
     propertyName: "Industrial Distribution Center",
-    propertyType: "Industrial",
-    location: "Dallas-Fort Worth",
+    propertyType: "Distribution",
+    location: "Indianapolis, IN",
     sqft: 150000,
     yearBuilt: 2015,
-    
-    // ACQUISITION
+    clearHeight: 32,
+    dockDoors: 20,
+
+    // Acquisition
     purchasePrice: 15000000,
-    closingCosts: 450000,
-    capitalReserves: 300000,
-    
-    // RENT ROLL (Units)
+    closingCosts: 300000,
+    capReserves: 150000,
+    tiLcPerSf: 0,
+
+    // Rent Roll
     rentRoll: [
-      { id: 1, tenant: "Tenant A", sqft: 50000, rentPerSqft: 6.50, leaseExpiry: "2026-12-31", type: "Industrial" },
-      { id: 2, tenant: "Tenant B", sqft: 50000, rentPerSqft: 6.75, leaseExpiry: "2027-06-30", type: "Industrial" },
-      { id: 3, tenant: "Tenant C", sqft: 50000, rentPerSqft: 7.00, leaseExpiry: "2028-03-31", type: "Industrial" },
+      { id: 1, tenant: "Tenant A", sqft: 75000, rentPerSqft: 6.50, leaseExpiry: "2028-12-31", creditRating: "Investment Grade", type: "Industrial" },
+      { id: 2, tenant: "Tenant B", sqft: 50000, rentPerSqft: 7.00, leaseExpiry: "2027-06-30", creditRating: "Good", type: "Industrial" },
+      { id: 3, tenant: "Vacant",   sqft: 25000, rentPerSqft: 0,    leaseExpiry: "",            creditRating: "—",                type: "Industrial" },
     ],
-    
-    // FINANCING
-    seniorDebt: 10500000,
-    seniorRate: 6.75,
-    seniorAmort: 25,
-    seniorTerm: 10,
-    mezDebt: 0,
-    mezRate: 10.0,
-    mezTerm: 7,
-    
-    // OPERATING EXPENSES (T-12 Annual)
-    realEstateTax: 180000,
-    insurance: 60000,
-    utilities: 45000,
-    repairs: 75000,
-    management: 90000, // 6% of EGI
-    cam: 30000,
-    reserves: 60000, // 4% of EGI
-    otherOpex: 25000,
-    
-    // ASSUMPTIONS
+
+    // Income assumptions
     vacancyRate: 5,
-    rentGrowth: 2.5,
-    opexGrowth: 2.0,
-    exitCapRate: 7.0,
-    saleExpenses: 1.0,
+    currentVacancy: 16.7, // % currently vacant (drives lease-up)
+    leaseUpPeriod: 6, // months to reach stabilized occupancy
+    otherIncome: 0,
+    rentGrowth: 3.0,
+    opexGrowth: 2.5,
+
+    // Financing
+    loanAmount: 10500000,
+    loanRate: 6.75,
+    amortYears: 25,
+    ioYears: 0,
+
+    // Operating Expenses
+    realEstateTax: 165000,
+    insurance: 52500,
+    utilities: 22500,
+    repairs: 52500,
+    management: 0, // will be % of EGI
+    managementPct: 4,
+    cam: 15000,
+    reserves: 37500,
+    otherOpex: 18000,
+
+    // Exit
+    exitCapRate: 6.75,
+    saleExpenses: 1.5,
     holdingPeriod: 5,
   });
 
-  const [activeTab, setActiveTab] = useState("property");
-  const [rentRollEdit, setRentRollEdit] = useState(null);
-  const [projectionYears, setProjectionYears] = useState(5);
+  const set = (k, v) => setUwData(p => ({ ...p, [k]: v }));
+  const [activeTab, setActiveTab] = useState("rentroll");
+  const [projYears, setProjYears] = useState(5);
+  const [sensMetric, setSensMetric] = useState("irr");
+  const [showProposal, setShowProposal] = useState(false);
 
-  const calcs = useMemo(() => {
-    // ACQUISITION COSTS
-    const purchasePrice = parseFloat(uwData.purchasePrice) || 0;
-    const closingCosts = parseFloat(uwData.closingCosts) || 0;
-    const capitalReserves = parseFloat(uwData.capitalReserves) || 0;
-    const totalAcquisitionCost = purchasePrice + closingCosts + capitalReserves;
-    const sqft = parseFloat(uwData.sqft) || 1;
-
-    // SOURCES & USES
-    const loanAmount = parseFloat(uwData.loanAmount) || 0;
-    const equity = totalAcquisitionCost - loanAmount;
-    const ltv = purchasePrice > 0 ? (loanAmount / purchasePrice) * 100 : 0;
-    const ltc = totalAcquisitionCost > 0 ? (loanAmount / totalAcquisitionCost) * 100 : 0;
-
-    // FINANCING METRICS
-    const interestRate = parseFloat(uwData.interestRate) || 0;
-    const amortization = parseInt(uwData.amortization) || 25;
-    const monthlyRate = interestRate / 100 / 12;
-    const numPayments = amortization * 12;
-    const monthlyPayment = monthlyRate > 0 
-      ? loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1)
-      : 0;
-    const annualDebtService = monthlyPayment * 12;
-
-    // INCOME PROJECTIONS
-    const grossPotentialRent = parseFloat(uwData.grossPotentialRent) || 0;
-    const otherIncome = parseFloat(uwData.otherIncome) || 0;
-    const vacancyRate = parseFloat(uwData.vacancyRate) || 0;
-    const rentGrowth = parseFloat(uwData.rentGrowth) || 0;
-    const vacancyLoss = (grossPotentialRent * vacancyRate) / 100;
-    const effectiveGrossIncome = grossPotentialRent + otherIncome - vacancyLoss;
-
-    // OPERATING EXPENSES (Year 1)
-    const propertyTax = parseFloat(uwData.propertyTax) || 0;
-    const insurance = parseFloat(uwData.insurance) || 0;
-    const utilities = parseFloat(uwData.utilities) || 0;
-    const maintenance = parseFloat(uwData.maintenance) || 0;
-    const management = parseFloat(uwData.management) || 0;
-    const capReserves = parseFloat(uwData.capReserves) || 0;
-    const otherOpex = parseFloat(uwData.otherOpex) || 0;
-    const totalOpex = propertyTax + insurance + utilities + maintenance + management + capReserves + otherOpex;
-    const opexRatio = effectiveGrossIncome > 0 ? (totalOpex / effectiveGrossIncome) * 100 : 0;
-    const opexGrowth = parseFloat(uwData.opexGrowth) || 0;
-
-    // YEAR 1 NOI
-    const noi = effectiveGrossIncome - totalOpex;
-    const capRate = purchasePrice > 0 ? (noi / purchasePrice) * 100 : 0;
-    const dscr = annualDebtService > 0 ? noi / annualDebtService : 0;
-    const cashFlowAfterDebt = noi - annualDebtService;
-    const cashOnCash = equity > 0 ? (cashFlowAfterDebt / equity) * 100 : 0;
-
-    // PRICE METRICS
-    const pricePerSqft = sqft > 0 ? purchasePrice / sqft : 0;
-    const rentPerSqft = sqft > 0 ? grossPotentialRent / sqft : 0;
-
-    // MULTI-YEAR PROJECTION
-    let projections = [];
-    let remainingBalance = loanAmount;
-    let cumulativeCashFlow = 0;
-
-    for (let year = 1; year <= projectionYears; year++) {
-      const yearRent = grossPotentialRent * Math.pow(1 + rentGrowth / 100, year - 1);
-      const yearVacancy = (yearRent * vacancyRate) / 100;
-      const yearEgi = yearRent + otherIncome - yearVacancy;
-      const yearOpex = totalOpex * Math.pow(1 + opexGrowth / 100, year - 1);
-      const yearNoi = yearEgi - yearOpex;
-      
-      // Principal paydown
-      const yearInterest = remainingBalance * (interestRate / 100);
-      const yearPrincipal = annualDebtService - yearInterest;
-      remainingBalance = Math.max(0, remainingBalance - yearPrincipal);
-      
-      const yearCashFlow = yearNoi - annualDebtService;
-      cumulativeCashFlow += yearCashFlow;
-
-      projections.push({
-        year,
-        rent: yearRent,
-        egi: yearEgi,
-        opex: yearOpex,
-        noi: yearNoi,
-        debtService: annualDebtService,
-        interest: yearInterest,
-        principal: yearPrincipal,
-        cashFlow: yearCashFlow,
-        cumulativeCashFlow,
-        remainingBalance,
-      });
+  // Compute management from %
+  const computedUwData = useMemo(() => {
+    const mgmtPct = parseFloat(uwData.managementPct) || 0;
+    if (mgmtPct > 0) {
+      const sqft = parseFloat(uwData.sqft) || 0;
+      const gpr = uwData.rentRoll.reduce((s, t) => s + (parseFloat(t.sqft)||0) * (parseFloat(t.rentPerSqft)||0), 0);
+      const vacLoss = gpr * (parseFloat(uwData.vacancyRate)||5) / 100;
+      const egi = gpr + (parseFloat(uwData.otherIncome)||0) - vacLoss;
+      return { ...uwData, management: egi * mgmtPct / 100 };
     }
+    return uwData;
+  }, [uwData]);
 
-    // EXIT ANALYSIS
-    const exitYear = projections[projectionYears - 1];
-    const exitCapRate = parseFloat(uwData.exitCapRate) || 7.0;
-    const projectedExitValue = exitYear ? (exitYear.noi / (exitCapRate / 100)) : purchasePrice;
-    const saleExpenses = (projectedExitValue * (parseFloat(uwData.saleExpenses) || 0)) / 100;
-    const proceedsAfterDebt = projectedExitValue - saleExpenses - remainingBalance;
-    const totalCashReturned = cumulativeCashFlow + proceedsAfterDebt;
-    const equityMultiple = equity > 0 ? totalCashReturned / equity : 0;
+  const proj = useMemo(() => buildProjection(computedUwData, projYears), [computedUwData, projYears]);
 
-    // IRR Calculation (simplified)
-    let irr = 0;
-    if (equity > 0 && totalCashReturned > 0) {
-      const totalReturn = (totalCashReturned - equity) / equity;
-      irr = (Math.pow(1 + totalReturn, 1 / projectionYears) - 1) * 100;
-    }
+  // Sensitivity: exit cap rate (rows) × rent growth (cols)
+  const exitCapRates = [5.5, 6.0, 6.5, 7.0, 7.5, 8.0];
+  const rentGrowths  = [1.0, 2.0, 3.0, 4.0, 5.0];
+  const sensTable = useMemo(() =>
+    buildSensitivityTable(computedUwData, projYears, "exitCapRate", "rentGrowth", exitCapRates, rentGrowths),
+  [computedUwData, projYears]);
 
-    return {
-      // Acquisition
-      totalAcquisitionCost,
-      equity,
-      ltv: ltv.toFixed(2),
-      ltc: ltc.toFixed(2),
-      
-      // Financing
-      monthlyPayment: monthlyPayment.toFixed(2),
-      annualDebtService: annualDebtService.toFixed(2),
-      
-      // Income
-      grossPotentialRent: grossPotentialRent.toFixed(2),
-      vacancyLoss: vacancyLoss.toFixed(2),
-      effectiveGrossIncome: effectiveGrossIncome.toFixed(2),
-      
-      // Expenses
-      totalOpex: totalOpex.toFixed(2),
-      opexRatio: opexRatio.toFixed(2),
-      
-      // Returns
-      noi: noi.toFixed(2),
-      capRate: capRate.toFixed(2),
-      dscr: dscr.toFixed(2),
-      cashFlowAfterDebt: cashFlowAfterDebt.toFixed(2),
-      cashOnCash: cashOnCash.toFixed(2),
-      
-      // Metrics
-      pricePerSqft: pricePerSqft.toFixed(2),
-      rentPerSqft: rentPerSqft.toFixed(2),
-      
-      // Exit
-      projectedExitValue: projectedExitValue.toFixed(2),
-      proceedsAfterDebt: proceedsAfterDebt.toFixed(2),
-      totalCashReturned: totalCashReturned.toFixed(2),
-      equityMultiple: equityMultiple.toFixed(2),
-      irr: irr.toFixed(2),
-      
-      // Projections
-      projections,
-    };
-  }, [uwData, projectionYears]);
+  // Rent roll helpers
+  const addTenant = () => set("rentRoll", [...uwData.rentRoll, { id: Date.now(), tenant: "New Tenant", sqft: 10000, rentPerSqft: 6.50, leaseExpiry: "", creditRating: "Good", type: "Industrial" }]);
+  const updateTenant = (id, field, val) => set("rentRoll", uwData.rentRoll.map(t => t.id === id ? { ...t, [field]: val } : t));
+  const removeTenant = (id) => set("rentRoll", uwData.rentRoll.filter(t => t.id !== id));
 
-  const handleChange = (field, value) => {
-    setUwData(prev => ({ ...prev, [field]: value }));
-  };
+  const totalLeasedSF = uwData.rentRoll.filter(t => (parseFloat(t.rentPerSqft)||0) > 0).reduce((s,t) => s + (parseFloat(t.sqft)||0), 0);
+  const totalVacantSF = (parseFloat(uwData.sqft)||0) - totalLeasedSF;
+  const occupancy = uwData.sqft > 0 ? totalLeasedSF / uwData.sqft * 100 : 0;
+  const waltYears = (() => {
+    const occupied = uwData.rentRoll.filter(t => t.leaseExpiry && (parseFloat(t.rentPerSqft)||0) > 0);
+    if (!occupied.length) return 0;
+    const now = new Date();
+    const totalSF = occupied.reduce((s,t) => s + (parseFloat(t.sqft)||0), 0);
+    const wt = occupied.reduce((s,t) => {
+      const exp = new Date(t.leaseExpiry + "T00:00:00");
+      const yrs = Math.max(0, (exp - now) / (365.25 * 86400000));
+      return s + yrs * (parseFloat(t.sqft)||0);
+    }, 0);
+    return totalSF > 0 ? wt / totalSF : 0;
+  })();
 
-  const inputStyle = {
-    background: DS.panel,
-    border: `1px solid ${DS.border}`,
-    borderRadius: DS.r.sm,
-    color: DS.text,
-    padding: "10px 12px",
-    fontSize: DS.fs.lg,
-    outline: "none",
-    width: "100%",
-    boxSizing: "border-box",
-  };
-
-  const labelStyle = {
-    color: DS.textMute,
-    fontSize: DS.fs.xs,
-    fontWeight: DS.fw.bold,
-    marginBottom: 6,
-    display: "block",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  };
-
-  const metricStyle = {
-    background: DS.panel,
-    border: `1px solid ${DS.border}`,
-    borderRadius: DS.r.lg,
-    padding: "16px 18px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-  };
-
-  const metricValue = (value, color = DS.accent) => ({
-    fontSize: DS.fs.h2,
-    fontWeight: DS.fw.black,
-    color: color,
-    fontFamily: "'DM Mono', monospace",
+  const inp = (extra = {}) => ({
+    background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm,
+    color: DS.text, padding: "8px 10px", fontSize: DS.fs.md, outline: "none",
+    width: "100%", boxSizing: "border-box", ...extra
   });
+  const lbl = (t) => <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>{t}</div>;
+  const metricCard = (label, value, color, sub) => (
+    <div style={{ background: DS.panelHi, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "14px 16px", flex: 1, minWidth: 120 }}>
+      <div style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6 }}>{label}</div>
+      <div style={{ color: color || DS.accent, fontSize: DS.fs.h2, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace", letterSpacing: "-0.5px" }}>{value}</div>
+      {sub && <div style={{ color: DS.textFaint, fontSize: 10, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+  const sectionHead = (t) => (
+    <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", textTransform: "uppercase", marginBottom: 10, marginTop: 6, paddingBottom: 6, borderBottom: `1px solid ${DS.border}` }}>{t}</div>
+  );
 
-  const metricLabel = {
-    fontSize: DS.fs.xs,
-    color: DS.textMute,
-    fontWeight: DS.fw.bold,
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  };
+  const TABS = [
+    { id: "rentroll", label: "Rent Roll" },
+    { id: "income", label: "Income & Expenses" },
+    { id: "financing", label: "Financing" },
+    { id: "projection", label: "Cash Flow Projection" },
+    { id: "sensitivity", label: "Sensitivity" },
+    { id: "summary", label: "Returns Summary" },
+  ];
+
+  const irrColor = (irr) => !irr ? DS.textMute : irr >= 15 ? DS.green : irr >= 10 ? DS.accent : DS.red;
+  const cocColor = (coc) => coc >= 8 ? DS.green : coc >= 5 ? DS.accent : DS.red;
 
   return (
-    <div style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 24 }}>
+    <div style={{ maxWidth: 1400, margin: "0 auto" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
         <div>
-          <h1 style={{ color: DS.text, fontSize: DS.fs.h1, fontWeight: DS.fw.black, marginBottom: 4 }}>Investment Analysis & Deal Modeler</h1>
-          <p style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Professional commercial real estate underwriting with multi-year projections</p>
+          <div style={{ color: DS.text, fontSize: DS.fs.h1, fontWeight: DS.fw.black, letterSpacing: "-0.5px" }}>Investment Underwriting</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Institutional-grade analysis · Rent roll driven · Real IRR</div>
         </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ color: DS.textMute, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>PURCHASE PRICE</div>
-          <div style={{ color: DS.accent, fontSize: 24, fontWeight: 900, fontFamily: "'DM Mono', monospace" }}>${parseFloat(uwData.purchasePrice).toLocaleString()}</div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Projection:</div>
+          {[3,5,7,10].map(y => (
+            <button key={y} onClick={() => setProjYears(y)}
+              style={{ background: projYears === y ? DS.accent : DS.panel, border: `1px solid ${projYears === y ? DS.accent : DS.border}`, color: projYears === y ? "#0a0f1a" : DS.textSub, padding: "4px 12px", borderRadius: DS.r.full, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, cursor: "pointer" }}>
+              {y}yr
+            </button>
+          ))}
+          <button onClick={() => setShowProposal(true)}
+            style={{ background: DS.blue, border: "none", color: "#fff", padding: "6px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black, marginLeft: 8 }}>
+            📄 LOI / Proposal
+          </button>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 8, borderBottom: `1px solid ${DS.border}`, paddingBottom: 12, marginBottom: 24, overflowX: "auto" }}>
-        {[
-          { id: "sources", label: "Sources & Uses" },
-          { id: "income", label: "Income Analysis" },
-          { id: "expenses", label: "Operating Expenses" },
-          { id: "financing", label: "Financing" },
-          { id: "projections", label: "5-Year Projection" },
-          { id: "exit", label: "Exit Analysis" }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              background: activeTab === tab.id ? DS.accent : "transparent",
-              color: activeTab === tab.id ? "#0f1e2e" : DS.textMute,
-              border: "none",
-              padding: "8px 16px",
-              borderRadius: DS.r.sm,
-              cursor: "pointer",
-              fontSize: DS.fs.lg,
-              fontWeight: DS.fw.semi,
-              transition: "all 0.2s ease",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {tab.label}
+      {/* Property Summary Row */}
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "14px 18px", marginBottom: 16, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ flex: 2, minWidth: 200 }}>
+          <input value={uwData.propertyName} onChange={e => set("propertyName", e.target.value)}
+            style={{ background: "none", border: "none", color: DS.text, fontSize: DS.fs.h2, fontWeight: DS.fw.black, outline: "none", width: "100%" }} />
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{uwData.location} · {uwData.yearBuilt ? `Built ${uwData.yearBuilt}` : ""} · {parseInt(uwData.sqft||0).toLocaleString()} SF</div>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {metricCard("Purchase Price", `$${(parseFloat(uwData.purchasePrice)||0).toLocaleString()}`, DS.text)}
+          {metricCard("Price/SF", `$${proj.pricePerSqft.toFixed(2)}`, DS.textSub)}
+          {metricCard("Occupancy", `${occupancy.toFixed(1)}%`, occupancy >= 90 ? DS.green : occupancy >= 75 ? DS.accent : DS.red, `WALT ${waltYears.toFixed(1)}yr`)}
+          {metricCard("Y1 Cap Rate", `${proj.capRate.toFixed(2)}%`, proj.capRate >= 6 ? DS.green : proj.capRate >= 5 ? DS.accent : DS.red, `${proj.capRateOnCost.toFixed(2)}% on cost`)}
+          {metricCard("IRR", proj.irr != null ? `${proj.irr.toFixed(1)}%` : "—", irrColor(proj.irr), `${projYears}yr hold`)}
+          {metricCard("Equity Multiple", `${proj.equityMultiple.toFixed(2)}x`, proj.equityMultiple >= 2 ? DS.green : proj.equityMultiple >= 1.5 ? DS.accent : DS.red)}
+        </div>
+      </div>
+
+      {/* Tab Nav */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: `1px solid ${DS.border}`, paddingBottom: 0 }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)}
+            style={{ background: "none", border: "none", borderBottom: activeTab === t.id ? `2px solid ${DS.accent}` : "2px solid transparent", color: activeTab === t.id ? DS.accent : DS.textMute, padding: "8px 16px", cursor: "pointer", fontSize: DS.fs.md, fontWeight: activeTab === t.id ? DS.fw.bold : DS.fw.normal, marginBottom: -1 }}>
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* Content Grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-        {/* Inputs */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {activeTab === "sources" && (
-            <>
-              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
-                <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: 13, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.5px" }}>SOURCES</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  <div>
-                    <label style={labelStyle}>Loan Amount ($)</label>
-                    <input type="number" value={uwData.loanAmount} onChange={e => handleChange("loanAmount", e.target.value)} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Equity ($)</label>
-                    <input type="number" value={calcs.equity} disabled style={{...inputStyle, opacity: 0.6}} />
-                  </div>
-                </div>
-              </div>
-              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
-                <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: 13, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.5px" }}>USES</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                  <div>
-                    <label style={labelStyle}>Purchase Price ($)</label>
-                    <input type="number" value={uwData.purchasePrice} onChange={e => handleChange("purchasePrice", e.target.value)} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Closing Costs ($)</label>
-                    <input type="number" value={uwData.closingCosts} onChange={e => handleChange("closingCosts", e.target.value)} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Capital Reserves ($)</label>
-                    <input type="number" value={uwData.capitalReserves} onChange={e => handleChange("capitalReserves", e.target.value)} style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Square Footage (SF)</label>
-                    <input type="number" value={uwData.sqft} onChange={e => handleChange("sqft", e.target.value)} style={inputStyle} />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
+      {/* ── RENT ROLL TAB ── */}
+      {activeTab === "rentroll" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Property specs */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+            {sectionHead("Property Information")}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10 }}>
+              <div>{lbl("Building SF")}<input type="number" value={uwData.sqft} onChange={e => set("sqft", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Property Type")}<input value={uwData.propertyType} onChange={e => set("propertyType", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Location")}<input value={uwData.location} onChange={e => set("location", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Year Built")}<input type="number" value={uwData.yearBuilt} onChange={e => set("yearBuilt", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Clear Height (ft)")}<input type="number" value={uwData.clearHeight} onChange={e => set("clearHeight", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Dock Doors")}<input type="number" value={uwData.dockDoors} onChange={e => set("dockDoors", e.target.value)} style={inp()} /></div>
+            </div>
+          </div>
 
-          {activeTab === "income" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div>
-                  <label style={labelStyle}>Gross Potential Rent ($)</label>
-                  <input type="number" value={uwData.grossPotentialRent} onChange={e => handleChange("grossPotentialRent", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Other Income ($)</label>
-                  <input type="number" value={uwData.otherIncome} onChange={e => handleChange("otherIncome", e.target.value)} style={inputStyle} />
-                </div>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div>
-                  <label style={labelStyle}>Vacancy Rate (%)</label>
-                  <input type="number" step="0.1" value={uwData.vacancyRate} onChange={e => handleChange("vacancyRate", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Annual Rent Growth (%)</label>
-                  <input type="number" step="0.1" value={uwData.rentGrowth} onChange={e => handleChange("rentGrowth", e.target.value)} style={inputStyle} />
-                </div>
-              </div>
-            </>
-          )}
+          {/* Rent Roll */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              {sectionHead("Rent Roll")}
+              <button onClick={addTenant} style={{ background: DS.accentSoft, border: `1px solid ${DS.accent}44`, color: DS.accent, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>+ Add Tenant</button>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: DS.bg }}>
+                    {["Tenant", "SF", "Rent/SF/Yr", "Ann. Rent", "Lease Expiry", "WALT", "Credit", "Type", ""].map(h => (
+                      <th key={h} style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, textAlign: "left", padding: "8px 10px", letterSpacing: "0.5px", textTransform: "uppercase", borderBottom: `1px solid ${DS.border}`, whiteSpace: "nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {uwData.rentRoll.map(t => {
+                    const sf = parseFloat(t.sqft) || 0;
+                    const rpsf = parseFloat(t.rentPerSqft) || 0;
+                    const annRent = sf * rpsf;
+                    const isVacant = rpsf === 0;
+                    const walt = t.leaseExpiry && !isVacant ? Math.max(0, (new Date(t.leaseExpiry+"T00:00:00") - new Date()) / (365.25 * 86400000)) : 0;
+                    const creditColors = { "Investment Grade": DS.green, "Good": DS.blue, "Average": DS.accent, "Below Average": DS.red, "—": DS.textFaint };
+                    return (
+                      <tr key={t.id} style={{ borderBottom: `1px solid ${DS.border}`, background: isVacant ? DS.red + "08" : "transparent" }}>
+                        <td style={{ padding: "8px 10px" }}>
+                          <input value={t.tenant} onChange={e => updateTenant(t.id, "tenant", e.target.value)} style={{ ...inp({ width: 150 }) }} />
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <input type="number" value={t.sqft} onChange={e => updateTenant(t.id, "sqft", e.target.value)} style={inp({ width: 90, textAlign: "right" })} />
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <input type="number" value={t.rentPerSqft} step="0.25" onChange={e => updateTenant(t.id, "rentPerSqft", e.target.value)} style={inp({ width: 80, textAlign: "right", color: isVacant ? DS.textFaint : DS.text })} placeholder="0 = vacant" />
+                        </td>
+                        <td style={{ padding: "8px 10px", color: isVacant ? DS.red : DS.accent, fontWeight: DS.fw.bold, fontSize: DS.fs.md, fontFamily: "'DM Mono', monospace", whiteSpace: "nowrap" }}>
+                          {isVacant ? "VACANT" : `$${Math.round(annRent).toLocaleString()}`}
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <input type="date" value={t.leaseExpiry} onChange={e => updateTenant(t.id, "leaseExpiry", e.target.value)} style={inp({ width: 130 })} disabled={isVacant} />
+                        </td>
+                        <td style={{ padding: "8px 10px", color: isVacant ? DS.textFaint : walt < 1 ? DS.red : walt < 2 ? DS.accent : DS.green, fontSize: DS.fs.sm, fontWeight: DS.fw.bold, fontFamily: "'DM Mono', monospace" }}>
+                          {isVacant ? "—" : `${walt.toFixed(1)}yr`}
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <select value={t.creditRating} onChange={e => updateTenant(t.id, "creditRating", e.target.value)}
+                            style={{ ...inp({ width: 150, color: creditColors[t.creditRating] || DS.text }) }}>
+                            {["Investment Grade", "Good", "Average", "Below Average", "—"].map(c => <option key={c}>{c}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <input value={t.type} onChange={e => updateTenant(t.id, "type", e.target.value)} style={inp({ width: 110 })} />
+                        </td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <button onClick={() => removeTenant(t.id)} style={{ background: "none", border: "none", color: DS.red, cursor: "pointer", fontSize: 14 }}>×</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: DS.bg, borderTop: `2px solid ${DS.border}` }}>
+                    <td style={{ padding: "10px", color: DS.textSub, fontWeight: DS.fw.bold }}>TOTAL / WEIGHTED</td>
+                    <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace" }}>
+                      {uwData.rentRoll.reduce((s,t) => s+(parseFloat(t.sqft)||0), 0).toLocaleString()} SF
+                    </td>
+                    <td style={{ padding: "10px", color: DS.textSub, fontFamily: "'DM Mono', monospace" }}>
+                      ${(uwData.rentRoll.reduce((s,t) => {const sf=parseFloat(t.sqft)||0; return s+(parseFloat(t.rentPerSqft)||0)*sf;},0) / Math.max(1, uwData.rentRoll.filter(t=>(parseFloat(t.rentPerSqft)||0)>0).reduce((s,t)=>s+(parseFloat(t.sqft)||0),0))).toFixed(2)} wtd avg
+                    </td>
+                    <td style={{ padding: "10px", color: DS.accent, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace" }}>
+                      ${Math.round(uwData.rentRoll.reduce((s,t) => s+(parseFloat(t.sqft)||0)*(parseFloat(t.rentPerSqft)||0),0)).toLocaleString()}
+                    </td>
+                    <td colSpan={3} style={{ padding: "10px", color: DS.textMute, fontSize: DS.fs.xs }}>
+                      {occupancy.toFixed(1)}% occupied · WALT {waltYears.toFixed(1)} years
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
 
-          {activeTab === "expenses" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div>
-                  <label style={labelStyle}>Property Tax ($)</label>
-                  <input type="number" value={uwData.propertyTax} onChange={e => handleChange("propertyTax", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Insurance ($)</label>
-                  <input type="number" value={uwData.insurance} onChange={e => handleChange("insurance", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Utilities ($)</label>
-                  <input type="number" value={uwData.utilities} onChange={e => handleChange("utilities", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Maintenance ($)</label>
-                  <input type="number" value={uwData.maintenance} onChange={e => handleChange("maintenance", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Management ($)</label>
-                  <input type="number" value={uwData.management} onChange={e => handleChange("management", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Cap Reserves ($)</label>
-                  <input type="number" value={uwData.capReserves} onChange={e => handleChange("capReserves", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Other OpEx ($)</label>
-                  <input type="number" value={uwData.otherOpex} onChange={e => handleChange("otherOpex", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Annual OpEx Growth (%)</label>
-                  <input type="number" step="0.1" value={uwData.opexGrowth} onChange={e => handleChange("opexGrowth", e.target.value)} style={inputStyle} />
-                </div>
+            {/* Lease expiry bar chart */}
+            <div style={{ marginTop: 16 }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, letterSpacing: "0.5px", textTransform: "uppercase", marginBottom: 8 }}>Lease Expiry Schedule</div>
+              <div style={{ display: "flex", gap: 4, alignItems: "flex-end", height: 60 }}>
+                {[...Array(7)].map((_, i) => {
+                  const yr = new Date().getFullYear() + i;
+                  const expSF = uwData.rentRoll.filter(t => t.leaseExpiry && new Date(t.leaseExpiry).getFullYear() === yr)
+                    .reduce((s,t) => s+(parseFloat(t.sqft)||0), 0);
+                  const pct = parseFloat(uwData.sqft) > 0 ? expSF / parseFloat(uwData.sqft) * 100 : 0;
+                  const color = pct > 30 ? DS.red : pct > 15 ? DS.accent : DS.green;
+                  return (
+                    <div key={yr} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                      <div style={{ color: DS.textMute, fontSize: 9 }}>{pct > 0 ? `${pct.toFixed(0)}%` : ""}</div>
+                      <div style={{ width: "100%", height: `${Math.max(4, pct * 0.6)}px`, background: pct > 0 ? color : DS.border, borderRadius: 3 }} />
+                      <div style={{ color: DS.textFaint, fontSize: 9 }}>{yr}</div>
+                    </div>
+                  );
+                })}
               </div>
-            </>
-          )}
+            </div>
+          </div>
 
-          {activeTab === "financing" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div>
-                  <label style={labelStyle}>Interest Rate (%)</label>
-                  <input type="number" step="0.01" value={uwData.interestRate} onChange={e => handleChange("interestRate", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Amortization (Years)</label>
-                  <input type="number" value={uwData.amortization} onChange={e => handleChange("amortization", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Loan Term (Years)</label>
-                  <input type="number" value={uwData.loanTerm} onChange={e => handleChange("loanTerm", e.target.value)} style={inputStyle} />
-                </div>
+          {/* Lease-Up Settings */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+            {sectionHead("Lease-Up & Vacancy Assumptions")}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10 }}>
+              <div>{lbl("Stabilized Vacancy (%)")}<input type="number" value={uwData.vacancyRate} onChange={e => set("vacancyRate", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Current Vacancy (%)")}<input type="number" value={uwData.currentVacancy} onChange={e => set("currentVacancy", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Lease-Up Period (months)")}<input type="number" value={uwData.leaseUpPeriod} onChange={e => set("leaseUpPeriod", e.target.value)} style={inp()} /></div>
+              <div>{lbl("TI / LC per SF ($)")}<input type="number" value={uwData.tiLcPerSf} onChange={e => set("tiLcPerSf", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Other Income ($/yr)")}<input type="number" value={uwData.otherIncome} onChange={e => set("otherIncome", e.target.value)} style={inp()} /></div>
+            </div>
+            {parseFloat(uwData.tiLcPerSf) > 0 && (
+              <div style={{ marginTop: 10, background: DS.bg, borderRadius: DS.r.sm, padding: "8px 12px", color: DS.accent, fontSize: DS.fs.sm }}>
+                Estimated TI/LC: <strong>${Math.round(proj.tiLcTotal).toLocaleString()}</strong> ({`$${uwData.tiLcPerSf}/SF × ${parseInt(uwData.sqft).toLocaleString()} SF`})
               </div>
-            </>
-          )}
-
-          {activeTab === "projections" && (
-            <>
-              <div>
-                <label style={labelStyle}>Projection Period (Years)</label>
-                <input type="number" min="1" max="30" value={projectionYears} onChange={e => setProjectionYears(parseInt(e.target.value) || 5)} style={inputStyle} />
-              </div>
-            </>
-          )}
-
-          {activeTab === "exit" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div>
-                  <label style={labelStyle}>Exit Cap Rate (%)</label>
-                  <input type="number" step="0.1" value={uwData.exitCapRate} onChange={e => handleChange("exitCapRate", e.target.value)} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Sale Expenses (% of Price)</label>
-                  <input type="number" step="0.1" value={uwData.saleExpenses} onChange={e => handleChange("saleExpenses", e.target.value)} style={inputStyle} />
-                </div>
-              </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
+      )}
 
-        {/* Metrics Display */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {activeTab === "sources" && (
-            <>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Total Acquisition Cost</div>
-                <div style={metricValue(calcs.totalAcquisitionCost)}>${parseFloat(calcs.totalAcquisitionCost).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+      {/* ── INCOME & EXPENSES TAB ── */}
+      {activeTab === "income" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {/* Income */}
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+              {sectionHead("Income Assumptions")}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div>{lbl("Rent Growth (%/yr)")}<input type="number" value={uwData.rentGrowth} step="0.25" onChange={e => set("rentGrowth", e.target.value)} style={inp()} /></div>
+                <div>{lbl("Vacancy Rate (%)")}<input type="number" value={uwData.vacancyRate} step="0.5" onChange={e => set("vacancyRate", e.target.value)} style={inp()} /></div>
+                <div>{lbl("Other Income ($/yr)")}<input type="number" value={uwData.otherIncome} onChange={e => set("otherIncome", e.target.value)} style={inp()} /></div>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>LTV (Loan-to-Value)</div>
-                <div style={metricValue(calcs.ltv, parseFloat(calcs.ltv) <= 75 ? DS.green : DS.red)}>{calcs.ltv}%</div>
-              </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>LTC (Loan-to-Cost)</div>
-                <div style={metricValue(calcs.ltc)}>{calcs.ltc}%</div>
-              </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Price per SF</div>
-                <div style={metricValue(calcs.pricePerSqft)}>${parseFloat(calcs.pricePerSqft).toLocaleString()}</div>
-              </div>
-            </>
-          )}
 
-          {activeTab === "income" && (
-            <>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Effective Gross Income</div>
-                <div style={metricValue(calcs.effectiveGrossIncome)}>${parseFloat(calcs.effectiveGrossIncome).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              {/* Year 1 Income Summary */}
+              <div style={{ marginTop: 16, background: DS.bg, borderRadius: DS.r.sm, overflow: "hidden" }}>
+                {[
+                  { label: "Gross Potential Rent", value: proj.y1?.gpr, color: DS.text },
+                  { label: `Vacancy Loss (${uwData.vacancyRate}%)`, value: -(proj.y1?.vacLoss || 0), color: DS.red },
+                  { label: "Other Income", value: parseFloat(uwData.otherIncome)||0, color: DS.textSub },
+                ].map((row, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", borderBottom: `1px solid ${DS.border}` }}>
+                    <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{row.label}</span>
+                    <span style={{ color: row.color, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.bold }}>
+                      {row.value >= 0 ? "$" : "−$"}{Math.round(Math.abs(row.value)).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: DS.panelHi }}>
+                  <span style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.black }}>Effective Gross Income</span>
+                  <span style={{ color: DS.accent, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>${Math.round(proj.y1?.egi || 0).toLocaleString()}</span>
+                </div>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Vacancy Loss</div>
-                <div style={metricValue(calcs.vacancyLoss, DS.red)}>${parseFloat(calcs.vacancyLoss).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
-              </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Rent per SF (Annual)</div>
-                <div style={metricValue(calcs.rentPerSqft)}>${parseFloat(calcs.rentPerSqft).toLocaleString()}</div>
-              </div>
-            </>
-          )}
+            </div>
 
-          {activeTab === "expenses" && (
-            <>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Total Operating Expenses</div>
-                <div style={metricValue(calcs.totalOpex)}>${parseFloat(calcs.totalOpex).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+            {/* Expenses */}
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+              {sectionHead("Operating Expenses (T-12 Annual)")}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[
+                  ["Real Estate Tax", "realEstateTax"],
+                  ["Insurance", "insurance"],
+                  ["Utilities", "utilities"],
+                  ["Repairs & Maint.", "repairs"],
+                  ["CAM / Landscaping", "cam"],
+                  ["Reserves", "reserves"],
+                  ["Other OpEx", "otherOpex"],
+                ].map(([label, key]) => (
+                  <div key={key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: DS.textSub, fontSize: DS.fs.sm, flex: 1 }}>{label}</span>
+                    <input type="number" value={uwData[key]} onChange={e => set(key, e.target.value)}
+                      style={{ ...inp({ width: 110, textAlign: "right" }) }} />
+                  </div>
+                ))}
+                {/* Management as % */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: DS.textSub, fontSize: DS.fs.sm, flex: 1 }}>Property Mgmt</span>
+                  <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                    <input type="number" value={uwData.managementPct} step="0.5" onChange={e => set("managementPct", e.target.value)}
+                      style={{ ...inp({ width: 55, textAlign: "right" }) }} />
+                    <span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>% EGI</span>
+                  </div>
+                </div>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>OpEx Ratio</div>
-                <div style={metricValue(calcs.opexRatio)}>{calcs.opexRatio}%</div>
+              <div style={{ marginTop: 12, background: DS.bg, borderRadius: DS.r.sm, padding: "10px 12px", display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DS.text, fontWeight: DS.fw.black }}>Total OpEx</span>
+                <span style={{ color: DS.red, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black }}>${Math.round(proj.y1?.yearOpex || 0).toLocaleString()}</span>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Annual NOI</div>
-                <div style={metricValue(calcs.noi)}>${parseFloat(calcs.noi).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              <div style={{ marginTop: 6, background: DS.greenSoft, border: `1px solid ${DS.green}33`, borderRadius: DS.r.sm, padding: "10px 12px", display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DS.green, fontWeight: DS.fw.black }}>Year 1 NOI</span>
+                <span style={{ color: DS.green, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>${Math.round(proj.y1?.noi || 0).toLocaleString()}</span>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Cap Rate</div>
-                <div style={metricValue(calcs.capRate)}>{calcs.capRate}%</div>
+              <div style={{ marginTop: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px" }}>
+                  <span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>OpEx Ratio</span>
+                  <span style={{ color: DS.textSub, fontSize: DS.fs.xs, fontFamily: "'DM Mono', monospace" }}>
+                    {proj.y1?.egi > 0 ? `${((proj.y1.yearOpex / proj.y1.egi) * 100).toFixed(1)}%` : "—"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 12px" }}>
+                  <span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>OpEx Growth</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <input type="number" value={uwData.opexGrowth} step="0.25" onChange={e => set("opexGrowth", e.target.value)}
+                      style={{ width: 50, background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "2px 6px", fontSize: DS.fs.xs, outline: "none", textAlign: "right" }} />
+                    <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>%/yr</span>
+                  </div>
+                </div>
               </div>
-            </>
-          )}
+            </div>
+          </div>
 
-          {activeTab === "financing" && (
-            <>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Monthly Payment</div>
-                <div style={metricValue(calcs.monthlyPayment)}>${parseFloat(calcs.monthlyPayment).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+          {/* Acquisition & Exit */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+              {sectionHead("Acquisition Costs")}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div>{lbl("Purchase Price ($)")}<input type="number" value={uwData.purchasePrice} onChange={e => set("purchasePrice", e.target.value)} style={inp()} /></div>
+                <div>{lbl("Closing Costs ($)")}<input type="number" value={uwData.closingCosts} onChange={e => set("closingCosts", e.target.value)} style={inp()} /></div>
+                <div>{lbl("Capital Reserves ($)")}<input type="number" value={uwData.capReserves} onChange={e => set("capReserves", e.target.value)} style={inp()} /></div>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Annual Debt Service</div>
-                <div style={metricValue(calcs.annualDebtService)}>${parseFloat(calcs.annualDebtService).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              <div style={{ marginTop: 12, background: DS.bg, borderRadius: DS.r.sm, padding: "10px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: DS.textSub }}>Total Acquisition Cost</span>
+                  <span style={{ color: DS.text, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black }}>${Math.round(proj.totalCost).toLocaleString()}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                  <span style={{ color: DS.textSub, fontSize: DS.fs.xs }}>Required Equity</span>
+                  <span style={{ color: DS.accent, fontFamily: "'DM Mono', monospace" }}>${Math.round(proj.equity).toLocaleString()}</span>
+                </div>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>DSCR</div>
-                <div style={metricValue(calcs.dscr, parseFloat(calcs.dscr) >= 1.25 ? DS.green : parseFloat(calcs.dscr) >= 1.0 ? DS.accent : DS.red)}>{calcs.dscr}x</div>
+            </div>
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+              {sectionHead("Exit Assumptions")}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div>{lbl("Exit Cap Rate (%)")}<input type="number" value={uwData.exitCapRate} step="0.25" onChange={e => set("exitCapRate", e.target.value)} style={inp()} /></div>
+                <div>{lbl("Sale Expenses (%)")}<input type="number" value={uwData.saleExpenses} step="0.25" onChange={e => set("saleExpenses", e.target.value)} style={inp()} /></div>
               </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Year 1 Cash Flow</div>
-                <div style={metricValue(calcs.cashFlowAfterDebt, parseFloat(calcs.cashFlowAfterDebt) > 0 ? DS.green : DS.red)}>${parseFloat(calcs.cashFlowAfterDebt).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              <div style={{ marginTop: 12, background: DS.bg, borderRadius: DS.r.sm, padding: "10px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: DS.textSub }}>Projected Exit Value</span>
+                  <span style={{ color: DS.accent, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black }}>${Math.round(proj.exitValue).toLocaleString()}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                  <span style={{ color: DS.textSub, fontSize: DS.fs.xs }}>Net Proceeds After Debt</span>
+                  <span style={{ color: DS.green, fontFamily: "'DM Mono', monospace" }}>${Math.round(proj.exitProceedsNet).toLocaleString()}</span>
+                </div>
               </div>
-            </>
-          )}
-
-          {activeTab === "projections" && (
-            <>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Cumulative Cash Flow</div>
-                <div style={metricValue(calcs.projections[calcs.projections.length - 1]?.cumulativeCashFlow || 0, DS.green)}>${parseFloat(calcs.projections[calcs.projections.length - 1]?.cumulativeCashFlow || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
-              </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Remaining Loan Balance</div>
-                <div style={metricValue(calcs.projections[calcs.projections.length - 1]?.remainingBalance || 0)}>${parseFloat(calcs.projections[calcs.projections.length - 1]?.remainingBalance || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
-              </div>
-            </>
-          )}
-
-          {activeTab === "exit" && (
-            <>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Projected Exit Value</div>
-                <div style={metricValue(calcs.projectedExitValue)}>${parseFloat(calcs.projectedExitValue).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
-              </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Proceeds After Debt</div>
-                <div style={metricValue(calcs.proceedsAfterDebt, DS.green)}>${parseFloat(calcs.proceedsAfterDebt).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
-              </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>Equity Multiple</div>
-                <div style={metricValue(calcs.equityMultiple)}>{calcs.equityMultiple}x</div>
-              </div>
-              <div style={metricStyle}>
-                <div style={metricLabel}>IRR</div>
-                <div style={metricValue(calcs.irr, parseFloat(calcs.irr) > 15 ? DS.green : DS.accent)}>{calcs.irr}%</div>
-              </div>
-            </>
-          )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* 5-Year Projection Table */}
-      {activeTab === "projections" && (
-        <div style={{ marginTop: 24, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "20px", overflowX: "auto" }}>
-          <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: 14, marginBottom: 16 }}>5-Year Cash Flow Projection</div>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ borderBottom: `2px solid ${DS.border}` }}>
-                <th style={{ textAlign: "left", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Year</th>
-                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Rent</th>
-                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>EGI</th>
-                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>OpEx</th>
-                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>NOI</th>
-                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Debt Service</th>
-                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Cash Flow</th>
-                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Remaining Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {calcs.projections.map(p => (
-                <tr key={p.year} style={{ borderBottom: `1px solid ${DS.border}` }}>
-                  <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.bold }}>Year {p.year}</td>
-                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.rent / 1000).toFixed(1)}k</td>
-                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.egi / 1000).toFixed(1)}k</td>
-                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.opex / 1000).toFixed(1)}k</td>
-                  <td style={{ textAlign: "right", padding: "10px", color: DS.green, fontWeight: DS.fw.bold }}>${(p.noi / 1000).toFixed(1)}k</td>
-                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.debtService / 1000).toFixed(1)}k</td>
-                  <td style={{ textAlign: "right", padding: "10px", color: p.cashFlow > 0 ? DS.green : DS.red, fontWeight: DS.fw.bold }}>${(p.cashFlow / 1000).toFixed(1)}k</td>
-                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.remainingBalance / 1000).toFixed(1)}k</td>
-                </tr>
+      {/* ── FINANCING TAB ── */}
+      {activeTab === "financing" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+            {sectionHead("Loan Terms")}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div>{lbl("Loan Amount ($)")}<input type="number" value={uwData.loanAmount} onChange={e => set("loanAmount", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Interest Rate (%)")}<input type="number" value={uwData.loanRate} step="0.125" onChange={e => set("loanRate", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Amortization (years)")}<input type="number" value={uwData.amortYears} onChange={e => set("amortYears", e.target.value)} style={inp()} /></div>
+              <div>{lbl("Interest Only Period (years)")}<input type="number" value={uwData.ioYears} min="0" onChange={e => set("ioYears", e.target.value)} style={inp()} /></div>
+            </div>
+          </div>
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+            {sectionHead("Financing Metrics")}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { label: "Loan Amount", value: `$${Math.round(proj.loanAmt).toLocaleString()}` },
+                { label: "LTV", value: `${proj.ltv.toFixed(1)}%`, color: proj.ltv > 75 ? DS.red : DS.green },
+                { label: "LTC", value: `${proj.ltc.toFixed(1)}%`, color: proj.ltc > 80 ? DS.red : DS.accent },
+                { label: "Required Equity", value: `$${Math.round(proj.equity).toLocaleString()}`, color: DS.accent },
+                { label: "Annual Debt Service (P&I)", value: `$${Math.round(proj.fullADS).toLocaleString()}`, color: DS.textSub },
+                { label: "IO Annual Payment", value: proj.ioYears > 0 ? `$${Math.round(proj.ioADS).toLocaleString()}` : "N/A", color: DS.textMute },
+                { label: "DSCR (Year 1)", value: proj.dscr.toFixed(2) + "x", color: proj.dscr >= 1.25 ? DS.green : proj.dscr >= 1.1 ? DS.accent : DS.red },
+                { label: "Cash-on-Cash (Year 1)", value: `${proj.coc.toFixed(2)}%`, color: cocColor(proj.coc) },
+              ].map((row, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: DS.bg, borderRadius: DS.r.sm }}>
+                  <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{row.label}</span>
+                  <span style={{ color: row.color || DS.text, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.bold }}>{row.value}</span>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+            {proj.dscr < 1.25 && proj.dscr > 0 && (
+              <div style={{ marginTop: 10, background: DS.red + "15", border: `1px solid ${DS.red}33`, borderRadius: DS.r.sm, padding: "8px 12px", color: DS.red, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>
+                ⚠ DSCR below 1.25x — most lenders require 1.20–1.30x minimum
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      {/* ── CASH FLOW PROJECTION TAB ── */}
+      {activeTab === "projection" && (
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+          <div style={{ padding: "16px 18px", borderBottom: `1px solid ${DS.border}` }}>
+            {sectionHead(`${projYears}-Year Cash Flow Projection`)}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: DS.fs.sm }}>
+              <thead>
+                <tr style={{ background: DS.bg }}>
+                  <th style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, textAlign: "left", padding: "10px 14px", letterSpacing: "0.5px", textTransform: "uppercase", borderBottom: `1px solid ${DS.border}` }}>Metric</th>
+                  {proj.years.map(y => (
+                    <th key={y.yr} style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, textAlign: "right", padding: "10px 14px", letterSpacing: "0.5px", textTransform: "uppercase", borderBottom: `1px solid ${DS.border}`, whiteSpace: "nowrap" }}>
+                      Year {y.yr} {y.isIO ? <span style={{ color: DS.blue, fontSize: 8 }}>IO</span> : ""}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { label: "Gross Potential Rent", key: "gpr", color: DS.text, fmt: v => `$${Math.round(v).toLocaleString()}` },
+                  { label: "Vacancy Loss", key: "vacLoss", color: DS.red, fmt: v => `($${Math.round(v).toLocaleString()})` },
+                  { label: "EGI", key: "egi", color: DS.accent, fmt: v => `$${Math.round(v).toLocaleString()}`, bold: true },
+                  { label: "Operating Expenses", key: "yearOpex", color: DS.red, fmt: v => `($${Math.round(v).toLocaleString()})` },
+                  { label: "NOI", key: "noi", color: DS.green, fmt: v => `$${Math.round(v).toLocaleString()}`, bold: true, borderTop: true },
+                  { label: "Cap Rate (on cost)", key: "capRateOnCost", color: DS.textSub, fmt: v => `${v.toFixed(2)}%` },
+                  { label: "Debt Service", key: "ads", color: DS.red, fmt: v => `($${Math.round(v).toLocaleString()})`, borderTop: true },
+                  { label: "Cash Flow After Debt", key: "cf", color: null, fmt: v => `${v >= 0 ? "$" : "($"}${Math.round(Math.abs(v)).toLocaleString()}${v < 0 ? ")" : ""}`, bold: true, dynamic: true },
+                ].map((row) => (
+                  <tr key={row.label} style={{ borderBottom: `1px solid ${DS.border}`, borderTop: row.borderTop ? `2px solid ${DS.border}` : undefined }}>
+                    <td style={{ padding: "9px 14px", color: DS.textSub, fontSize: DS.fs.sm, fontWeight: row.bold ? DS.fw.bold : DS.fw.normal, paddingLeft: row.bold ? 14 : 24 }}>{row.label}</td>
+                    {proj.years.map(y => {
+                      const val = y[row.key];
+                      const color = row.dynamic ? (val >= 0 ? DS.green : DS.red) : row.color;
+                      return (
+                        <td key={y.yr} style={{ padding: "9px 14px", textAlign: "right", color: color || DS.textSub, fontFamily: "'DM Mono', monospace", fontWeight: row.bold ? DS.fw.black : DS.fw.normal, fontSize: DS.fs.sm }}>
+                          {row.fmt(val)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Exit + Returns row */}
+          <div style={{ padding: "16px 18px", borderTop: `2px solid ${DS.border}`, background: DS.bg, display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <div style={{ color: DS.textMute, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Year {projYears} Exit Value</div>
+              <div style={{ color: DS.accent, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>${Math.round(proj.exitValue).toLocaleString()}</div>
+              <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>@ {uwData.exitCapRate}% exit cap · NOI ${Math.round(proj.years[projYears-1]?.noi||0).toLocaleString()}</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 120 }}>
+              <div style={{ color: DS.textMute, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Net Proceeds</div>
+              <div style={{ color: DS.green, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>${Math.round(proj.exitProceedsNet).toLocaleString()}</div>
+              <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>After debt payoff</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 120 }}>
+              <div style={{ color: DS.textMute, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>IRR</div>
+              <div style={{ color: irrColor(proj.irr), fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>
+                {proj.irr != null ? `${proj.irr.toFixed(1)}%` : "—"}
+              </div>
+            </div>
+            <div style={{ flex: 1, minWidth: 120 }}>
+              <div style={{ color: DS.textMute, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Equity Multiple</div>
+              <div style={{ color: proj.equityMultiple >= 2 ? DS.green : DS.accent, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>{proj.equityMultiple.toFixed(2)}x</div>
+            </div>
+            <div style={{ flex: 1, minWidth: 120 }}>
+              <div style={{ color: DS.textMute, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 4 }}>Cash-on-Cash Y1</div>
+              <div style={{ color: cocColor(proj.coc), fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>{proj.coc.toFixed(1)}%</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SENSITIVITY TAB ── */}
+      {activeTab === "sensitivity" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Show:</div>
+            {[{id: "irr", label: "IRR"}, {id: "coc", label: "Cash-on-Cash Y1"}, {id: "em", label: "Equity Multiple"}].map(m => (
+              <button key={m.id} onClick={() => setSensMetric(m.id)}
+                style={{ background: sensMetric === m.id ? DS.accent : DS.panel, border: `1px solid ${sensMetric === m.id ? DS.accent : DS.border}`, color: sensMetric === m.id ? "#0a0f1a" : DS.textSub, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sensitivity Table: exit cap rate vs rent growth */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+            <div style={{ padding: "14px 18px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>Sensitivity Analysis</div>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>Exit Cap Rate (rows) × Rent Growth % (columns) · {projYears}-yr hold</div>
+              </div>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: DS.bg }}>
+                    <th style={{ padding: "10px 14px", color: DS.textMute, fontSize: 10, textAlign: "left", borderBottom: `1px solid ${DS.border}`, fontWeight: DS.fw.bold }}>
+                      Exit Cap ↓ / Rent Growth →
+                    </th>
+                    {rentGrowths.map(rg => (
+                      <th key={rg} style={{ padding: "10px 14px", color: Math.abs(rg - parseFloat(uwData.rentGrowth)) < 0.25 ? DS.accent : DS.textMute, fontSize: 10, textAlign: "center", borderBottom: `1px solid ${DS.border}`, fontWeight: DS.fw.bold, background: Math.abs(rg - parseFloat(uwData.rentGrowth)) < 0.25 ? DS.accentSoft : "transparent" }}>
+                        {rg}%
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sensTable.map(row => {
+                    const isBaseRow = Math.abs(row.rowVal - parseFloat(uwData.exitCapRate)) < 0.1;
+                    return (
+                      <tr key={row.rowVal} style={{ borderBottom: `1px solid ${DS.border}`, background: isBaseRow ? DS.accentSoft : "transparent" }}>
+                        <td style={{ padding: "10px 14px", color: isBaseRow ? DS.accent : DS.textSub, fontWeight: isBaseRow ? DS.fw.black : DS.fw.normal, fontFamily: "'DM Mono', monospace", fontSize: DS.fs.sm }}>
+                          {row.rowVal}%
+                        </td>
+                        {row.cols.map(cell => {
+                          const val = cell[sensMetric];
+                          const isBase = Math.abs(row.rowVal - parseFloat(uwData.exitCapRate)) < 0.1 && Math.abs(cell.colVal - parseFloat(uwData.rentGrowth)) < 0.25;
+                          let color, bgColor;
+                          if (sensMetric === "irr") {
+                            color = val == null ? DS.textFaint : val >= 15 ? DS.green : val >= 12 ? "#86efac" : val >= 9 ? DS.accent : val >= 6 ? "#fbbf24" : DS.red;
+                            bgColor = val == null ? "transparent" : val >= 15 ? DS.green + "20" : val >= 9 ? DS.accent + "15" : DS.red + "15";
+                          } else if (sensMetric === "coc") {
+                            color = val >= 8 ? DS.green : val >= 5 ? DS.accent : DS.red;
+                            bgColor = val >= 8 ? DS.green + "18" : val >= 5 ? DS.accent + "12" : DS.red + "12";
+                          } else {
+                            color = val >= 2.5 ? DS.green : val >= 1.8 ? DS.accent : DS.red;
+                            bgColor = val >= 2.5 ? DS.green + "18" : val >= 1.8 ? DS.accent + "12" : DS.red + "12";
+                          }
+                          return (
+                            <td key={cell.colVal} style={{ padding: "10px 14px", textAlign: "center", color, background: isBase ? DS.accent + "30" : bgColor, fontFamily: "'DM Mono', monospace", fontWeight: isBase ? DS.fw.black : DS.fw.semi, fontSize: DS.fs.sm, border: isBase ? `1px solid ${DS.accent}` : undefined }}>
+                              {val == null ? "—" : sensMetric === "irr" ? `${val.toFixed(1)}%` : sensMetric === "coc" ? `${val.toFixed(1)}%` : `${val.toFixed(2)}x`}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: "10px 18px", borderTop: `1px solid ${DS.border}`, display: "flex", gap: 16 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ width: 12, height: 12, background: DS.green + "40", border: `1px solid ${DS.green}`, borderRadius: 2 }} />
+                <span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{sensMetric === "irr" ? "≥15% IRR" : sensMetric === "coc" ? "≥8% CoC" : "≥2.5x EM"}</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ width: 12, height: 12, background: DS.accent + "30", border: `1px solid ${DS.accent}`, borderRadius: 2 }} />
+                <span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Current assumption (highlighted)</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ width: 12, height: 12, background: DS.red + "30", border: `1px solid ${DS.red}`, borderRadius: 2 }} />
+                <span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{sensMetric === "irr" ? "<9% IRR" : sensMetric === "coc" ? "<5% CoC" : "<1.8x EM"}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* DSCR sensitivity */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 12 }}>DSCR at Various Vacancy Rates</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {[0, 5, 10, 15, 20, 25].map(vac => {
+                const modData = { ...computedUwData, vacancyRate: vac };
+                const r = buildProjection(modData, 1);
+                const dscr = r.dscr;
+                const color = dscr >= 1.25 ? DS.green : dscr >= 1.10 ? DS.accent : DS.red;
+                const isCurrent = vac === parseFloat(uwData.vacancyRate);
+                return (
+                  <div key={vac} style={{ flex: 1, minWidth: 90, background: isCurrent ? DS.accentSoft : DS.bg, border: `1px solid ${isCurrent ? DS.accent : DS.border}`, borderRadius: DS.r.md, padding: "12px", textAlign: "center" }}>
+                    <div style={{ color: DS.textMute, fontSize: 10 }}>{vac}% vac.</div>
+                    <div style={{ color, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black, fontSize: DS.fs.h2, marginTop: 4 }}>{dscr.toFixed(2)}x</div>
+                    {dscr < 1.0 && <div style={{ color: DS.red, fontSize: 9, marginTop: 2 }}>NEGATIVE</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── RETURNS SUMMARY TAB ── */}
+      {activeTab === "summary" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Key returns metrics */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
+            {[
+              { label: "IRR", value: proj.irr != null ? `${proj.irr.toFixed(1)}%` : "N/A", color: irrColor(proj.irr), sub: `${projYears}-yr hold` },
+              { label: "Equity Multiple", value: `${proj.equityMultiple.toFixed(2)}x`, color: proj.equityMultiple >= 2 ? DS.green : DS.accent, sub: `$${Math.round(proj.equity).toLocaleString()} → $${Math.round(proj.equity + proj.totalReturn).toLocaleString()}` },
+              { label: "Cash-on-Cash Y1", value: `${proj.coc.toFixed(1)}%`, color: cocColor(proj.coc), sub: `$${Math.round(proj.y1?.cf||0).toLocaleString()}/yr` },
+              { label: "Y1 Cap Rate", value: `${proj.capRate.toFixed(2)}%`, color: proj.capRate >= 6 ? DS.green : DS.accent, sub: `${proj.capRateOnCost.toFixed(2)}% on cost` },
+              { label: "DSCR (Y1)", value: `${proj.dscr.toFixed(2)}x`, color: proj.dscr >= 1.25 ? DS.green : DS.red, sub: proj.dscr < 1.25 ? "⚠ Below 1.25x" : "Meets threshold" },
+              { label: "LTV", value: `${proj.ltv.toFixed(1)}%`, color: proj.ltv > 75 ? DS.red : DS.green, sub: `$${Math.round(proj.loanAmt).toLocaleString()} loan` },
+              { label: "Rent/SF (Y1)", value: `$${proj.rentPerSqft.toFixed(2)}`, color: DS.accent, sub: "Gross potential" },
+              { label: "Price/SF", value: `$${proj.pricePerSqft.toFixed(2)}`, color: DS.textSub, sub: "Acquisition" },
+            ].map(m => (
+              <div key={m.label} style={{ background: DS.panelHi, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+                <div style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.6px", marginBottom: 6 }}>{m.label}</div>
+                <div style={{ color: m.color, fontSize: DS.fs.h2, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace" }}>{m.value}</div>
+                <div style={{ color: DS.textFaint, fontSize: 10, marginTop: 4 }}>{m.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Sources & Uses */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+              {sectionHead("Sources")}
+              {[
+                { label: "Senior Debt", value: proj.loanAmt, pct: proj.ltc, color: DS.blue },
+                { label: "Equity", value: proj.equity, pct: 100 - proj.ltc, color: DS.accent },
+              ].map(s => (
+                <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{s.label}</span>
+                      <span style={{ color: s.color, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.bold }}>${Math.round(s.value).toLocaleString()} ({s.pct.toFixed(1)}%)</span>
+                    </div>
+                    <div style={{ background: DS.border, borderRadius: 999, height: 6 }}>
+                      <div style={{ width: `${Math.max(0, Math.min(100, s.pct))}%`, height: "100%", background: s.color, borderRadius: 999 }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div style={{ borderTop: `1px solid ${DS.border}`, paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DS.text, fontWeight: DS.fw.black }}>Total</span>
+                <span style={{ color: DS.text, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black }}>${Math.round(proj.totalCost).toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+              {sectionHead("Uses")}
+              {[
+                { label: "Purchase Price", value: parseFloat(uwData.purchasePrice)||0, color: DS.text },
+                { label: "Closing Costs", value: parseFloat(uwData.closingCosts)||0, color: DS.textSub },
+                { label: "Capital Reserves", value: parseFloat(uwData.capReserves)||0, color: DS.textSub },
+                { label: "TI / LC", value: proj.tiLcTotal, color: uwData.tiLcPerSf > 0 ? DS.accent : DS.textFaint },
+              ].map(u => (
+                <div key={u.label} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${DS.border}` }}>
+                  <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{u.label}</span>
+                  <span style={{ color: u.color, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.semi }}>${Math.round(u.value).toLocaleString()}</span>
+                </div>
+              ))}
+              <div style={{ paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: DS.text, fontWeight: DS.fw.black }}>Total Uses</span>
+                <span style={{ color: DS.text, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.black }}>${Math.round(proj.totalCost + proj.tiLcTotal).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Investment thesis summary */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+            {sectionHead("Quick Investment Thesis")}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {[
+                { check: proj.capRate >= 5.5, pass: `Cap rate of ${proj.capRate.toFixed(2)}% is market competitive`, fail: `Cap rate of ${proj.capRate.toFixed(2)}% is below typical industrial market range` },
+                { check: proj.dscr >= 1.25, pass: `DSCR of ${proj.dscr.toFixed(2)}x meets lender requirements`, fail: `DSCR of ${proj.dscr.toFixed(2)}x is below typical 1.25x lender requirement — may need more equity` },
+                { check: proj.irr != null && proj.irr >= 12, pass: `IRR of ${proj.irr?.toFixed(1)}% exceeds typical 12% industrial hurdle`, fail: `IRR of ${proj.irr?.toFixed(1) || "N/A"}% is below typical 12% industrial return hurdle` },
+                { check: proj.ltv <= 75, pass: `LTV of ${proj.ltv.toFixed(1)}% is within normal lender parameters`, fail: `LTV of ${proj.ltv.toFixed(1)}% is high — lenders typically cap at 65–75%` },
+                { check: waltYears >= 3, pass: `WALT of ${waltYears.toFixed(1)} years provides meaningful lease stability`, fail: `WALT of ${waltYears.toFixed(1)} years is short — near-term re-leasing risk` },
+                { check: occupancy >= 90, pass: `${occupancy.toFixed(0)}% occupancy provides stable income base`, fail: `${occupancy.toFixed(0)}% occupancy — lease-up risk, budget for vacancy carry costs` },
+              ].map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 10px", background: DS.bg, borderRadius: DS.r.sm, border: `1px solid ${DS.border}` }}>
+                  <span style={{ color: item.check ? DS.green : DS.red, flexShrink: 0, marginTop: 1, fontSize: 14 }}>{item.check ? "✓" : "⚠"}</span>
+                  <span style={{ color: item.check ? DS.textSub : DS.text, fontSize: DS.fs.sm }}>{item.check ? item.pass : item.fail}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOI / Proposal Generator Modal */}
+      {showProposal && (
+        <ProposalGeneratorModal
+          uwData={uwData}
+          proj={proj}
+          waltYears={waltYears}
+          occupancy={occupancy}
+          projYears={projYears}
+          onClose={() => setShowProposal(false)}
+        />
       )}
     </div>
   );
 }
+
+// ── Proposal / LOI Generator Modal ─────────────────────────────────────────
+function ProposalGeneratorModal({ uwData, proj, waltYears, occupancy, projYears, onClose }) {
+  const [docType, setDocType] = useState("loi");
+  const brokerName = localStorage.getItem("cre-broker-name") || "Broker";
+  const brokerage  = localStorage.getItem("cre-brokerage")  || "SVN";
+  const brokerEmail = localStorage.getItem("cre-email") || "";
+  const brokerPhone = localStorage.getItem("cre-phone") || "";
+
+  const today = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+  const printDoc = () => {
+    const win = window.open("", "_blank");
+    if (!win) return;
+    const content = docType === "loi" ? generateLOI() : generateInvestmentMemo();
+    win.document.write(content);
+    win.document.close();
+  };
+
+  const generateLOI = () => `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Letter of Intent — ${uwData.propertyName}</title>
+  <style>body{font-family:'Times New Roman',serif;max-width:750px;margin:48px auto;color:#1a1a1a;line-height:1.6}
+  h1{font-size:22px;text-align:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:24px}
+  h2{font-size:14px;font-weight:bold;margin:20px 0 6px;text-transform:uppercase;letter-spacing:0.5px}
+  .header-block{text-align:right;margin-bottom:32px;font-size:13px}
+  .section{margin-bottom:18px}p{margin:6px 0;font-size:13px}
+  .term-table{width:100%;border-collapse:collapse;margin:12px 0}
+  .term-table td{padding:7px 12px;border:1px solid #ccc;font-size:13px}
+  .term-table td:first-child{font-weight:bold;width:40%;background:#f5f5f5}
+  .sig-block{margin-top:48px;display:flex;gap:80px}
+  .sig-line{border-top:1px solid #333;padding-top:6px;font-size:12px;min-width:200px}
+  @media print{button{display:none}}</style></head><body>
+  <div class='header-block'>${today}<br/>${brokerage}<br/>${brokerName}${brokerEmail?'<br/>'+brokerEmail:''}${brokerPhone?'<br/>'+brokerPhone:''}</div>
+  <h1>LETTER OF INTENT — ACQUISITION<br/>${uwData.propertyName}</h1>
+  <div class='section'><p>This Letter of Intent ("LOI") is submitted on behalf of the Purchaser in connection with the proposed acquisition of the property described herein. This LOI is non-binding and subject to execution of a definitive Purchase and Sale Agreement.</p></div>
+  <h2>Property</h2>
+  <table class='term-table'>
+    <tr><td>Property Name</td><td>${uwData.propertyName}</td></tr>
+    <tr><td>Location</td><td>${uwData.location}</td></tr>
+    <tr><td>Property Type</td><td>${uwData.propertyType}</td></tr>
+    <tr><td>Building Size</td><td>${parseInt(uwData.sqft||0).toLocaleString()} SF</td></tr>
+    <tr><td>Year Built</td><td>${uwData.yearBuilt || "—"}</td></tr>
+    <tr><td>Clear Height</td><td>${uwData.clearHeight || "—"} feet</td></tr>
+    <tr><td>Dock Doors</td><td>${uwData.dockDoors || "—"}</td></tr>
+    <tr><td>Occupancy</td><td>${occupancy.toFixed(1)}% · WALT ${waltYears.toFixed(1)} years</td></tr>
+  </table>
+  <h2>Purchase Terms</h2>
+  <table class='term-table'>
+    <tr><td>Offered Purchase Price</td><td><strong>$${Math.round(parseFloat(uwData.purchasePrice)||0).toLocaleString()}</strong></td></tr>
+    <tr><td>Price Per Square Foot</td><td>$${proj.pricePerSqft.toFixed(2)}/SF</td></tr>
+    <tr><td>Year 1 NOI</td><td>$${Math.round(proj.y1?.noi||0).toLocaleString()}</td></tr>
+    <tr><td>Going-In Cap Rate</td><td>${proj.capRate.toFixed(2)}%</td></tr>
+    <tr><td>Earnest Money Deposit</td><td>$${Math.round((parseFloat(uwData.purchasePrice)||0)*0.01).toLocaleString()} (1% of purchase price)</td></tr>
+    <tr><td>Due Diligence Period</td><td>30 days from contract execution</td></tr>
+    <tr><td>Closing Period</td><td>30 days following expiration of due diligence</td></tr>
+    <tr><td>Financing Contingency</td><td>${proj.loanAmt > 0 ? `Yes — Purchaser to arrange ${proj.ltv.toFixed(0)}% LTV financing` : "All cash — no financing contingency"}</td></tr>
+  </table>
+  <h2>Conditions</h2>
+  <div class='section'><p>This LOI is subject to, among other things: (i) satisfactory completion of physical, environmental, and financial due diligence; (ii) review and approval of all leases, rent rolls, and operating statements; (iii) title review; and (iv) execution of a mutually acceptable Purchase and Sale Agreement.</p></div>
+  <h2>Expiration</h2>
+  <div class='section'><p>This offer shall expire if not accepted in writing within five (5) business days from the date hereof.</p></div>
+  <div class='sig-block'>
+    <div><div class='sig-line'>Purchaser Signature &amp; Date</div></div>
+    <div><div class='sig-line'>Seller Signature &amp; Date</div></div>
+  </div>
+  <p style='margin-top:40px;font-size:11px;color:#666'>Prepared by: ${brokerName} · ${brokerage} · ${today} · This LOI is non-binding and for discussion purposes only.</p>
+  <br/><button onclick='window.print()' style='background:#1a4f8a;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:bold'>🖨 Print / Save as PDF</button>
+  </body></html>`;
+
+  const generateInvestmentMemo = () => `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Investment Memo — ${uwData.propertyName}</title>
+  <style>body{font-family:'Helvetica Neue',Arial,sans-serif;max-width:800px;margin:48px auto;color:#1a1a1a;line-height:1.6}
+  h1{font-size:24px;font-weight:800;border-bottom:3px solid #1a4f8a;padding-bottom:10px;color:#1a4f8a}
+  h2{font-size:14px;font-weight:700;margin:20px 0 8px;text-transform:uppercase;letter-spacing:1px;color:#1a4f8a;border-left:3px solid #1a4f8a;padding-left:8px}
+  .metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
+  .metric-card{background:#f0f4f8;border-radius:6px;padding:12px;text-align:center}
+  .metric-val{font-size:20px;font-weight:800;color:#1a4f8a;font-family:'Courier New',monospace}
+  .metric-lbl{font-size:10px;color:#666;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-top:4px}
+  table{width:100%;border-collapse:collapse;margin:10px 0}
+  th{background:#1a4f8a;color:#fff;padding:8px 12px;text-align:left;font-size:12px}
+  td{padding:7px 12px;border-bottom:1px solid #e0e0e0;font-size:12px}
+  tr:nth-child(even) td{background:#f9f9f9}
+  .footer{margin-top:40px;font-size:10px;color:#999;border-top:1px solid #ddd;padding-top:10px}
+  @media print{button{display:none}}</style></head><body>
+  <div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px'>
+    <h1>Investment Memo<br/>${uwData.propertyName}</h1>
+    <div style='text-align:right;font-size:12px;color:#666'><strong>${brokerage}</strong><br/>${brokerName}<br/>${today}</div>
+  </div>
+  <div class='metrics-grid'>
+    <div class='metric-card'><div class='metric-val'>$${(parseFloat(uwData.purchasePrice)/1000000).toFixed(2)}M</div><div class='metric-lbl'>Purchase Price</div></div>
+    <div class='metric-card'><div class='metric-val'>${proj.capRate.toFixed(2)}%</div><div class='metric-lbl'>Going-In Cap Rate</div></div>
+    <div class='metric-card'><div class='metric-val'>${proj.irr!=null?proj.irr.toFixed(1)+'%':'—'}</div><div class='metric-lbl'>${projYears||5}-Yr IRR</div></div>
+    <div class='metric-card'><div class='metric-val'>${proj.equityMultiple.toFixed(2)}x</div><div class='metric-lbl'>Equity Multiple</div></div>
+  </div>
+  <h2>Property Overview</h2>
+  <table>
+    <tr><th>Attribute</th><th>Details</th><th>Attribute</th><th>Details</th></tr>
+    <tr><td>Location</td><td>${uwData.location}</td><td>Type</td><td>${uwData.propertyType}</td></tr>
+    <tr><td>Building Size</td><td>${parseInt(uwData.sqft||0).toLocaleString()} SF</td><td>Year Built</td><td>${uwData.yearBuilt||'—'}</td></tr>
+    <tr><td>Clear Height</td><td>${uwData.clearHeight||'—'} ft</td><td>Dock Doors</td><td>${uwData.dockDoors||'—'}</td></tr>
+    <tr><td>Occupancy</td><td>${occupancy.toFixed(1)}%</td><td>WALT</td><td>${waltYears.toFixed(1)} years</td></tr>
+  </table>
+  <h2>Rent Roll Summary</h2>
+  <table>
+    <tr><th>Tenant</th><th>SF</th><th>Rent/SF</th><th>Annual Rent</th><th>Lease Expiry</th><th>Credit</th></tr>
+    ${uwData.rentRoll.map(t => `<tr><td>${t.tenant}</td><td>${parseInt(t.sqft||0).toLocaleString()}</td><td>${(parseFloat(t.rentPerSqft)||0)>0?'$'+(parseFloat(t.rentPerSqft)).toFixed(2):'VACANT'}</td><td>${(parseFloat(t.rentPerSqft)||0)>0?'$'+Math.round((parseFloat(t.sqft)||0)*(parseFloat(t.rentPerSqft)||0)).toLocaleString():'—'}</td><td>${t.leaseExpiry||'—'}</td><td>${t.creditRating}</td></tr>`).join('')}
+  </table>
+  <h2>Financial Highlights</h2>
+  <table>
+    <tr><th>Metric</th><th>Value</th><th>Metric</th><th>Value</th></tr>
+    <tr><td>Year 1 GPR</td><td>$${Math.round(proj.y1?.gpr||0).toLocaleString()}</td><td>Year 1 NOI</td><td>$${Math.round(proj.y1?.noi||0).toLocaleString()}</td></tr>
+    <tr><td>Year 1 EGI</td><td>$${Math.round(proj.y1?.egi||0).toLocaleString()}</td><td>Cash-on-Cash</td><td>${proj.coc.toFixed(2)}%</td></tr>
+    <tr><td>Loan Amount</td><td>$${Math.round(proj.loanAmt).toLocaleString()}</td><td>LTV</td><td>${proj.ltv.toFixed(1)}%</td></tr>
+    <tr><td>DSCR</td><td>${proj.dscr.toFixed(2)}x</td><td>Exit Value</td><td>$${Math.round(proj.exitValue).toLocaleString()}</td></tr>
+    <tr><td>Total Equity</td><td>$${Math.round(proj.equity).toLocaleString()}</td><td>Net Proceeds</td><td>$${Math.round(proj.exitProceedsNet).toLocaleString()}</td></tr>
+  </table>
+  <div class='footer'>Prepared by ${brokerName} · ${brokerage} · ${today} · This memo is for informational purposes only and does not constitute an offer or commitment. All projections are estimates and subject to change. Past performance is not indicative of future results.</div>
+  <br/><button onclick='window.print()' style='background:#1a4f8a;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:bold'>🖨 Print / Save as PDF</button>
+  </body></html>`;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.xl, width: 560, boxShadow: DS.shadow.xl }}>
+        <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Generate Document</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{uwData.propertyName}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ padding: "24px" }}>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.5px" }}>Document Type</div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 24 }}>
+            {[
+              { id: "loi", label: "Letter of Intent", desc: "Acquisition LOI with deal terms for seller" },
+              { id: "memo", label: "Investment Memo", desc: "Investor-facing summary with full financials" },
+            ].map(d => (
+              <div key={d.id} onClick={() => setDocType(d.id)} style={{ flex: 1, background: docType === d.id ? DS.accentSoft : DS.bg, border: `1px solid ${docType === d.id ? DS.accent : DS.border}`, borderRadius: DS.r.lg, padding: "14px 16px", cursor: "pointer" }}>
+                <div style={{ color: docType === d.id ? DS.accent : DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.md, marginBottom: 4 }}>{d.label}</div>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{d.desc}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Quick preview summary */}
+          <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px", marginBottom: 20 }}>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 8, textTransform: "uppercase" }}>Will include</div>
+            <div style={{ color: DS.textSub, fontSize: DS.fs.sm, lineHeight: 1.8 }}>
+              {docType === "loi" ? "Property details · Purchase price ($" + Math.round(parseFloat(uwData.purchasePrice)||0).toLocaleString() + ") · Cap rate · Earnest money · Due diligence & closing timeline · Financing terms · Conditions" : "Rent roll · Full financials · " + (uwData.holdingPeriod||5) + "-yr projection · IRR · Equity multiple · DSCR · Sensitivity overview"}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onClose} style={{ flex: 1, background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Cancel</button>
+            <button onClick={printDoc} style={{ flex: 2, background: DS.accent, border: "none", color: "#0a0f1a", padding: "10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>
+              🖨 Generate & Print
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PipelineDashboard() {
   const [deals, setDeals] = useState(() => {
     try { const s = localStorage.getItem("cre-industrial-v5"); return s ? JSON.parse(s) : initialDeals; } catch { return initialDeals; }
