@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import React, { useState, useMemo, useEffect } from "react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 
 const STAGES = ["Prospect", "Proposal", "LOI", "Under Contract", "Closed", "Lost"];
 const INDUSTRIAL_SUBTYPES = ["Distribution", "Manufacturing", "Flex", "Cold Storage", "Data Center", "Light Industrial", "Heavy Industrial", "Truck Terminal", "Other"];
@@ -18,7 +18,7 @@ const RELATIONSHIP_LEVELS = ["Cold", "Warm", "Active", "Key Relationship"];
 const TASK_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 const RECURRENCE_OPTIONS = ["None", "Daily", "Weekly", "Bi-weekly", "Monthly", "Quarterly", "Annually"];
 const EXPENSE_CATEGORIES = ["CoStar / Data", "LoopNet", "Marketing / Mailers", "E&O Insurance", "Dues / Memberships", "Transportation / Mileage", "Meals / Entertainment", "Office / Supplies", "Legal / Professional", "Other"];
-const DEAL_TAG_SUGGESTIONS = ["Hot 🔥", "Off-Market", "Year-End Push", "Referral", "Repeat Client", "Portfolio", "Value-Add", "Distressed", "1031 Exchange", "New Construction", "Watch", "On Hold"];
+const DEAL_TAG_SUGGESTIONS = ["Hot", "Off-Market", "Year-End Push", "Referral", "Repeat Client", "Portfolio", "Value-Add", "Distressed", "1031 Exchange", "New Construction", "Watch", "On Hold"];
 
 const today = new Date().toISOString().split("T")[0];
 const thisYear = new Date().getFullYear();
@@ -43,12 +43,12 @@ const initialProperties = [
 ];
 
 const STAGE_COLORS = {
-  Prospect:       { bg: "#e8f4fd", text: "#2563eb", border: "#93c5fd" },
-  Proposal:       { bg: "#fef9c3", text: "#ca8a04", border: "#fde047" },
-  LOI:            { bg: "#fdf4ff", text: "#9333ea", border: "#e9d5ff" },
-  "Under Contract":{ bg: "#fff7ed", text: "#c2410c", border: "#fdba74" },
-  Closed:         { bg: "#f0fdf4", text: "#15803d", border: "#4ade80" },
-  Lost:           { bg: "#fef2f2", text: "#dc2626", border: "#fca5a5" },
+  Prospect:        { bg: "#0f1e35", text: "#60a5fa", border: "#1e3a5f", glow: "#3b82f620" },
+  Proposal:        { bg: "#1a1500", text: "#fbbf24", border: "#2a2000", glow: "#f59e0b20" },
+  LOI:             { bg: "#170e2a", text: "#a78bfa", border: "#2a1a4a", glow: "#8b5cf620" },
+  "Under Contract":{ bg: "#1a0f00", text: "#fb923c", border: "#2a1800", glow: "#f9731620" },
+  Closed:          { bg: "#0a1f14", text: "#34d399", border: "#0f2d1c", glow: "#10b98120" },
+  Lost:            { bg: "#1a0808", text: "#f87171", border: "#2a0f0f", glow: "#ef444420" },
 };
 
 const initialDeals = [
@@ -73,6 +73,362 @@ const initialComps = [
 const fmt = (n) => "$" + Math.round(n || 0).toLocaleString();
 const fmtSqft = (n) => n ? Number(n).toLocaleString() + " SF" : "—";
 const pct = (n) => Number(n || 0).toFixed(1) + "%";
+
+
+// ── Design Tokens ────────────────────────────────────────────────
+const DS = {
+  bg:        "#070e1a",
+  surface:   "#0c1524",
+  panel:     "#111d2e",
+  panelHi:   "#162438",
+  border:    "#1a2d45",
+  borderHi:  "#243d5a",
+  borderGlow:"#f59e0b22",
+  text:      "#eef2f7",
+  textSub:   "#8ba3be",
+  textMute:  "#4a6080",
+  textFaint: "#2a3f58",
+  accent:    "#f59e0b",
+  accentSoft:"#fbbf2422",
+  accentDim: "#78350f",
+  green:     "#10b981",
+  greenSoft: "#10b98118",
+  red:       "#ef4444",
+  redSoft:   "#ef444418",
+  blue:      "#3b82f6",
+  blueSoft:  "#3b82f618",
+  purple:    "#8b5cf6",
+  purpleSoft:"#8b5cf618",
+  r:   { xs: 4, sm: 7, md: 11, lg: 16, xl: 20, full: 999 },
+  sp:  { xs: 4, sm: 8, md: 14, lg: 20, xl: 28, xxl: 40 },
+  fs:  { xs: 10, sm: 11, md: 12, lg: 13, xl: 15, h3: 16, h2: 19, h1: 24 },
+  fw:  { normal: 400, med: 500, semi: 600, bold: 700, black: 800 },
+  shadow: {
+    sm:  "0 1px 3px rgba(0,0,0,0.4)",
+    md:  "0 4px 16px rgba(0,0,0,0.5)",
+    lg:  "0 8px 32px rgba(0,0,0,0.6)",
+    xl:  "0 20px 60px rgba(0,0,0,0.8)",
+    glow:"0 0 20px rgba(245,158,11,0.15)",
+  },
+};
+
+const globalIStyle = (extra = {}) => ({
+  background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm,
+  color: DS.text, padding: "8px 11px", fontSize: DS.fs.lg, outline: "none",
+  width: "100%", boxSizing: "border-box", ...extra,
+});
+
+// ── Toast Notification System ─────────────────────────────────────
+let _toastSetter = null;
+const toast = (msg, type = "success") => { if (_toastSetter) _toastSetter({ msg, type, id: Date.now() }); };
+
+function ToastProvider() {
+  const [t, setT] = useState(null);
+  _toastSetter = setT;
+  useEffect(() => { if (t) { const tid = setTimeout(() => setT(null), 2800); return () => clearTimeout(tid); } }, [t]);
+  if (!t) return null;
+  const colors = { success: DS.green, error: DS.red, info: DS.blue, warning: DS.accent };
+  const color = colors[t.type] || DS.green;
+  return (
+    <div style={{ position: "fixed", bottom: 28, right: 28, zIndex: 9999, background: "rgba(17,29,46,0.96)", backdropFilter: "blur(16px)", border: `1px solid ${color}33`, borderLeft: `3px solid ${color}`, borderRadius: DS.r.md, padding: "12px 18px", color: DS.text, fontSize: DS.fs.lg, fontWeight: DS.fw.semi, boxShadow: `0 8px 32px rgba(0,0,0,0.6), 0 0 16px ${color}18`, maxWidth: 320, animation: "fadeSlideIn 0.2s cubic-bezier(0.4,0,0.2,1)" }}>
+      {t.msg}
+    </div>
+  );
+}
+
+// ── Global Search ──────────────────────────────────────────────────
+function GlobalSearch({ deals, contacts, properties, comps, tasks, onNavigate, onClose }) {
+  const [q, setQ] = useState("");
+  const inputRef = useState(null);
+
+  const results = useMemo(() => {
+    if (!q.trim() || q.length < 2) return [];
+    const lq = q.toLowerCase();
+    const hits = [];
+    deals.forEach(d => { if ((d.name+d.client+d.counterparty+d.submarket).toLowerCase().includes(lq)) hits.push({ type: "Deal", label: d.name, sub: `${d.stage} · ${d.client}`, tab: "pipeline", color: DS.accent }); });
+    contacts.forEach(c => { if ((c.name+c.company+c.email).toLowerCase().includes(lq)) hits.push({ type: "Contact", label: c.name, sub: `${c.company} · ${c.type}`, tab: "contacts", color: DS.blue }); });
+    properties.forEach(p => { if ((p.name+p.address+p.submarket+p.owner).toLowerCase().includes(lq)) hits.push({ type: "Property", label: p.name, sub: `${p.submarket} · ${p.subtype}`, tab: "properties", color: DS.purple }); });
+    comps.forEach(c => { if ((c.name+c.address+c.submarket+c.buyer+c.seller).toLowerCase().includes(lq)) hits.push({ type: "Comp", label: c.name, sub: `${c.submarket} · ${c.compType}`, tab: "comps", color: DS.green }); });
+    tasks.forEach(t => { if ((t.title+t.notes).toLowerCase().includes(lq)) hits.push({ type: "Task", label: t.title, sub: `${t.category} · ${t.priority}`, tab: "tasks", color: "#f97316" }); });
+    return hits.slice(0, 12);
+  }, [q, deals, contacts, properties, comps, tasks]);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 9000, paddingTop: 80 }} onClick={onClose}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, width: 580, overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: `1px solid ${DS.border}` }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={DS.textMute} strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search deals, contacts, properties, comps, tasks..." style={{ flex: 1, background: "none", border: "none", color: DS.text, fontSize: DS.fs.xl, outline: "none" }} onKeyDown={e => e.key === "Escape" && onClose()} />
+          <kbd style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: 4, padding: "2px 7px", fontSize: DS.fs.xs, color: DS.textMute }}>ESC</kbd>
+        </div>
+        {q.length >= 2 && results.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: DS.textMute, fontSize: DS.fs.md }}>No results for "{q}"</div>}
+        {results.length > 0 && (
+          <div style={{ maxHeight: 400, overflowY: "auto" }}>
+            {results.map((r, i) => (
+              <div key={i} onClick={() => { onNavigate(r.tab); onClose(); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 18px", cursor: "pointer", borderBottom: `1px solid ${DS.border}` }}
+                onMouseEnter={e => e.currentTarget.style.background = DS.surface}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <span style={{ background: r.color + "22", color: r.color, border: `1px solid ${r.color}33`, padding: "2px 8px", borderRadius: 20, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, flexShrink: 0, minWidth: 52, textAlign: "center" }}>{r.type}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{r.sub}</div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DS.textFaint} strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </div>
+            ))}
+          </div>
+        )}
+        {!q && <div style={{ padding: "16px 18px", color: DS.textMute, fontSize: DS.fs.sm }}>Type to search across all deals, contacts, properties, comps, and tasks.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ── Settings Modal ─────────────────────────────────────────────────
+function SettingsModal({ onClose, gciGoal, setGciGoal }) {
+  const [form, setForm] = useState({
+    brokerName: localStorage.getItem("cre-broker-name") || "",
+    brokerage: localStorage.getItem("cre-brokerage") || "SVN",
+    licenseNum: localStorage.getItem("cre-license") || "",
+    phone: localStorage.getItem("cre-phone") || "",
+    email: localStorage.getItem("cre-email") || "",
+    mgBrokerSplit: localStorage.getItem("cre-mg-split") || "80",
+    gciGoal: String(gciGoal),
+  });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const save = () => {
+    localStorage.setItem("cre-broker-name", form.brokerName);
+    localStorage.setItem("cre-brokerage", form.brokerage);
+    localStorage.setItem("cre-license", form.licenseNum);
+    localStorage.setItem("cre-phone", form.phone);
+    localStorage.setItem("cre-email", form.email);
+    localStorage.setItem("cre-mg-split", form.mgBrokerSplit);
+    setGciGoal(parseFloat(form.gciGoal) || 500000);
+    toast("Settings saved");
+    onClose();
+  };
+  const inp = globalIStyle();
+  const lbl = t => <label style={{ color: DS.textSub, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>{t}</label>;
+  const section = t => <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, letterSpacing: 1, marginBottom: 10, marginTop: 6, textTransform: "uppercase" }}>{t}</div>;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.xl, padding: DS.sp.xl, width: 520 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+          <div>
+            <div style={{ color: DS.text, fontSize: DS.fs.h2, fontWeight: DS.fw.black }}>Settings</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>Broker profile and preferences</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}></button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {section("Broker Profile")}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>{lbl("Your Name")}<input value={form.brokerName} onChange={e => set("brokerName", e.target.value)} placeholder="Hayden Abney" style={inp} /></div>
+            <div>{lbl("Brokerage")}<input value={form.brokerage} onChange={e => set("brokerage", e.target.value)} placeholder="SVN Northern Commercial" style={inp} /></div>
+            <div>{lbl("License Number")}<input value={form.licenseNum} onChange={e => set("licenseNum", e.target.value)} placeholder="RB25001852" style={inp} /></div>
+            <div>{lbl("Phone")}<input value={form.phone} onChange={e => set("phone", e.target.value)} placeholder="765.432.8166" style={inp} /></div>
+            <div style={{ gridColumn: "span 2" }}>{lbl("Email")}<input value={form.email} onChange={e => set("email", e.target.value)} placeholder="hayden.abney@svnnc.com" style={inp} /></div>
+          </div>
+          {section("Commission & Goals")}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>{lbl("Annual GCI Goal ($)")}<input type="number" value={form.gciGoal} onChange={e => set("gciGoal", e.target.value)} style={inp} /></div>
+            <div>{lbl("Your Split w/ Managing Broker (%)")}<input type="number" value={form.mgBrokerSplit} onChange={e => set("mgBrokerSplit", e.target.value)} min="0" max="100" style={inp} /></div>
+          </div>
+          {section("Data")}
+          <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+            <div style={{ color: DS.textSub, fontSize: DS.fs.sm, marginBottom: 8 }}>All data is stored locally in your browser. Nothing is sent to any server.</div>
+            <button onClick={() => { if (window.confirm("Clear ALL data and reset to demo data? This cannot be undone.")) { ["cre-industrial-v5","cre-listings-v1","cre-campaigns-v1","cre-comps-v1","cre-submarkets-v1","cre-contacts-v1","cre-tasks-v1","cre-expenses-v1","cre-properties-v1","cre-pipeline-goal"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}}
+              style={{ background: "none", border: `1px solid ${DS.red}44`, color: DS.red, padding: "6px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>
+              Reset All Data
+            </button>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.lg }}>Cancel</button>
+          <button onClick={save} style={{ background: DS.accent, border: "none", color: "#0f1e2e", padding: "8px 22px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.lg, fontWeight: DS.fw.black }}>Save Settings</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Commission Waterfall Modal ────────────────────────────────
+function CommissionWaterfallModal({ deal, onClose }) {
+  const mgSplit = parseFloat(localStorage.getItem("cre-mg-split") || "80");
+  const calc = calcDeal(deal);
+  const gross = calc.grossCommission || 0;
+  const coBrokeAmt = calc.isSplit ? gross * (1 - (parseFloat(deal.splitPct)||100)/100) : 0;
+  const afterCoBroke = gross - coBrokeAmt;
+  const referralPct = parseFloat(deal.referralPct || 0);
+  const referralAmt = afterCoBroke * (referralPct / 100);
+  const afterReferral = afterCoBroke - referralAmt;
+  const mgBrokerAmt = afterReferral * ((100 - mgSplit) / 100);
+  const yourNet = afterReferral * (mgSplit / 100);
+  const taxRate = 0.32;
+  const afterTax = yourNet * (1 - taxRate);
+  const [localReferralPct, setLocalReferralPct] = React.useState(deal.referralPct || 0);
+  const [localTaxRate, setLocalTaxRate] = React.useState(32);
+
+  const recalc = (ref, tax) => {
+    const r = parseFloat(ref) || 0;
+    const t = parseFloat(tax) || 0;
+    const refAmt = afterCoBroke * (r / 100);
+    const afterRef = afterCoBroke - refAmt;
+    const mgAmt = afterRef * ((100 - mgSplit) / 100);
+    const net = afterRef * (mgSplit / 100);
+    const netAfterTax = net * (1 - t / 100);
+    return { refAmt, afterRef, mgAmt, net, netAfterTax };
+  };
+
+  const nums = recalc(localReferralPct, localTaxRate);
+
+  const WaterfallRow = ({ label, amount, color, isSub, isTotal, sign = "-" }) => (
+    <div style={{ display:"flex", alignItems:"center", gap:12, padding: isTotal ? "12px 16px" : "9px 16px", background: isTotal ? DS.accentSoft : isSub ? "transparent" : DS.panelHi, borderRadius: isTotal ? DS.r.md : 0, borderBottom: isTotal ? "none" : `1px solid ${DS.border}`, marginTop: isTotal ? 8 : 0 }}>
+      <div style={{ flex:1, color: isSub ? DS.textMute : DS.textSub, fontSize: isSub ? DS.fs.xs : DS.fs.md, fontWeight: isTotal ? DS.fw.black : DS.fw.med, paddingLeft: isSub ? 16 : 0 }}>{label}</div>
+      <div style={{ color: color || (isTotal ? DS.accent : DS.textSub), fontSize: isTotal ? DS.fs.h2 : DS.fs.lg, fontWeight: isTotal ? DS.fw.black : DS.fw.bold, fontFamily:"'DM Mono', monospace" }}>
+        {sign === "-" && amount > 0 ? "−" : sign === "+" ? "+" : ""}{sign === "net" ? "" : ""}
+        {amount < 0 ? "−" : ""}{Math.abs(Math.round(amount)).toLocaleString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(3,8,18,0.88)", backdropFilter:"blur(10px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1200 }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.xl, width:500, maxHeight:"90vh", overflowY:"auto", boxShadow:DS.shadow.xl }}>
+        {/* Header */}
+        <div style={{ padding:"20px 24px 16px", borderBottom:`1px solid ${DS.border}`, display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+          <div>
+            <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h2 }}>Commission Waterfall</div>
+            <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:3 }}>{deal.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer", lineHeight:1 }}>×</button>
+        </div>
+
+        {/* Deal summary line */}
+        <div style={{ padding:"12px 24px", background:DS.bg, display:"flex", gap:20, flexWrap:"wrap" }}>
+          <div><div style={{ color:DS.textMute, fontSize:10, textTransform:"uppercase", letterSpacing:"0.6px" }}>Deal Value</div><div style={{ color:DS.text, fontWeight:DS.fw.bold, fontFamily:"'DM Mono', monospace" }}>${Math.round(calc.totalValue||0).toLocaleString()}</div></div>
+          <div><div style={{ color:DS.textMute, fontSize:10, textTransform:"uppercase", letterSpacing:"0.6px" }}>Comm Rate</div><div style={{ color:DS.text, fontWeight:DS.fw.bold, fontFamily:"'DM Mono', monospace" }}>{deal.commissionRate||0}%</div></div>
+          <div><div style={{ color:DS.textMute, fontSize:10, textTransform:"uppercase", letterSpacing:"0.6px" }}>Gross Comm</div><div style={{ color:DS.accent, fontWeight:DS.fw.bold, fontFamily:"'DM Mono', monospace" }}>${Math.round(gross).toLocaleString()}</div></div>
+          <div><div style={{ color:DS.textMute, fontSize:10, textTransform:"uppercase", letterSpacing:"0.6px" }}>Stage</div><div style={{ color:DS.text, fontWeight:DS.fw.bold }}>{deal.stage}</div></div>
+        </div>
+
+        {/* Waterfall */}
+        <div style={{ padding:"16px 0" }}>
+          {/* Gross */}
+          <div style={{ padding:"9px 16px", display:"flex", alignItems:"center", gap:12, borderBottom:`1px solid ${DS.border}` }}>
+            <div style={{ flex:1, color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold }}>Gross Commission</div>
+            <div style={{ color:DS.text, fontSize:DS.fs.lg, fontWeight:DS.fw.black, fontFamily:"'DM Mono', monospace" }}>${Math.round(gross).toLocaleString()}</div>
+          </div>
+
+          {/* Co-broke */}
+          {calc.isSplit && (
+            <div style={{ padding:"9px 16px", display:"flex", alignItems:"center", gap:12, borderBottom:`1px solid ${DS.border}`, background:DS.redSoft }}>
+              <div style={{ flex:1, paddingLeft:16 }}>
+                <div style={{ color:DS.textSub, fontSize:DS.fs.md }}>Co-Broke to {deal.coBroker||"Co-Broker"}</div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs }}>Other side's {100-(parseFloat(deal.splitPct)||100)}%</div>
+              </div>
+              <div style={{ color:DS.red, fontFamily:"'DM Mono', monospace", fontWeight:DS.fw.bold }}>−${Math.round(coBrokeAmt).toLocaleString()}</div>
+            </div>
+          )}
+
+          {/* After co-broke */}
+          <div style={{ padding:"9px 16px", display:"flex", alignItems:"center", gap:12, borderBottom:`1px solid ${DS.border}`, background:DS.panelHi }}>
+            <div style={{ flex:1, color:DS.textSub, fontSize:DS.fs.md, fontWeight:DS.fw.semi }}>Your Gross Share</div>
+            <div style={{ color:DS.textSub, fontFamily:"'DM Mono', monospace", fontWeight:DS.fw.bold }}>${Math.round(afterCoBroke).toLocaleString()}</div>
+          </div>
+
+          {/* Referral fee — editable */}
+          <div style={{ padding:"9px 16px", borderBottom:`1px solid ${DS.border}`, background: nums.refAmt > 0 ? DS.redSoft : "transparent" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ flex:1, paddingLeft:16 }}>
+                <div style={{ color:DS.textSub, fontSize:DS.fs.md }}>Referral Fee Out</div>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4 }}>
+                  <input type="number" value={localReferralPct} onChange={e=>setLocalReferralPct(e.target.value)} min="0" max="50" style={{ width:52, background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, padding:"3px 7px", fontSize:DS.fs.xs, outline:"none", textAlign:"center" }} />
+                  <span style={{ color:DS.textMute, fontSize:DS.fs.xs }}>% of your gross share</span>
+                </div>
+              </div>
+              <div style={{ color: nums.refAmt > 0 ? DS.red : DS.textFaint, fontFamily:"'DM Mono', monospace", fontWeight:DS.fw.bold }}>
+                {nums.refAmt > 0 ? `−$${Math.round(nums.refAmt).toLocaleString()}` : "—"}
+              </div>
+            </div>
+          </div>
+
+          {/* After referral */}
+          <div style={{ padding:"9px 16px", display:"flex", alignItems:"center", gap:12, borderBottom:`1px solid ${DS.border}`, background:DS.panelHi }}>
+            <div style={{ flex:1, color:DS.textSub, fontSize:DS.fs.md, fontWeight:DS.fw.semi }}>After Referral</div>
+            <div style={{ color:DS.textSub, fontFamily:"'DM Mono', monospace", fontWeight:DS.fw.bold }}>${Math.round(nums.afterRef).toLocaleString()}</div>
+          </div>
+
+          {/* Managing broker */}
+          <div style={{ padding:"9px 16px", borderBottom:`1px solid ${DS.border}`, background:DS.redSoft }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ flex:1, paddingLeft:16 }}>
+                <div style={{ color:DS.textSub, fontSize:DS.fs.md }}>Managing Broker Split</div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginTop:2 }}>They take {100-mgSplit}% · You keep {mgSplit}%</div>
+              </div>
+              <div style={{ color:DS.red, fontFamily:"'DM Mono', monospace", fontWeight:DS.fw.bold }}>−${Math.round(nums.mgAmt).toLocaleString()}</div>
+            </div>
+          </div>
+
+          {/* Your net */}
+          <div style={{ padding:"12px 16px", display:"flex", alignItems:"center", gap:12, borderBottom:`1px solid ${DS.border}`, background:`linear-gradient(90deg, ${DS.greenSoft}, transparent)` }}>
+            <div style={{ flex:1, color:DS.green, fontSize:DS.fs.lg, fontWeight:DS.fw.black }}>Your Net Commission</div>
+            <div style={{ color:DS.green, fontSize:DS.fs.h2, fontFamily:"'DM Mono', monospace", fontWeight:DS.fw.black }}>${Math.round(nums.net).toLocaleString()}</div>
+          </div>
+
+          {/* Tax — editable */}
+          <div style={{ padding:"9px 16px", borderBottom:`1px solid ${DS.border}`, background:DS.redSoft }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ flex:1, paddingLeft:16 }}>
+                <div style={{ color:DS.textSub, fontSize:DS.fs.md }}>Est. Tax</div>
+                <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4 }}>
+                  <input type="number" value={localTaxRate} onChange={e=>setLocalTaxRate(e.target.value)} min="0" max="60" style={{ width:52, background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, padding:"3px 7px", fontSize:DS.fs.xs, outline:"none", textAlign:"center" }} />
+                  <span style={{ color:DS.textMute, fontSize:DS.fs.xs }}>% effective rate (est.)</span>
+                </div>
+              </div>
+              <div style={{ color:DS.red, fontFamily:"'DM Mono', monospace", fontWeight:DS.fw.bold }}>−${Math.round(nums.net * localTaxRate/100).toLocaleString()}</div>
+            </div>
+          </div>
+
+          {/* After tax — the number */}
+          <div style={{ margin:"16px 16px 8px", background:`linear-gradient(135deg, ${DS.accent}18, ${DS.accent}08)`, border:`1px solid ${DS.accent}44`, borderRadius:DS.r.lg, padding:"16px 20px", display:"flex", alignItems:"center", gap:16 }}>
+            <div style={{ flex:1 }}>
+              <div style={{ color:DS.accent, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.8px", marginBottom:4 }}>Take-Home Estimate</div>
+              <div style={{ color:DS.textMute, fontSize:DS.fs.xs }}>After all deductions · Not tax advice</div>
+            </div>
+            <div style={{ color:DS.accent, fontSize:28, fontWeight:DS.fw.black, fontFamily:"'DM Mono', monospace", letterSpacing:"-1px" }}>${Math.round(nums.netAfterTax).toLocaleString()}</div>
+          </div>
+
+          {/* Waterfall bar visual */}
+          <div style={{ padding:"0 16px 16px" }}>
+            <div style={{ color:DS.textMute, fontSize:10, textTransform:"uppercase", letterSpacing:"0.6px", marginBottom:8, marginTop:4 }}>Visual Breakdown</div>
+            {[
+              { label:"Co-Broke", amt: coBrokeAmt, color: DS.red },
+              { label:"Referral", amt: nums.refAmt, color: "#f97316" },
+              { label:"Mgr Broker", amt: nums.mgAmt, color: DS.purple },
+              { label:"Tax (est.)", amt: nums.net * localTaxRate/100, color: "#64748b" },
+              { label:"Take-Home", amt: nums.netAfterTax, color: DS.green },
+            ].filter(r => r.amt > 0).map(row => (
+              <div key={row.label} style={{ marginBottom:6 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                  <span style={{ color:DS.textSub, fontSize:DS.fs.xs }}>{row.label}</span>
+                  <span style={{ color:row.color, fontSize:DS.fs.xs, fontFamily:"'DM Mono', monospace" }}>${Math.round(row.amt).toLocaleString()}</span>
+                </div>
+                <div style={{ background:DS.border, borderRadius:DS.r.full, height:6, overflow:"hidden" }}>
+                  <div style={{ width:`${Math.min(100,(row.amt/gross)*100)}%`, height:"100%", background:row.color, borderRadius:DS.r.full, transition:"width 0.4s ease" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ padding:"0 16px 20px", display:"flex", justifyContent:"flex-end" }}>
+          <button onClick={onClose} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function calcDealHealth(d, daysInStage) {
   if (d.stage === "Closed" || d.stage === "Lost") return null;
@@ -146,22 +502,47 @@ function calcDeal(d) {
 
 // ── Stage Badge ─────────────────────────────────────────────
 function StageBadge({ stage }) {
-  const c = STAGE_COLORS[stage] || { bg: "#f3f4f6", text: "#374151", border: "#d1d5db" };
-  return <span style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}`, padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", display: "inline-block" }}>{stage}</span>;
+  const c = STAGE_COLORS[stage] || { bg: DS.panel, text: DS.textSub, border: DS.border, glow: "transparent" };
+  return (
+    <span style={{
+      background: c.bg,
+      color: c.text,
+      border: `1px solid ${c.border}`,
+      padding: "3px 10px",
+      borderRadius: DS.r.full,
+      fontSize: DS.fs.xs,
+      fontWeight: DS.fw.bold,
+      whiteSpace: "nowrap",
+      display: "inline-block",
+      letterSpacing: "0.3px",
+      boxShadow: `0 0 8px ${c.glow || "transparent"}`,
+    }}>{stage}</span>
+  );
 }
 
 // ── Stat Card ───────────────────────────────────────────────
-function StatCard({ label, sub, value, icon, accent, alert }) {
+function StatCard({ label, sub, value, accent, alert }) {
+  const accentColor = accent || DS.blue;
   return (
-    <div style={{ background: alert ? "#2d1515" : "#162032", borderRadius: 12, padding: "16px 18px", flex: 1, minWidth: 140, border: `1px solid ${alert ? "#7f1d1d" : "#1e3048"}`, display: "flex", flexDirection: "column", gap: 7 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 500 }}>{label}</div>
-          <div style={{ color: "#475569", fontSize: 10, marginTop: 1 }}>{sub}</div>
-        </div>
-        <div style={{ background: accent, borderRadius: 8, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>{icon}</div>
-      </div>
-      <div style={{ color: alert ? "#fca5a5" : "#f1f5f9", fontSize: 20, fontWeight: 800, letterSpacing: "-0.5px" }}>{value}</div>
+    <div className="card-hover" style={{
+      background: alert ? DS.redSoft : DS.panel,
+      borderRadius: DS.r.lg,
+      padding: "18px 20px",
+      flex: 1,
+      minWidth: 148,
+      border: `1px solid ${alert ? DS.red + "44" : DS.border}`,
+      borderLeft: `3px solid ${alert ? DS.red : accentColor}`,
+      display: "flex",
+      flexDirection: "column",
+      gap: 10,
+      cursor: "default",
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      <div style={{ position: "absolute", top: 0, right: 0, width: 80, height: 80, background: `radial-gradient(circle at top right, ${accentColor}08, transparent 70%)`, pointerEvents: "none" }} />
+      <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.8px" }}>{label}</div>
+      <div style={{ color: alert ? DS.red : DS.text, fontSize: DS.fs.h2, fontWeight: DS.fw.black, letterSpacing: "-0.8px", lineHeight: 1, fontFamily: "'DM Mono', monospace" }}>{value}</div>
+      {sub && <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: -4 }}>{sub}</div>}
     </div>
   );
 }
@@ -178,28 +559,28 @@ function ActivityLog({ deal, onClose, onSave }) {
     setText("");
   };
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 26, width: 540, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,8,18,0.85)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 540, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <div><h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>Activity Log</h2><div style={{ color: "#475569", fontSize: 12, marginTop: 2 }}>{deal.name}</div></div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
         </div>
-        <div style={{ background: "#0f1e2e", borderRadius: 10, padding: 12, border: "1px solid #1e3048" }}>
+        <div style={{ background: "#070e1a", borderRadius: 10, padding: 12, border: `1px solid ${DS.border}` }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-            {Object.keys(typeColors).map(t => <button key={t} onClick={() => setType(t)} style={{ background: type === t ? typeColors[t] : "#162032", color: type === t ? "#fff" : "#64748b", border: `1px solid ${type === t ? typeColors[t] : "#1e3048"}`, padding: "3px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{t}</button>)}
+            {Object.keys(typeColors).map(t => <button key={t} onClick={() => setType(t)} style={{ background: type === t ? typeColors[t] : DS.panel, color: type === t ? "#fff" : "#64748b", border: `1px solid ${type === t ? typeColors[t] : "#1e3048"}`, padding: "3px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{t}</button>)}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && addActivity()} placeholder={`Log a ${type.toLowerCase()}...`} style={{ flex: 1, background: "#162032", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none" }} />
+            <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && addActivity()} placeholder={`Log a ${type.toLowerCase()}...`} style={{ flex: 1, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none" }} />
             <button onClick={addActivity} style={{ background: "#f59e0b", border: "none", color: "#0f1e2e", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>Log</button>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginTop: 12, display: "flex", flexDirection: "column", gap: 7 }}>
           {activities.length === 0 && <div style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: "28px 0" }}>No activities yet.</div>}
           {activities.map(a => (
-            <div key={a.id} style={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 9, padding: "10px 12px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div key={a.id} style={{ background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 9, padding: "10px 12px", display: "flex", gap: 10, alignItems: "flex-start" }}>
               <span style={{ background: typeColors[a.type] || "#64748b", color: "#fff", padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>{a.type}</span>
               <div style={{ flex: 1 }}><div style={{ color: "#f1f5f9", fontSize: 13 }}>{a.text}</div><div style={{ color: "#475569", fontSize: 10, marginTop: 2 }}>{new Date(a.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</div></div>
-              <button onClick={() => onSave({ ...deal, activities: activities.filter(x => x.id !== a.id) })} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 12 }}>🗑️</button>
+              <button onClick={() => onSave({ ...deal, activities: activities.filter(x => x.id !== a.id) })} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 12 }}></button>
             </div>
           ))}
         </div>
@@ -223,23 +604,23 @@ function RichNotesModal({ deal, onClose, onSave }) {
   };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 26, width: 620, maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 620, maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div><h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>📎 Deal Notes & Documents</h2><div style={{ color: "#475569", fontSize: 12, marginTop: 2 }}>{deal.name}</div></div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <div><h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>Deal Notes & Documents</h2><div style={{ color: "#475569", fontSize: 12, marginTop: 2 }}>{deal.name}</div></div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
         </div>
-        <div style={{ background: "#0f1e2e", borderRadius: 10, padding: 14, border: "1px solid #1e3048", marginBottom: 14 }}>
+        <div style={{ background: "#070e1a", borderRadius: 10, padding: 14, border: `1px solid ${DS.border}`, marginBottom: 14 }}>
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {NOTE_TYPES.map(t => <button key={t} onClick={() => setNoteType(t)} style={{ background: noteType === t ? (typeColors[t] || "#64748b") : "#162032", color: noteType === t ? "#fff" : "#64748b", border: `1px solid ${noteType === t ? (typeColors[t] || "#64748b") : "#1e3048"}`, padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{t}</button>)}
+            {NOTE_TYPES.map(t => <button key={t} onClick={() => setNoteType(t)} style={{ background: noteType === t ? (typeColors[t] || "#64748b") : DS.panel, color: noteType === t ? "#fff" : "#64748b", border: `1px solid ${noteType === t ? (typeColors[t] || "#64748b") : "#1e3048"}`, padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>{t}</button>)}
           </div>
-          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title (optional)" style={{ width: "100%", background: "#162032", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "7px 11px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
-          <textarea value={text} onChange={e => setText(e.target.value)} rows={4} placeholder={`Paste ${noteType} details here — LOI summaries, deal terms, landlord requirements, etc.`} style={{ width: "100%", background: "#162032", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", marginBottom: 8 }} />
+          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title (optional)" style={{ width: "100%", background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "7px 11px", fontSize: 13, outline: "none", marginBottom: 8, boxSizing: "border-box" }} />
+          <textarea value={text} onChange={e => setText(e.target.value)} rows={4} placeholder={`Paste ${noteType} details here — LOI summaries, deal terms, landlord requirements, etc.`} style={{ width: "100%", background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", resize: "vertical", boxSizing: "border-box", marginBottom: 8 }} />
           <button onClick={addNote} style={{ background: "#f59e0b", border: "none", color: "#0f1e2e", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>Add Note</button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
           {notes.length === 0 && <div style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: "28px 0" }}>No notes yet. Add LOI summaries, deal terms, requirements...</div>}
           {notes.map(n => (
-            <div key={n.id} style={{ background: "#0f1e2e", border: `1px solid #1e3048`, borderLeft: `3px solid ${typeColors[n.type] || "#64748b"}`, borderRadius: 9, padding: "12px 14px" }}>
+            <div key={n.id} style={{ background: "#070e1a", border: `1px solid #1e3048`, borderLeft: `3px solid ${typeColors[n.type] || "#64748b"}`, borderRadius: 9, padding: "12px 14px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
                 <div>
                   <span style={{ background: typeColors[n.type] || "#64748b", color: "#fff", padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{n.type}</span>
@@ -247,7 +628,7 @@ function RichNotesModal({ deal, onClose, onSave }) {
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span style={{ color: "#475569", fontSize: 10 }}>{new Date(n.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-                  <button onClick={() => onSave({ ...deal, richNotes: notes.filter(x => x.id !== n.id) })} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 12 }}>🗑️</button>
+                  <button onClick={() => onSave({ ...deal, richNotes: notes.filter(x => x.id !== n.id) })} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 12 }}></button>
                 </div>
               </div>
               <div style={{ color: "#cbd5e1", fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{n.content}</div>
@@ -259,20 +640,551 @@ function RichNotesModal({ deal, onClose, onSave }) {
   );
 }
 
+// ── Daily 3-Minute Sync Modal ────────────────────────────────
+function DailySyncModal({ deals, tasks, contacts, onUpdateDeal, onUpdateTask, onUpdateContact, onClose }) {
+  const enriched = useMemo(() => deals.map(calcDeal), [deals]);
+  const now = new Date();
+
+  // Build the queue — ordered by urgency type
+  const queue = useMemo(() => {
+    const items = [];
+    // 1. Overdue follow-ups first
+    enriched.filter(d => d.stage !== "Closed" && d.stage !== "Lost" && d.followUpDate && d.followUpDate <= today)
+      .sort((a,b) => a.followUpDate.localeCompare(b.followUpDate))
+      .forEach(d => items.push({ type: "followup", deal: d, id: `followup-${d.id}` }));
+    // 2. Urgent tasks
+    tasks.filter(t => !t.done && t.dueDate && t.dueDate <= today)
+      .sort((a,b) => ["Urgent","High","Medium","Low"].indexOf(a.priority) - ["Urgent","High","Medium","Low"].indexOf(b.priority))
+      .forEach(t => items.push({ type: "task", task: t, id: `task-${t.id}` }));
+    // 3. Cold deals
+    enriched.filter(d => d.isAging)
+      .sort((a,b) => b.daysInStage - a.daysInStage)
+      .slice(0, 5)
+      .forEach(d => items.push({ type: "cold", deal: d, id: `cold-${d.id}` }));
+    // 4. Contacts due for outreach
+    contacts.filter(c => {
+      if (!c.lastContact) return true;
+      const days = Math.floor((now - new Date(c.lastContact+"T00:00:00")) / 86400000);
+      return days >= ({ "Key Relationship":30, "Active":45, "Warm":60, "Cold":90 }[c.relationshipLevel] || 90);
+    }).sort((a,b) => ["Key Relationship","Active","Warm","Cold"].indexOf(a.relationshipLevel) - ["Key Relationship","Active","Warm","Cold"].indexOf(b.relationshipLevel))
+      .slice(0, 5)
+      .forEach(c => items.push({ type: "contact", contact: c, id: `contact-${c.id}` }));
+    return items;
+  }, []);
+
+  const [idx, setIdx] = useState(0);
+  const [done, setDone] = useState([]);
+  const [snoozeDate, setSnoozeDate] = useState("");
+  const [showSnooze, setShowSnooze] = useState(false);
+  const [actionsLog, setActionsLog] = useState([]);
+
+  const remaining = queue.filter(item => !done.includes(item.id));
+  const current = remaining[0];
+  const progress = queue.length > 0 ? Math.round((done.length / queue.length) * 100) : 100;
+
+  const dismiss = (action) => {
+    if (current) {
+      setDone(d => [...d, current.id]);
+      setActionsLog(l => [...l, { id: current.id, action }]);
+      setShowSnooze(false);
+      setSnoozeDate("");
+    }
+  };
+
+  const handleFollowupLogged = (deal) => {
+    const newDate = (() => { const d = new Date(); d.setDate(d.getDate()+3); return d.toISOString().split("T")[0]; })();
+    onUpdateDeal({ ...deal, followUpDate: newDate, activities: [...(deal.activities||[]), { text: "Follow-up logged via daily sync", date: new Date().toISOString() }] });
+    dismiss("logged");
+  };
+  const handleSnooze = (deal, days) => {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    onUpdateDeal({ ...deal, followUpDate: d.toISOString().split("T")[0] });
+    dismiss(`snoozed ${days}d`);
+  };
+  const handleContactSnoozeDeal = (deal, days) => {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    onUpdateDeal({ ...deal, followUpDate: d.toISOString().split("T")[0] });
+    dismiss(`snoozed ${days}d`);
+  };
+  const handleTaskDone = (task) => {
+    onUpdateTask({ ...task, done: true });
+    dismiss("completed");
+  };
+  const handleTaskSnooze = (task, days) => {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    onUpdateTask({ ...task, dueDate: d.toISOString().split("T")[0] });
+    dismiss(`snoozed ${days}d`);
+  };
+  const handleContactContacted = (contact) => {
+    onUpdateContact({ ...contact, lastContact: today });
+    dismiss("contacted");
+  };
+
+  const typeColors = { followup: DS.green, task: DS.accent, cold: DS.blue, contact: "#ec4899" };
+  const typeLabels = { followup: "Follow-up Due", task: "Task Due", cold: "Deal Gone Cold", contact: "Contact Outreach" };
+
+  if (queue.length === 0 || remaining.length === 0) {
+    return (
+      <div style={{ position:"fixed", inset:0, background:"rgba(3,8,18,0.95)", backdropFilter:"blur(16px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.green}44`, borderRadius:DS.r.xl, padding:"48px 52px", textAlign:"center", maxWidth:420, boxShadow:`${DS.shadow.xl}, 0 0 60px ${DS.green}15` }}>
+          <div style={{ fontSize:56, marginBottom:16 }}>✓</div>
+          <div style={{ color:DS.green, fontSize:DS.fs.h1, fontWeight:DS.fw.black, marginBottom:8 }}>You're all caught up</div>
+          <div style={{ color:DS.textMute, fontSize:DS.fs.md, marginBottom:8 }}>
+            {queue.length === 0 ? "Nothing urgent today — your pipeline is in good shape." : `${done.length} item${done.length !== 1 ? "s" : ""} cleared in today's sync.`}
+          </div>
+          <div style={{ color:DS.textFaint, fontSize:DS.fs.sm, marginBottom:28 }}>{now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
+          <button onClick={onClose} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"11px 32px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Close</button>
+        </div>
+      </div>
+    );
+  }
+
+  const item = current;
+  const color = typeColors[item.type];
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(3,8,18,0.95)", backdropFilter:"blur(16px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2000 }}>
+      <div style={{ background:DS.panel, border:`1px solid ${color}33`, borderRadius:DS.r.xl, width:520, boxShadow:`${DS.shadow.xl}, 0 0 40px ${color}12` }}>
+
+        {/* Progress bar */}
+        <div style={{ height:4, background:DS.border, borderRadius:"16px 16px 0 0", overflow:"hidden" }}>
+          <div style={{ width:`${progress}%`, height:"100%", background:color, borderRadius:"16px 16px 0 0", transition:"width 0.4s ease" }} />
+        </div>
+
+        {/* Header */}
+        <div style={{ padding:"18px 24px 14px", borderBottom:`1px solid ${DS.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ background:color+"22", color, border:`1px solid ${color}44`, padding:"3px 12px", borderRadius:DS.r.full, fontSize:DS.fs.xs, fontWeight:DS.fw.black, letterSpacing:"0.5px", textTransform:"uppercase" }}>{typeLabels[item.type]}</span>
+            <span style={{ color:DS.textMute, fontSize:DS.fs.xs }}>{remaining.length} left · {done.length} done</span>
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:DS.textMute, fontSize:18, cursor:"pointer", padding:"0 4px" }}>×</button>
+        </div>
+
+        {/* Card content */}
+        <div style={{ padding:"24px 28px" }}>
+
+          {/* FOLLOW-UP */}
+          {item.type === "followup" && (
+            <div>
+              <div style={{ color:DS.textFaint, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:8 }}>Deal needs your attention</div>
+              <div style={{ color:DS.text, fontSize:DS.fs.h2, fontWeight:DS.fw.black, marginBottom:4 }}>{item.deal.name}</div>
+              <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+                <span style={{ color:DS.textMute, fontSize:DS.fs.sm }}>{item.deal.client}</span>
+                <StageBadge stage={item.deal.stage} />
+                <span style={{ color:item.deal.isOverdue ? DS.red : DS.accent, fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>
+                  {item.deal.isOverdue ? `Overdue since ${new Date(item.deal.followUpDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : "Due today"}
+                </span>
+              </div>
+              {item.deal.notes && <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, padding:"10px 12px", color:DS.textSub, fontSize:DS.fs.sm, marginBottom:16, fontStyle:"italic" }}>{item.deal.notes.substring(0,120)}</div>}
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                <button onClick={() => handleFollowupLogged(item.deal)} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"9px 18px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>✓ Logged Contact</button>
+                <button onClick={() => handleSnooze(item.deal, 3)} style={{ background:DS.accentSoft, border:`1px solid ${DS.accent}44`, color:DS.accent, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>Snooze 3 days</button>
+                <button onClick={() => handleSnooze(item.deal, 7)} style={{ background:DS.surface, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Snooze 1 week</button>
+                <button onClick={() => dismiss("skipped")} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textFaint, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Skip</button>
+              </div>
+            </div>
+          )}
+
+          {/* TASK */}
+          {item.type === "task" && (
+            <div>
+              <div style={{ color:DS.textFaint, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:8 }}>Task due</div>
+              <div style={{ color:DS.text, fontSize:DS.fs.h2, fontWeight:DS.fw.black, marginBottom:4 }}>{item.task.title}</div>
+              <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+                <span style={{ background:{ "Urgent":"#dc262622","High":"#f9731622","Medium":"#f59e0b22","Low":"#47556922" }[item.task.priority]||DS.surface, color:{ "Urgent":DS.red,"High":"#f97316","Medium":DS.accent,"Low":DS.textMute }[item.task.priority]||DS.textMute, padding:"2px 10px", borderRadius:DS.r.full, fontSize:DS.fs.xs, fontWeight:DS.fw.bold }}>{item.task.priority}</span>
+                <span style={{ color:DS.textMute, fontSize:DS.fs.sm }}>{item.task.category}</span>
+                <span style={{ color:item.task.dueDate < today ? DS.red : DS.accent, fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>{item.task.dueDate < today ? `Overdue since ${new Date(item.task.dueDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : "Due today"}</span>
+              </div>
+              {item.task.notes && <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, padding:"10px 12px", color:DS.textSub, fontSize:DS.fs.sm, marginBottom:16, fontStyle:"italic" }}>{item.task.notes}</div>}
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                <button onClick={() => handleTaskDone(item.task)} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"9px 18px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>✓ Mark Done</button>
+                <button onClick={() => handleTaskSnooze(item.task, 3)} style={{ background:DS.accentSoft, border:`1px solid ${DS.accent}44`, color:DS.accent, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>Snooze 3 days</button>
+                <button onClick={() => handleTaskSnooze(item.task, 7)} style={{ background:DS.surface, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Snooze 1 week</button>
+                <button onClick={() => dismiss("skipped")} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textFaint, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Skip</button>
+              </div>
+            </div>
+          )}
+
+          {/* COLD DEAL */}
+          {item.type === "cold" && (
+            <div>
+              <div style={{ color:DS.textFaint, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:8 }}>Deal has gone cold</div>
+              <div style={{ color:DS.text, fontSize:DS.fs.h2, fontWeight:DS.fw.black, marginBottom:4 }}>{item.deal.name}</div>
+              <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+                <span style={{ color:DS.textMute, fontSize:DS.fs.sm }}>{item.deal.client}</span>
+                <StageBadge stage={item.deal.stage} />
+                <span style={{ color:DS.red, fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>{item.deal.daysInStage} days in {item.deal.stage}</span>
+              </div>
+              {item.deal.health?.issues?.length > 0 && (
+                <div style={{ background:DS.bg, border:`1px solid ${DS.red}33`, borderRadius:DS.r.sm, padding:"10px 12px", marginBottom:16 }}>
+                  {item.deal.health.issues.map((iss,i) => <div key={i} style={{ color:DS.red, fontSize:DS.fs.sm, marginBottom:2 }}>· {iss}</div>)}
+                </div>
+              )}
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                <button onClick={() => { const d = new Date(); d.setDate(d.getDate()+3); onUpdateDeal({...item.deal, followUpDate: d.toISOString().split("T")[0]}); dismiss("follow-up set"); }} style={{ background:DS.blue, border:"none", color:"#fff", padding:"9px 18px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Set Follow-up</button>
+                <button onClick={() => { onUpdateDeal({...item.deal, stage:"Lost", won:false, lossReason:"Deal went cold / no response"}); dismiss("marked lost"); }} style={{ background:DS.red+"22", border:`1px solid ${DS.red}44`, color:DS.red, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>Mark Lost</button>
+                <button onClick={() => dismiss("skipped")} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textFaint, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Skip</button>
+              </div>
+            </div>
+          )}
+
+          {/* CONTACT OUTREACH */}
+          {item.type === "contact" && (
+            <div>
+              <div style={{ color:DS.textFaint, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:8 }}>Outreach overdue</div>
+              <div style={{ color:DS.text, fontSize:DS.fs.h2, fontWeight:DS.fw.black, marginBottom:4 }}>{item.contact.name}</div>
+              <div style={{ display:"flex", gap:12, marginBottom:16, flexWrap:"wrap" }}>
+                <span style={{ color:DS.textMute, fontSize:DS.fs.sm }}>{item.contact.company}</span>
+                <span style={{ background:"#ec489922", color:"#ec4899", padding:"2px 10px", borderRadius:DS.r.full, fontSize:DS.fs.xs, fontWeight:DS.fw.bold }}>{item.contact.relationshipLevel}</span>
+                {item.contact.phone && <a href={`tel:${item.contact.phone}`} style={{ color:DS.blue, fontSize:DS.fs.sm, textDecoration:"none", fontWeight:DS.fw.bold }}>{item.contact.phone}</a>}
+              </div>
+              {item.contact.notes && <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, padding:"10px 12px", color:DS.textSub, fontSize:DS.fs.sm, marginBottom:16, fontStyle:"italic" }}>{item.contact.notes?.substring(0,100)}</div>}
+              {item.contact.lastContact && <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginBottom:12 }}>Last contact: {new Date(item.contact.lastContact+"T00:00:00").toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>}
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                <button onClick={() => handleContactContacted(item.contact)} style={{ background:"#ec4899", border:"none", color:"#fff", padding:"9px 18px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>✓ Contacted</button>
+                <button onClick={() => dismiss("skipped")} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textFaint, padding:"9px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Skip</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer nav */}
+        <div style={{ padding:"14px 24px", borderTop:`1px solid ${DS.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div style={{ display:"flex", gap:4 }}>
+            {queue.slice(0, Math.min(queue.length, 8)).map((item, i) => (
+              <div key={item.id} style={{ width:8, height:8, borderRadius:"50%", background: done.includes(item.id) ? DS.green : i === 0 && !done.includes(item.id) ? typeColors[item.type] : DS.border, transition:"background 0.2s" }} />
+            ))}
+            {queue.length > 8 && <span style={{ color:DS.textFaint, fontSize:9, marginLeft:4 }}>+{queue.length-8}</span>}
+          </div>
+          <div style={{ color:DS.textFaint, fontSize:DS.fs.xs }}>{done.length} of {queue.length} cleared</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Closing Checklist Modal ─────────────────────────────────────
+const CLOSING_CHECKLIST_SALE = [
+  { id:"commission_agreement", label:"Commission agreement signed", critical:true },
+  { id:"title_ordered", label:"Title ordered / escrow opened", critical:true },
+  { id:"earnest_money", label:"Earnest money received / confirmed", critical:true },
+  { id:"inspection", label:"Inspection scheduled / completed", critical:false },
+  { id:"lender_approval", label:"Buyer financing / lender approval confirmed", critical:false },
+  { id:"contingencies_waived", label:"All contingencies waived", critical:false },
+  { id:"closing_statement", label:"Closing statement reviewed", critical:true },
+  { id:"commission_demand", label:"Commission demand / closing instructions sent", critical:true },
+  { id:"commission_check", label:"Commission check received", critical:true },
+];
+const CLOSING_CHECKLIST_LEASE = [
+  { id:"lease_executed", label:"Lease fully executed by both parties", critical:true },
+  { id:"commission_agreement", label:"Commission agreement signed", critical:true },
+  { id:"first_months_rent", label:"First month's rent / security deposit confirmed", critical:false },
+  { id:"tenant_insurance", label:"Tenant insurance certificate received", critical:false },
+  { id:"co_broker_commission", label:"Co-broker commission agreement (if applicable)", critical:false },
+  { id:"keys_delivered", label:"Keys / access delivered to tenant", critical:false },
+  { id:"commission_invoice", label:"Commission invoice submitted to landlord", critical:true },
+  { id:"commission_received", label:"Commission payment received", critical:true },
+];
+
+function ClosingChecklistModal({ deal, onSave, onClose }) {
+  const items = deal.dealType === "Lease" ? CLOSING_CHECKLIST_LEASE : CLOSING_CHECKLIST_SALE;
+  const [checked, setChecked] = useState(deal.closingChecklist || {});
+  const [note, setNote] = useState(deal.closingChecklistNote || "");
+
+  const toggle = (id) => setChecked(c => ({ ...c, [id]: !c[id] }));
+  const completedCount = items.filter(i => checked[i.id]).length;
+  const criticalPending = items.filter(i => i.critical && !checked[i.id]);
+  const pct = Math.round((completedCount / items.length) * 100);
+
+  const handleSave = () => {
+    onSave({ ...deal, closingChecklist: checked, closingChecklistNote: note });
+    onClose();
+  };
+
+  const barColor = pct === 100 ? DS.green : pct >= 60 ? DS.accent : DS.blue;
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(3,8,18,0.9)", backdropFilter:"blur(12px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1200 }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.xl, width:540, maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:DS.shadow.xl }}>
+
+        {/* Header */}
+        <div style={{ padding:"18px 24px 14px", borderBottom:`1px solid ${DS.border}`, flexShrink:0 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div>
+              <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h2 }}>Closing Checklist</div>
+              <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:2 }}>{deal.name} · {deal.dealType}</div>
+            </div>
+            <button onClick={onClose} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}>×</button>
+          </div>
+          {/* Progress */}
+          <div style={{ marginTop:14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+              <span style={{ color:DS.textMute, fontSize:DS.fs.xs }}>{completedCount} of {items.length} complete</span>
+              <span style={{ color:barColor, fontWeight:DS.fw.black, fontSize:DS.fs.sm }}>{pct}%</span>
+            </div>
+            <div style={{ background:DS.border, borderRadius:999, height:6, overflow:"hidden" }}>
+              <div style={{ width:`${pct}%`, height:"100%", background:barColor, borderRadius:999, transition:"width 0.3s" }} />
+            </div>
+          </div>
+          {criticalPending.length > 0 && (
+            <div style={{ background:DS.red+"15", border:`1px solid ${DS.red}33`, borderRadius:DS.r.sm, padding:"8px 12px", marginTop:10, color:DS.red, fontSize:DS.fs.xs, fontWeight:DS.fw.bold }}>
+              {criticalPending.length} critical item{criticalPending.length !== 1 ? "s" : ""} still pending
+            </div>
+          )}
+        </div>
+
+        {/* Checklist */}
+        <div style={{ flex:1, overflowY:"auto", padding:"14px 24px" }}>
+          {items.map(item => (
+            <div key={item.id} onClick={() => toggle(item.id)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0", borderBottom:`1px solid ${DS.border}`, cursor:"pointer" }}
+              onMouseEnter={e => e.currentTarget.style.background = DS.panelHi}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <div style={{ width:20, height:20, borderRadius:5, border:`2px solid ${checked[item.id] ? DS.green : item.critical ? DS.red+"66" : DS.border}`, background:checked[item.id] ? DS.green : "transparent", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.15s" }}>
+                {checked[item.id] && <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#0a0f1a" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+              <span style={{ color:checked[item.id] ? DS.textMute : DS.text, fontSize:DS.fs.md, flex:1, textDecoration:checked[item.id] ? "line-through" : "none" }}>{item.label}</span>
+              {item.critical && !checked[item.id] && <span style={{ background:DS.red+"22", color:DS.red, padding:"1px 7px", borderRadius:DS.r.full, fontSize:9, fontWeight:DS.fw.black, flexShrink:0 }}>critical</span>}
+            </div>
+          ))}
+          <div style={{ marginTop:14 }}>
+            <div style={{ color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, marginBottom:5 }}>Notes</div>
+            <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Closing contact, escrow officer, title company, special instructions..." rows={3}
+              style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, padding:"8px 11px", fontSize:DS.fs.md, outline:"none", width:"100%", boxSizing:"border-box", resize:"none", lineHeight:1.5 }} />
+          </div>
+        </div>
+
+        <div style={{ padding:"12px 24px", borderTop:`1px solid ${DS.border}`, display:"flex", gap:10, justifyContent:"flex-end", flexShrink:0 }}>
+          <button onClick={onClose} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"9px 18px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md }}>Cancel</button>
+          <button onClick={handleSave} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Save Checklist</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── CSV Import Modal ────────────────────────────────────────────
+function CSVImportModal({ onImport, onClose, submarketList }) {
+  const [step, setStep] = useState("upload"); // upload → preview → confirm
+  const [rows, setRows] = useState([]);
+  const [headers, setHeaders] = useState([]);
+  const [mapping, setMapping] = useState({});
+  const [importType, setImportType] = useState("deals");
+  const [error, setError] = useState("");
+  const [imported, setImported] = useState(0);
+
+  const DEAL_FIELDS = ["name","client","counterparty","stage","dealType","repType","subtype","submarket","sqft","dealTotal","monthlyRent","leaseTerm","commissionRate","probability","expectedClose","followUpDate","leadSource","coBroker","splitPct","notes"];
+  const CONTACT_FIELDS = ["name","company","contactType","phone","email","relationshipLevel","submarket","notes"];
+  const fields = importType === "deals" ? DEAL_FIELDS : CONTACT_FIELDS;
+
+  const parseCSV = (text) => {
+    const lines = text.trim().split("\n").map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return { error: "CSV must have a header row and at least one data row." };
+    const headers = lines[0].split(",").map(h => h.replace(/"/g,"").trim());
+    const rows = lines.slice(1).map(line => {
+      const vals = [];
+      let cur = ""; let inQ = false;
+      for (let c of line) {
+        if (c === '"') { inQ = !inQ; }
+        else if (c === "," && !inQ) { vals.push(cur.trim()); cur = ""; }
+        else cur += c;
+      }
+      vals.push(cur.trim());
+      return Object.fromEntries(headers.map((h,i) => [h, vals[i] || ""]));
+    });
+    return { headers, rows };
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.name.endsWith(".csv")) { setError("Please upload a .csv file."); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = parseCSV(ev.target.result);
+      if (result.error) { setError(result.error); return; }
+      setHeaders(result.headers);
+      setRows(result.rows);
+      // Auto-map headers that match field names
+      const autoMap = {};
+      fields.forEach(f => {
+        const match = result.headers.find(h => h.toLowerCase().replace(/[^a-z]/g,"") === f.toLowerCase().replace(/[^a-z]/g,""));
+        if (match) autoMap[f] = match;
+      });
+      setMapping(autoMap);
+      setStep("map");
+      setError("");
+    };
+    reader.readAsText(file);
+  };
+
+  const buildRecords = () => {
+    return rows.slice(0, 200).map((row, i) => {
+      if (importType === "deals") {
+        const get = (f) => mapping[f] ? row[mapping[f]] || "" : "";
+        const smList = submarketList || DEFAULT_SUBMARKETS;
+        return {
+          id: Date.now() + i,
+          name: get("name") || `Imported Deal ${i+1}`,
+          client: get("client"), counterparty: get("counterparty"),
+          stage: STAGES.includes(get("stage")) ? get("stage") : "Prospect",
+          dealType: ["Sale","Lease"].includes(get("dealType")) ? get("dealType") : "Sale",
+          repType: get("repType") || "Seller/Landlord Rep",
+          subtype: INDUSTRIAL_SUBTYPES.includes(get("subtype")) ? get("subtype") : "Distribution",
+          submarket: smList.includes(get("submarket")) ? get("submarket") : (smList[0] || "Northeast"),
+          sqft: parseFloat(get("sqft")) || 0,
+          dealTotal: parseFloat(get("dealTotal")) || 0,
+          monthlyRent: parseFloat(get("monthlyRent")) || 0,
+          leaseTerm: parseFloat(get("leaseTerm")) || 0,
+          commissionRate: parseFloat(get("commissionRate")) || 5,
+          probability: parseFloat(get("probability")) || 25,
+          expectedClose: get("expectedClose"), followUpDate: get("followUpDate"),
+          leadSource: LEAD_SOURCES.includes(get("leadSource")) ? get("leadSource") : "Other",
+          coBroker: get("coBroker"), splitPct: parseFloat(get("splitPct")) || 100,
+          notes: get("notes"), broker:"Me", daysInStage:0, activities:[], richNotes:[], tags:[], documents:[],
+          won:null, lossReason:"",
+          stageHistory:[{ stage: STAGES.includes(get("stage")) ? get("stage") : "Prospect", enteredDate:today, note:"Imported from CSV" }]
+        };
+      } else {
+        const get = (f) => mapping[f] ? row[mapping[f]] || "" : "";
+        return {
+          id: Date.now() + i,
+          name: get("name") || `Contact ${i+1}`,
+          company: get("company"), contactType: get("contactType") || "Other",
+          phone: get("phone"), email: get("email"),
+          relationshipLevel: ["Cold","Warm","Active","Key Relationship"].includes(get("relationshipLevel")) ? get("relationshipLevel") : "Cold",
+          submarket: get("submarket"), notes: get("notes"),
+          lastContact: "", activityLog: [], linkedDeals: []
+        };
+      }
+    });
+  };
+
+  const handleImport = () => {
+    const records = buildRecords();
+    onImport(importType, records);
+    setImported(records.length);
+    setStep("done");
+  };
+
+  const iStyle = { background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, padding:"6px 9px", fontSize:DS.fs.sm, outline:"none", width:"100%" };
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(3,8,18,0.92)", backdropFilter:"blur(12px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1200 }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.xl, width:600, maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:DS.shadow.xl }}>
+
+        <div style={{ padding:"18px 24px 14px", borderBottom:`1px solid ${DS.border}`, display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0 }}>
+          <div>
+            <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h2 }}>Import from CSV</div>
+            <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:2 }}>Import deals or contacts from a spreadsheet</div>
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}>×</button>
+        </div>
+
+        <div style={{ flex:1, overflowY:"auto", padding:"20px 24px" }}>
+
+          {step === "upload" && (
+            <div>
+              <div style={{ marginBottom:16 }}>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, marginBottom:8 }}>Import type</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  {["deals","contacts"].map(t => (
+                    <button key={t} onClick={() => setImportType(t)} style={{ flex:1, padding:"10px", borderRadius:DS.r.sm, border:`1px solid ${importType===t ? DS.accent : DS.border}`, background:importType===t ? DS.accentSoft : DS.surface, color:importType===t ? DS.accent : DS.textMute, fontWeight:importType===t ? DS.fw.black : DS.fw.normal, cursor:"pointer", fontSize:DS.fs.md, textTransform:"capitalize" }}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ background:DS.bg, border:`2px dashed ${DS.border}`, borderRadius:DS.r.lg, padding:"36px 24px", textAlign:"center", marginBottom:16 }}>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.lg, marginBottom:8 }}>Drop your CSV file or click to upload</div>
+                <div style={{ color:DS.textFaint, fontSize:DS.fs.sm, marginBottom:16 }}>First row must be headers · Max 200 rows</div>
+                <input type="file" accept=".csv" onChange={handleFile} style={{ display:"none" }} id="csv-upload" />
+                <label htmlFor="csv-upload" style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"10px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black, display:"inline-block" }}>Choose File</label>
+              </div>
+              <div style={{ background:DS.surface, borderRadius:DS.r.md, padding:"12px 16px" }}>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, marginBottom:6 }}>Expected columns for {importType}</div>
+                <div style={{ color:DS.textFaint, fontSize:DS.fs.xs, lineHeight:1.8, fontFamily:"'DM Mono', monospace" }}>
+                  {fields.slice(0,8).join(", ")}{fields.length > 8 ? `, +${fields.length-8} more` : ""}
+                </div>
+              </div>
+              {error && <div style={{ color:DS.red, fontSize:DS.fs.sm, marginTop:10, fontWeight:DS.fw.bold }}>{error}</div>}
+            </div>
+          )}
+
+          {step === "map" && (
+            <div>
+              <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginBottom:14 }}>
+                Found <span style={{ color:DS.text, fontWeight:DS.fw.bold }}>{rows.length} rows</span> with <span style={{ color:DS.text, fontWeight:DS.fw.bold }}>{headers.length} columns</span>. Map your CSV columns to app fields.
+              </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                {fields.map(f => (
+                  <div key={f}>
+                    <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginBottom:3 }}>{f}</div>
+                    <select value={mapping[f]||""} onChange={e => setMapping(m => ({ ...m, [f]: e.target.value }))} style={iStyle}>
+                      <option value="">— skip —</option>
+                      {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              {/* Preview first 3 rows */}
+              {rows.length > 0 && (
+                <div style={{ marginTop:18 }}>
+                  <div style={{ color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, marginBottom:8 }}>Preview (first 3 rows)</div>
+                  <div style={{ overflowX:"auto", background:DS.bg, borderRadius:DS.r.sm, border:`1px solid ${DS.border}` }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:DS.fs.xs }}>
+                      <thead>
+                        <tr>{headers.slice(0,6).map(h => <th key={h} style={{ padding:"6px 10px", color:DS.textMute, textAlign:"left", borderBottom:`1px solid ${DS.border}`, whiteSpace:"nowrap" }}>{h}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {rows.slice(0,3).map((r,i) => <tr key={i}>{headers.slice(0,6).map(h => <td key={h} style={{ padding:"6px 10px", color:DS.textSub, borderBottom:`1px solid ${DS.border}`, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r[h]||"—"}</td>)}</tr>)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === "done" && (
+            <div style={{ textAlign:"center", padding:"24px 0" }}>
+              <div style={{ fontSize:48, marginBottom:16 }}>✓</div>
+              <div style={{ color:DS.green, fontSize:DS.fs.h2, fontWeight:DS.fw.black, marginBottom:8 }}>Import complete</div>
+              <div style={{ color:DS.textMute, fontSize:DS.fs.md }}>{imported} {importType} imported successfully.</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:"12px 24px", borderTop:`1px solid ${DS.border}`, display:"flex", gap:10, justifyContent:"flex-end", flexShrink:0 }}>
+          {step === "upload" && <button onClick={onClose} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"9px 20px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md }}>Cancel</button>}
+          {step === "map" && (
+            <>
+              <button onClick={() => setStep("upload")} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"9px 20px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md }}>Back</button>
+              <button onClick={handleImport} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>
+                Import {rows.length} {importType}
+              </button>
+            </>
+          )}
+          {step === "done" && <button onClick={onClose} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Done</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Win/Loss Modal ──────────────────────────────────────────
 function WinLossModal({ deal, onSave, onClose }) {
   const [won, setWon] = useState(true);
   const [reason, setReason] = useState(LOSS_REASONS[0]);
   const [notes, setNotes] = useState("");
-  const iStyle = { background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1001 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 28, width: 440 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 28, width: 440 }}>
         <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: "0 0 6px 0" }}>Close Out Deal</h2>
         <div style={{ color: "#475569", fontSize: 12, marginBottom: 20 }}>{deal.name}</div>
         <div style={{ display: "flex", gap: 10, marginBottom: 18 }}>
-          <button onClick={() => setWon(true)} style={{ flex: 1, background: won ? "#15803d" : "#0f1e2e", border: `1px solid ${won ? "#15803d" : "#1e3048"}`, color: won ? "#fff" : "#64748b", padding: "12px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 800 }}>🏆 Won</button>
-          <button onClick={() => setWon(false)} style={{ flex: 1, background: !won ? "#7f1d1d" : "#0f1e2e", border: `1px solid ${!won ? "#dc2626" : "#1e3048"}`, color: !won ? "#fca5a5" : "#64748b", padding: "12px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 800 }}>❌ Lost</button>
+          <button onClick={() => setWon(true)} style={{ flex: 1, background: won ? "#15803d" : "#0f1e2e", border: `1px solid ${won ? "#15803d" : "#1e3048"}`, color: won ? "#fff" : "#64748b", padding: "12px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 800 }}> Won</button>
+          <button onClick={() => setWon(false)} style={{ flex: 1, background: !won ? "#7f1d1d" : "#0f1e2e", border: `1px solid ${!won ? "#dc2626" : "#1e3048"}`, color: !won ? "#fca5a5" : "#64748b", padding: "12px", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 800 }}> Lost</button>
         </div>
         {!won && (
           <div style={{ marginBottom: 14 }}>
@@ -285,8 +1197,8 @@ function WinLossModal({ deal, onSave, onClose }) {
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} style={{ ...iStyle, resize: "vertical" }} placeholder="Any details worth capturing..." />
         </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ background: "none", border: "1px solid #1e3048", color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
-          <button onClick={() => onSave({ ...deal, stage: won ? "Closed" : "Lost", won, lossReason: won ? "" : reason, notes: notes || deal.notes })} style={{ background: won ? "#15803d" : "#dc2626", border: "none", color: "#fff", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>{won ? "Mark Won ✓" : "Mark Lost"}</button>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
+          <button onClick={() => onSave({ ...deal, stage: won ? "Closed" : "Lost", won, lossReason: won ? "" : reason, notes: notes || deal.notes })} style={{ background: won ? "#15803d" : "#dc2626", border: "none", color: "#fff", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>{won ? "Mark Won" : "Mark Lost"}</button>
         </div>
       </div>
     </div>
@@ -297,13 +1209,13 @@ function WinLossModal({ deal, onSave, onClose }) {
 function QuickAdd({ onSave, onClose }) {
   const [form, setForm] = useState({ name: "", sqft: "", stage: "Prospect", dealType: "Sale" });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const iStyle = { background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "9px 12px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "9px 12px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 26, width: 400 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,8,18,0.85)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 400 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-          <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>⚡ Quick Add Deal</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>Quick Add Deal</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div><label style={{ color: "#94a3b8", fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>Property Name *</label><input autoFocus value={form.name} onChange={e => set("name", e.target.value)} onKeyDown={e => e.key === "Enter" && form.name && onSave(form)} placeholder="e.g. Lakeside Distribution Center" style={iStyle} /></div>
@@ -314,7 +1226,7 @@ function QuickAdd({ onSave, onClose }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 20, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ background: "none", border: "1px solid #1e3048", color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
           <button onClick={() => form.name && onSave(form)} style={{ background: "#f59e0b", border: "none", color: "#0f1e2e", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>Add Deal →</button>
         </div>
       </div>
@@ -341,55 +1253,55 @@ function DocumentsModal({ deal, onClose, onSave }) {
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1100 }}>
-      <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:16, padding:26, width:580, maxHeight:"85vh", overflowY:"auto" }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:580, maxHeight:"85vh", overflowY:"auto" }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
           <div>
-            <h2 style={{ color:"#f1f5f9", fontSize:16, fontWeight:800, margin:0 }}>📁 Documents — {deal.name}</h2>
+            <h2 style={{ color:"#f1f5f9", fontSize:16, fontWeight:800, margin:0 }}> Documents — {deal.name}</h2>
             <div style={{ color:"#475569", fontSize:11, marginTop:2 }}>Link LOIs, leases, reports, and any deal-related files</div>
           </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
         </div>
 
         {/* Add new doc */}
-        <div style={{ background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
+        <div style={{ background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:10, padding:"14px 16px", marginBottom:16 }}>
           <div style={{ color:"#94a3b8", fontSize:11, fontWeight:700, marginBottom:10 }}>ADD DOCUMENT / LINK</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9, marginBottom:9 }}>
             <div>
               <label style={{ color:"#64748b", fontSize:10, fontWeight:600, display:"block", marginBottom:3 }}>Document Name *</label>
-              <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addDoc()} placeholder='e.g. "Executed LOI - Draft 2"' style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:7, color:"#f1f5f9", padding:"7px 10px", fontSize:12, outline:"none", width:"100%", boxSizing:"border-box" }}/>
+              <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addDoc()} placeholder='e.g. "Executed LOI - Draft 2"' style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:7, color:"#f1f5f9", padding:"7px 10px", fontSize:12, outline:"none", width:"100%", boxSizing:"border-box" }}/>
             </div>
             <div>
               <label style={{ color:"#64748b", fontSize:10, fontWeight:600, display:"block", marginBottom:3 }}>Type</label>
-              <select value={docType} onChange={e=>setDocType(e.target.value)} style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:7, color:"#f1f5f9", padding:"7px 10px", fontSize:12, outline:"none", width:"100%", boxSizing:"border-box" }}>
+              <select value={docType} onChange={e=>setDocType(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:7, color:"#f1f5f9", padding:"7px 10px", fontSize:12, outline:"none", width:"100%", boxSizing:"border-box" }}>
                 {docTypes.map(t=><option key={t}>{t}</option>)}
               </select>
             </div>
           </div>
           <div style={{ marginBottom:10 }}>
             <label style={{ color:"#64748b", fontSize:10, fontWeight:600, display:"block", marginBottom:3 }}>URL / Link (optional — Google Drive, Dropbox, DocuSign, etc.)</label>
-            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://drive.google.com/..." style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:7, color:"#f1f5f9", padding:"7px 10px", fontSize:12, outline:"none", width:"100%", boxSizing:"border-box" }}/>
+            <input value={url} onChange={e=>setUrl(e.target.value)} placeholder="https://drive.google.com/..." style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:7, color:"#f1f5f9", padding:"7px 10px", fontSize:12, outline:"none", width:"100%", boxSizing:"border-box" }}/>
           </div>
           <button onClick={addDoc} style={{ background:"#3b82f6", border:"none", color:"#fff", padding:"7px 18px", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:800 }}>+ Add Document</button>
-          <div style={{ color:"#334155", fontSize:10, marginTop:8 }}>💡 Paste any URL — Google Drive, Dropbox, DocuSign, CoStar, email, Notion, etc.</div>
+          <div style={{ color:"#334155", fontSize:10, marginTop:8 }}> Paste any URL — Google Drive, Dropbox, DocuSign, CoStar, email, Notion, etc.</div>
         </div>
 
         {/* Document list */}
         {docs.length === 0 && <div style={{ color:"#475569", fontSize:13, textAlign:"center", padding:"24px 0" }}>No documents linked yet.</div>}
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
           {docs.map(doc => (
-            <div key={doc.id} style={{ background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:9, padding:"11px 14px", display:"flex", alignItems:"center", gap:12 }}>
+            <div key={doc.id} style={{ background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:9, padding:"11px 14px", display:"flex", alignItems:"center", gap:12 }}>
               <span style={{ background:"#1e3048", color: typeColors[doc.type]||"#64748b", border:`1px solid ${typeColors[doc.type]||"#1e3048"}33`, padding:"2px 8px", borderRadius:20, fontSize:10, fontWeight:700, whiteSpace:"nowrap", flexShrink:0 }}>{doc.type}</span>
               <div style={{ flex:1, minWidth:0 }}>
                 {doc.url ? (
                   <a href={doc.url} target="_blank" rel="noreferrer" style={{ color:"#60a5fa", fontWeight:600, fontSize:13, textDecoration:"none", display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                    🔗 {doc.name}
+                     {doc.name}
                   </a>
                 ) : (
-                  <div style={{ color:"#f1f5f9", fontWeight:600, fontSize:13 }}>📄 {doc.name}</div>
+                  <div style={{ color:"#f1f5f9", fontWeight:600, fontSize:13 }}> {doc.name}</div>
                 )}
                 <div style={{ color:"#334155", fontSize:10, marginTop:2 }}>Added {new Date(doc.addedDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
               </div>
-              <button onClick={()=>onSave({ ...deal, documents: docs.filter(d=>d.id!==doc.id) })} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13, flexShrink:0 }}>🗑️</button>
+              <button onClick={()=>onSave({ ...deal, documents: docs.filter(d=>d.id!==doc.id) })} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13, flexShrink:0 }}></button>
             </div>
           ))}
         </div>
@@ -402,7 +1314,7 @@ function DocumentsModal({ deal, onClose, onSave }) {
   );
 }
 
-function DealModal({ deal, onSave, onClose, submarketList }) {
+function DealModal({ deal, onSave, onClose, submarketList, comps = [] }) {
   const smList = submarketList || DEFAULT_SUBMARKETS;
   const [form, setForm] = useState(deal || {
     name: "", client: "", counterparty: "", stage: "Prospect", dealType: "Sale", repType: "Seller/Landlord Rep",
@@ -411,18 +1323,19 @@ function DealModal({ deal, onSave, onClose, submarketList }) {
     followUpDate: "", leadSource: "Referral", coBroker: "", splitPct: 100, won: null, lossReason: "",
     richNotes: [], submarket: "Northeast", tags: [], documents: []
   });
+  const [showWaterfall, setShowWaterfall] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const calc = calcDeal(form);
-  const iStyle = { background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const label = (txt) => <label style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 4 }}>{txt}</label>;
   const sectionHead = (txt) => <div style={{ color: "#475569", fontSize: 10, fontWeight: 700, letterSpacing: 1, marginBottom: 8, marginTop: 4 }}>{txt}</div>;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 26, width: 660, maxHeight: "93vh", overflowY: "auto" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,8,18,0.85)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 660, maxHeight: "93vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>{deal?.id ? "Edit Deal" : "New Deal"}</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
         </div>
 
         {sectionHead("DEAL INFO")}
@@ -462,14 +1375,20 @@ function DealModal({ deal, onSave, onClose, submarketList }) {
         </div>
 
         {(calc.totalValue > 0 || calc.grossCommission > 0) && (
-          <div style={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 10, padding: "12px 16px", marginBottom: 14, display: "flex", gap: 20, flexWrap: "wrap" }}>
-            <div><div style={{ color: "#64748b", fontSize: 10 }}>Total Value</div><div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 15 }}>{fmt(calc.totalValue)}</div></div>
-            {calc.sqft > 0 && <div><div style={{ color: "#64748b", fontSize: 10 }}>$/SF</div><div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 15 }}>${(calc.totalValue / calc.sqft).toFixed(2)}</div></div>}
-            <div><div style={{ color: "#64748b", fontSize: 10 }}>Gross Commission</div><div style={{ color: calc.isSplit ? "#64748b" : "#f59e0b", fontWeight: 800, fontSize: 15, textDecoration: calc.isSplit ? "line-through" : "none" }}>{fmt(calc.grossCommission)}</div></div>
-            {calc.isSplit && <div><div style={{ color: "#64748b", fontSize: 10 }}>Your Net ({form.splitPct}%)</div><div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 15 }}>{fmt(calc.netCommission)}</div></div>}
-            <div><div style={{ color: "#64748b", fontSize: 10 }}>Weighted Value</div><div style={{ color: "#34d399", fontWeight: 800, fontSize: 15 }}>{fmt(calc.weighted)}</div></div>
+          <div style={{ background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <div style={{ display:"flex", gap: 20, flexWrap: "wrap" }}>
+                <div><div style={{ color: "#64748b", fontSize: 10 }}>Total Value</div><div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 15 }}>{fmt(calc.totalValue)}</div></div>
+                {calc.sqft > 0 && <div><div style={{ color: "#64748b", fontSize: 10 }}>$/SF</div><div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 15 }}>${(calc.totalValue / calc.sqft).toFixed(2)}</div></div>}
+                <div><div style={{ color: "#64748b", fontSize: 10 }}>Gross Commission</div><div style={{ color: calc.isSplit ? "#64748b" : "#f59e0b", fontWeight: 800, fontSize: 15, textDecoration: calc.isSplit ? "line-through" : "none" }}>{fmt(calc.grossCommission)}</div></div>
+                {calc.isSplit && <div><div style={{ color: "#64748b", fontSize: 10 }}>Your Net ({form.splitPct}%)</div><div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 15 }}>{fmt(calc.netCommission)}</div></div>}
+                <div><div style={{ color: "#64748b", fontSize: 10 }}>Weighted Value</div><div style={{ color: "#34d399", fontWeight: 800, fontSize: 15 }}>{fmt(calc.weighted)}</div></div>
+              </div>
+              <button onClick={() => setShowWaterfall(true)} style={{ background: DS.accentSoft, border: `1px solid ${DS.accent}44`, color: DS.accent, padding: "5px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold, whiteSpace: "nowrap", flexShrink: 0 }}>Waterfall</button>
+            </div>
           </div>
         )}
+        {showWaterfall && <CommissionWaterfallModal deal={form} onClose={() => setShowWaterfall(false)} />}
 
         <div style={{ marginBottom: 14 }}>
           <label style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 6 }}>Tags</label>
@@ -477,14 +1396,14 @@ function DealModal({ deal, onSave, onClose, submarketList }) {
             {(form.tags||[]).map(tag => (
               <span key={tag} style={{ background:"#1e3a5f", color:"#60a5fa", border:"1px solid #1e4a7f", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}
                 onClick={()=>set("tags",(form.tags||[]).filter(t=>t!==tag))}>
-                {tag} <span style={{ fontSize:10, opacity:0.7 }}>✕</span>
+                {tag} <span style={{ fontSize:10, opacity:0.7 }}></span>
               </span>
             ))}
             {(form.tags||[]).length === 0 && <span style={{ color:"#334155", fontSize:11 }}>No tags yet — click below to add</span>}
           </div>
           <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
             {DEAL_TAG_SUGGESTIONS.filter(s=>!(form.tags||[]).includes(s)).map(s=>(
-              <button key={s} onClick={()=>set("tags",[...(form.tags||[]),s])} style={{ background:"#0f1e2e", border:"1px solid #1e3048", color:"#64748b", padding:"3px 9px", borderRadius:20, fontSize:10, cursor:"pointer" }}>{s}</button>
+              <button key={s} onClick={()=>set("tags",[...(form.tags||[]),s])} style={{ background:"#0f1e2e", border:`1px solid ${DS.border}`, color:"#64748b", padding:"3px 9px", borderRadius:20, fontSize:10, cursor:"pointer" }}>{s}</button>
             ))}
             <input placeholder="Custom tag..." onKeyDown={e=>{ if(e.key==="Enter"&&e.target.value.trim()&&!(form.tags||[]).includes(e.target.value.trim())){ set("tags",[...(form.tags||[]),e.target.value.trim()]); e.target.value=""; }}} style={{ background:"#0f1e2e", border:"1px dashed #1e3048", borderRadius:20, color:"#94a3b8", padding:"3px 10px", fontSize:10, outline:"none", width:100 }}/>
           </div>
@@ -492,7 +1411,7 @@ function DealModal({ deal, onSave, onClose, submarketList }) {
 
         <div style={{ marginBottom: 18 }}>
           <label style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 4 }}>Quick Notes</label>
-          <textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...iStyle, resize: "vertical" }} placeholder="Short notes. Use 📎 Notes button for detailed LOI, deal terms, requirements..." />
+          <textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...iStyle, resize: "vertical" }} placeholder="Short notes. Use Notes button for detailed LOI, deal terms, requirements..." />
         </div>
 
         {(form.stageHistory||[]).length > 0 && (
@@ -500,7 +1419,7 @@ function DealModal({ deal, onSave, onClose, submarketList }) {
             {sectionHead("STAGE HISTORY")}
             <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
               {[...(form.stageHistory||[])].reverse().map((h, i) => (
-                <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 10px", background:"#0f1e2e", borderRadius:7, border:"1px solid #1e3048" }}>
+                <div key={i} style={{ display:"flex", alignItems:"center", gap:10, padding:"6px 10px", background:"#0f1e2e", borderRadius:7, border:`1px solid ${DS.border}` }}>
                   <StageBadge stage={h.stage} />
                   <span style={{ color:"#475569", fontSize:10 }}>{h.enteredDate ? new Date(h.enteredDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—"}</span>
                   {h.note && <span style={{ color:"#334155", fontSize:10, fontStyle:"italic" }}>{h.note}</span>}
@@ -510,8 +1429,53 @@ function DealModal({ deal, onSave, onClose, submarketList }) {
           </div>
         )}
 
+        {/* ── Comp Intelligence ── */}
+        {(() => {
+          const sm = form.submarket;
+          const dt = form.dealType;
+          const sqft = parseFloat(form.sqft) || 0;
+          const relevantComps = comps
+            .filter(c => c.submarket === sm && c.compType === dt)
+            .sort((a,b) => new Date(b.closeDate||0) - new Date(a.closeDate||0))
+            .slice(0, 4);
+          if (relevantComps.length === 0) return null;
+          const avgPsf = relevantComps.reduce((s,c) => s + (dt==="Sale" ? parseFloat(c.psfSale)||0 : parseFloat(c.psfLease)||0), 0) / relevantComps.length;
+          const dealPsf = sqft > 0 ? (dt==="Sale" ? parseFloat(form.dealTotal)/sqft : parseFloat(form.monthlyRent)/sqft) : 0;
+          return (
+            <div style={{ marginBottom:18 }}>
+              {sectionHead("COMP INTELLIGENCE — " + (sm||"").toUpperCase())}
+              <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, overflow:"hidden" }}>
+                <div style={{ padding:"10px 14px", borderBottom:`1px solid ${DS.border}`, display:"flex", gap:20, flexWrap:"wrap", alignItems:"center" }}>
+                  <div><span style={{ color:DS.textMute, fontSize:DS.fs.xs }}>Avg $/SF ({relevantComps.length} comps): </span><span style={{ color:DS.green, fontWeight:DS.fw.bold, fontFamily:"'DM Mono', monospace" }}>{avgPsf > 0 ? "$"+avgPsf.toFixed(2) : "—"}</span></div>
+                  {dealPsf > 0 && avgPsf > 0 && (
+                    <div><span style={{ color:DS.textMute, fontSize:DS.fs.xs }}>Your deal: </span>
+                      <span style={{ color: dealPsf > avgPsf*1.05 ? DS.green : dealPsf < avgPsf*0.95 ? DS.red : DS.accent, fontWeight:DS.fw.bold, fontFamily:"'DM Mono', monospace" }}>
+                        ${dealPsf.toFixed(2)} {dealPsf > avgPsf*1.05 ? "▲ above mkt" : dealPsf < avgPsf*0.95 ? "▼ below mkt" : "≈ at market"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                {relevantComps.map((c, i) => (
+                  <div key={c.id} style={{ display:"flex", gap:12, padding:"8px 14px", borderBottom: i < relevantComps.length-1 ? `1px solid ${DS.border}` : "none", alignItems:"center" }}>
+                    <div style={{ flex:2, minWidth:0 }}>
+                      <div style={{ color:DS.text, fontSize:DS.fs.sm, fontWeight:DS.fw.semi, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.name||"—"}</div>
+                      <div style={{ color:DS.textMute, fontSize:10 }}>{c.sqft ? parseInt(c.sqft).toLocaleString()+" SF" : ""}{c.subtype ? " · "+c.subtype : ""}</div>
+                    </div>
+                    <div style={{ color:DS.accent, fontWeight:DS.fw.bold, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace", flexShrink:0 }}>
+                      {dt==="Sale" ? (c.psfSale > 0 ? "$"+parseFloat(c.psfSale).toFixed(2)+"/SF" : "—") : (c.psfLease > 0 ? "$"+parseFloat(c.psfLease).toFixed(3)+"/SF/mo" : "—")}
+                    </div>
+                    <div style={{ color:DS.textMute, fontSize:10, flexShrink:0 }}>{c.closeDate ? new Date(c.closeDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",year:"numeric"}) : "—"}</div>
+                    {c.verified && <span style={{ color:DS.green, fontSize:9, flexShrink:0, fontWeight:DS.fw.bold }}>verified</span>}
+                    {c.notes && <div style={{ color:DS.textFaint, fontSize:10, flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontStyle:"italic" }}>{c.notes}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ background: "none", border: "1px solid #1e3048", color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
           <button onClick={() => onSave(form)} style={{ background: "#f59e0b", border: "none", color: "#0f1e2e", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>Save Deal</button>
         </div>
       </div>
@@ -529,7 +1493,7 @@ function ListingModal({ listing, onSave, onClose, submarketList }) {
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const [showingText, setShowingText] = useState("");
-  const iStyle = { background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const label = (t) => <label style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 4 }}>{t}</label>;
   const addShowing = () => {
     if (!showingText.trim()) return;
@@ -538,10 +1502,10 @@ function ListingModal({ listing, onSave, onClose, submarketList }) {
   };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 26, width: 620, maxHeight: "92vh", overflowY: "auto" }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 620, maxHeight: "92vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>{listing?.id ? "Edit Listing" : "New Listing"}</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11, marginBottom: 14 }}>
           <div style={{ gridColumn: "span 2" }}>{label("Property Name")}<input value={form.name} onChange={e => set("name", e.target.value)} style={iStyle} /></div>
@@ -572,17 +1536,17 @@ function ListingModal({ listing, onSave, onClose, submarketList }) {
             <button onClick={addShowing} style={{ background: "#3b82f6", border: "none", color: "#fff", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add</button>
           </div>
           {(form.showings||[]).map(s => (
-            <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0f1e2e", borderRadius: 7, padding: "7px 10px", marginBottom: 5, border: "1px solid #1e3048" }}>
+            <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", borderRadius: 7, padding: "7px 10px", marginBottom: 5, border: `1px solid ${DS.border}` }}>
               <span style={{ color: "#f1f5f9", fontSize: 12 }}>{s.prospect}</span>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <span style={{ color: "#475569", fontSize: 10 }}>{s.date}</span>
-                <button onClick={() => setForm(f => ({ ...f, showings: f.showings.filter(x => x.id !== s.id) }))} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer" }}>🗑️</button>
+                <button onClick={() => setForm(f => ({ ...f, showings: f.showings.filter(x => x.id !== s.id) }))} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer" }}></button>
               </div>
             </div>
           ))}
         </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ background: "none", border: "1px solid #1e3048", color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
           <button onClick={() => onSave(form)} style={{ background: "#10b981", border: "none", color: "#fff", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>Save Listing</button>
         </div>
       </div>
@@ -598,16 +1562,16 @@ function ProspectingModal({ campaign, onSave, onClose, submarketList }) {
     responses: "", conversations: "", convertedDeals: "", notes: "", status: "Draft"
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  const iStyle = { background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const label = (t) => <label style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 4 }}>{t}</label>;
   const responseRate = form.targetCount > 0 ? ((parseFloat(form.responses)||0) / parseFloat(form.targetCount) * 100).toFixed(1) : null;
   const convRate = (parseFloat(form.responses)||0) > 0 ? ((parseFloat(form.conversations)||0) / (parseFloat(form.responses)||0) * 100).toFixed(1) : null;
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 26, width: 560 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 560 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>{campaign?.id ? "Edit Campaign" : "New Prospecting Campaign"}</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 11, marginBottom: 14 }}>
           <div style={{ gridColumn: "span 2" }}>{label("Campaign Name")}<input value={form.name} onChange={e => set("name", e.target.value)} placeholder='e.g. "Q1 Northeast Owner Mailer"' style={iStyle} /></div>
@@ -621,7 +1585,7 @@ function ProspectingModal({ campaign, onSave, onClose, submarketList }) {
           <div>{label("Status")}<select value={form.status} onChange={e => set("status", e.target.value)} style={iStyle}>{["Draft","Sent","In Progress","Complete"].map(s => <option key={s}>{s}</option>)}</select></div>
         </div>
         {responseRate && (
-          <div style={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", gap: 20 }}>
+          <div style={{ background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, display: "flex", gap: 20 }}>
             <div><div style={{ color: "#64748b", fontSize: 10 }}>Response Rate</div><div style={{ color: "#34d399", fontWeight: 800, fontSize: 16 }}>{responseRate}%</div></div>
             {convRate && <div><div style={{ color: "#64748b", fontSize: 10 }}>Response → Conversation</div><div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16 }}>{convRate}%</div></div>}
             <div><div style={{ color: "#64748b", fontSize: 10 }}>Deals Created</div><div style={{ color: "#60a5fa", fontWeight: 800, fontSize: 16 }}>{form.convertedDeals || 0}</div></div>
@@ -629,7 +1593,7 @@ function ProspectingModal({ campaign, onSave, onClose, submarketList }) {
         )}
         <div style={{ marginBottom: 18 }}>{label("Notes / Strategy")}<textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...iStyle, resize: "vertical" }} placeholder="Target criteria, message used, lessons learned..." /></div>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ background: "none", border: "1px solid #1e3048", color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
           <button onClick={() => onSave(form)} style={{ background: "#8b5cf6", border: "none", color: "#fff", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>Save Campaign</button>
         </div>
       </div>
@@ -662,7 +1626,7 @@ function ListingsTab({ listings, setListings, submarketList }) {
           const sc = statusColors[l.status] || statusColors["Active"];
           const dom = l.listedDate ? Math.floor((new Date() - new Date(l.listedDate)) / 86400000) : (l.daysOnMarket || 0);
           return (
-            <div key={l.id} style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 12, padding: "16px 18px" }}>
+            <div key={l.id} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "16px 18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                 <div>
                   <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 14 }}>{l.name}</div>
@@ -671,11 +1635,11 @@ function ListingsTab({ listings, setListings, submarketList }) {
                 <span style={{ background: sc.bg, color: sc.text, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{l.status}</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-                <div style={{ background: "#0f1e2e", borderRadius: 7, padding: "8px 10px", border: "1px solid #1e3048" }}>
+                <div style={{ background: "#070e1a", borderRadius: 7, padding: "8px 10px", border: `1px solid ${DS.border}` }}>
                   <div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>SIZE</div>
                   <div style={{ color: "#f1f5f9", fontSize: 13, fontWeight: 700 }}>{l.sqft ? l.sqft.toLocaleString() : "—"} SF</div>
                 </div>
-                <div style={{ background: "#0f1e2e", borderRadius: 7, padding: "8px 10px", border: "1px solid #1e3048" }}>
+                <div style={{ background: "#070e1a", borderRadius: 7, padding: "8px 10px", border: `1px solid ${DS.border}` }}>
                   <div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>{l.dealType === "Sale" ? "ASKING" : "RENT/MO"}</div>
                   <div style={{ color: "#f59e0b", fontSize: 13, fontWeight: 700 }}>{l.dealType === "Sale" ? fmt(l.askingPrice) : fmt(l.monthlyRent)}</div>
                 </div>
@@ -689,11 +1653,11 @@ function ListingsTab({ listings, setListings, submarketList }) {
                 <span style={{ background: l.dealType === "Sale" ? "#1e3a5f" : "#1a2a1a", color: l.dealType === "Sale" ? "#60a5fa" : "#4ade80", padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{l.dealType}</span>
                 {(l.dealType === "Sale" ? l.askingPsfSale : l.askingPsfLease) > 0 && <span style={{ background: "#1e3048", color: "#f59e0b", padding: "2px 8px", borderRadius: 20, fontSize: 10 }}>${l.dealType === "Sale" ? l.askingPsfSale : l.askingPsfLease}/SF{l.dealType === "Lease" ? "/mo" : ""}</span>}
               </div>
-              {(l.showings||[]).length > 0 && <div style={{ color: "#64748b", fontSize: 11, marginBottom: 8 }}>👁 {l.showings.length} showing{l.showings.length !== 1 ? "s" : ""}</div>}
+              {(l.showings||[]).length > 0 && <div style={{ color: "#64748b", fontSize: 11, marginBottom: 8 }}> {l.showings.length} showing{l.showings.length !== 1 ? "s" : ""}</div>}
               {l.marketingNotes && <div style={{ color: "#475569", fontSize: 11, marginBottom: 10, fontStyle: "italic" }}>{l.marketingNotes}</div>}
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => setModal(l)} style={{ flex: 1, background: "#1e3048", border: "none", color: "#94a3b8", padding: "6px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}>✏️ Edit</button>
-                <button onClick={() => { if (window.confirm("Delete listing?")) setListings(prev => prev.filter(x => x.id !== l.id)); }} style={{ background: "none", border: "1px solid #1e3048", color: "#475569", padding: "6px 10px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}>🗑️</button>
+                <button onClick={() => setModal(l)} style={{ flex: 1, background: "#1e3048", border: "none", color: "#94a3b8", padding: "6px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}> Edit</button>
+                <button onClick={() => { if (window.confirm("Delete listing?")) setListings(prev => prev.filter(x => x.id !== l.id)); }} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#475569", padding: "6px 10px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}></button>
               </div>
             </div>
           );
@@ -751,7 +1715,7 @@ function ForecastTab({ deals }) {
           { label: "Next Month", value: fmt(forecastData[1]?.weightedTotal||0), sub: `${forecastData[1]?.mDeals.length||0} deals closing`, color: "#60a5fa" },
           { label: "This Quarter", value: fmt(quarterTotal), sub: "Weighted pipeline", color: "#34d399" },
         ].map(c => (
-          <div key={c.label} style={{ flex: 1, minWidth: 160, background: "#162032", border: "1px solid #1e3048", borderRadius: 12, padding: "14px 16px" }}>
+          <div key={c.label} style={{ flex: 1, minWidth: 160, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "14px 16px" }}>
             <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600 }}>{c.label}</div>
             <div style={{ color: c.color, fontSize: 22, fontWeight: 800, margin: "4px 0" }}>{c.value}</div>
             <div style={{ color: "#475569", fontSize: 10 }}>{c.sub}</div>
@@ -761,7 +1725,7 @@ function ForecastTab({ deals }) {
       {/* Monthly breakdown */}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {forecastData.map(m => (
-          <div key={m.key} style={{ background: m.key === thisMonthKey ? "#1a2d42" : "#162032", border: `1px solid ${m.key === thisMonthKey ? "#3b82f6" : "#1e3048"}`, borderRadius: 12, padding: "14px 18px" }}>
+          <div key={m.key} style={{ background: m.key === thisMonthKey ? "#1a2d42" : DS.panel, border: `1px solid ${m.key === thisMonthKey ? "#3b82f6" : "#1e3048"}`, borderRadius: 12, padding: "14px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: m.mDeals.length > 0 ? 12 : 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 14 }}>{m.label}</div>
@@ -777,24 +1741,24 @@ function ForecastTab({ deals }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {m.closed.map(d => (
                   <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0f2010", border: "1px solid #14532d", borderRadius: 8, padding: "8px 12px" }}>
-                    <div><div style={{ color: "#4ade80", fontSize: 12, fontWeight: 600 }}>✅ {d.name}</div><div style={{ color: "#16a34a", fontSize: 10 }}>{d.client} · Closed</div></div>
+                    <div><div style={{ color: "#4ade80", fontSize: 12, fontWeight: 600 }}> {d.name}</div><div style={{ color: "#16a34a", fontSize: 10 }}>{d.client} · Closed</div></div>
                     <div style={{ color: "#4ade80", fontWeight: 800, fontSize: 13 }}>{fmt(d.netCommission)}</div>
                   </div>
                 ))}
                 {m.certain.map(d => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, padding: "8px 12px" }}>
+                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, padding: "8px 12px" }}>
                     <div><div style={{ color: "#f1f5f9", fontSize: 12, fontWeight: 600 }}>{d.name}</div><div style={{ color: "#64748b", fontSize: 10 }}>{d.client} · {d.stage} · {d.probability}% probability</div></div>
                     <div style={{ textAlign: "right" }}><div style={{ color: "#f59e0b", fontWeight: 700, fontSize: 13 }}>{fmt(d.weighted)}</div><div style={{ color: "#475569", fontSize: 10 }}>of {fmt(d.netCommission)}</div></div>
                   </div>
                 ))}
                 {m.probable.map(d => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, padding: "8px 12px", opacity: 0.85 }}>
+                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, padding: "8px 12px", opacity: 0.85 }}>
                     <div><div style={{ color: "#f1f5f9", fontSize: 12 }}>{d.name}</div><div style={{ color: "#64748b", fontSize: 10 }}>{d.client} · {d.stage} · {d.probability}% probability</div></div>
                     <div style={{ textAlign: "right" }}><div style={{ color: "#f59e0b", fontSize: 12 }}>{fmt(d.weighted)}</div><div style={{ color: "#475569", fontSize: 10 }}>of {fmt(d.netCommission)}</div></div>
                   </div>
                 ))}
                 {m.speculative.map(d => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0f1e2e", border: "1px dashed #1e3048", borderRadius: 8, padding: "8px 12px", opacity: 0.65 }}>
+                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", border: "1px dashed #1e3048", borderRadius: 8, padding: "8px 12px", opacity: 0.65 }}>
                     <div><div style={{ color: "#94a3b8", fontSize: 12 }}>{d.name}</div><div style={{ color: "#475569", fontSize: 10 }}>{d.client} · {d.stage} · {d.probability}% probability</div></div>
                     <div style={{ textAlign: "right" }}><div style={{ color: "#94a3b8", fontSize: 12 }}>{fmt(d.weighted)}</div><div style={{ color: "#475569", fontSize: 10 }}>of {fmt(d.netCommission)}</div></div>
                   </div>
@@ -804,8 +1768,8 @@ function ForecastTab({ deals }) {
           </div>
         ))}
       </div>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 10, padding: "10px 14px" }}>
-        <div style={{ color: "#475569", fontSize: 11 }}>💡 Solid borders = 50%+ probability · Dashed borders = speculative (&lt;50%) · Green = already closed</div>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 10, padding: "10px 14px" }}>
+        <div style={{ color: "#475569", fontSize: 11 }}> Solid borders = 50%+ probability · Dashed borders = speculative (&lt;50%) · Green = already closed</div>
       </div>
     </div>
   );
@@ -839,12 +1803,12 @@ function ProspectingTab({ campaigns, setCampaigns, deals, submarketList }) {
       {campaigns.length > 0 && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {[
-            { label: "Total Sent", value: totalSent.toLocaleString(), icon: "📬" },
+            { label: "Total Sent", value: totalSent.toLocaleString(), icon: "" },
             { label: "Responses", value: totalResp.toLocaleString() + (overallRate ? ` (${overallRate}%)` : ""), icon: "↩️" },
-            { label: "Conversations", value: totalConv, icon: "💬" },
-            { label: "Deals Created", value: totalDeals, icon: "🤝" },
+            { label: "Conversations", value: totalConv, icon: "" },
+            { label: "Deals Created", value: totalDeals, icon: "" },
           ].map(c => (
-            <div key={c.label} style={{ flex: 1, minWidth: 120, background: "#162032", border: "1px solid #1e3048", borderRadius: 10, padding: "12px 14px" }}>
+            <div key={c.label} style={{ flex: 1, minWidth: 120, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 10, padding: "12px 14px" }}>
               <div style={{ fontSize: 18, marginBottom: 4 }}>{c.icon}</div>
               <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 18 }}>{c.value}</div>
               <div style={{ color: "#475569", fontSize: 10, fontWeight: 600 }}>{c.label}</div>
@@ -857,7 +1821,7 @@ function ProspectingTab({ campaigns, setCampaigns, deals, submarketList }) {
           const rRate = c.targetCount > 0 ? (c.responses / c.targetCount * 100).toFixed(1) : null;
           const cRate = c.responses > 0 ? (c.conversations / c.responses * 100).toFixed(1) : null;
           return (
-            <div key={c.id} style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 12, padding: "16px 18px" }}>
+            <div key={c.id} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "16px 18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -867,8 +1831,8 @@ function ProspectingTab({ campaigns, setCampaigns, deals, submarketList }) {
                   <div style={{ color: "#64748b", fontSize: 11, marginTop: 3 }}>{c.type} · {c.submarket} · {new Date(c.sendDate+"T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={() => setModal(c)} style={{ background: "none", border: "1px solid #1e3048", color: "#64748b", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}>✏️</button>
-                  <button onClick={() => { if (window.confirm("Delete?")) setCampaigns(prev => prev.filter(x => x.id !== c.id)); }} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer" }}>🗑️</button>
+                  <button onClick={() => setModal(c)} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#64748b", padding: "5px 10px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}></button>
+                  <button onClick={() => { if (window.confirm("Delete?")) setCampaigns(prev => prev.filter(x => x.id !== c.id)); }} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer" }}></button>
                 </div>
               </div>
               {/* Funnel */}
@@ -881,7 +1845,7 @@ function ProspectingTab({ campaigns, setCampaigns, deals, submarketList }) {
                 ].map((step, i) => (
                   <div key={step.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     {i > 0 && <div style={{ color: "#334155", fontSize: 14 }}>→</div>}
-                    <div style={{ background: "#0f1e2e", border: `1px solid #1e3048`, borderRadius: 8, padding: "8px 12px", textAlign: "center", minWidth: 70 }}>
+                    <div style={{ background: "#070e1a", border: `1px solid #1e3048`, borderRadius: 8, padding: "8px 12px", textAlign: "center", minWidth: 70 }}>
                       <div style={{ color: step.color, fontWeight: 800, fontSize: 16 }}>{step.value || 0}</div>
                       <div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>{step.label}</div>
                       {step.rate && <div style={{ color: step.color, fontSize: 9, marginTop: 1 }}>{step.rate}%</div>}
@@ -906,7 +1870,8 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
   const [filterSm, setFilterSm] = useState("All");
   const [filterType, setFilterType] = useState("All");
   const [search, setSearch] = useState("");
-  const iStyle = { background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const [expandedComp, setExpandedComp] = useState(null);
+  const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const label = (t) => <label style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 4 }}>{t}</label>;
 
   const saveComp = (form) => {
@@ -929,6 +1894,53 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
   const avgPsfLease = (() => { const s = filtered.filter(c=>c.compType==="Lease"&&c.psfLease>0); return s.length ? (s.reduce((a,c)=>a+c.psfLease,0)/s.length).toFixed(4) : null; })();
   const totalSF = filtered.reduce((s,c)=>s+(c.sqft||0),0);
 
+  // Analytics data
+  const PIE_COLORS = [DS.blue, DS.green, DS.accent, DS.purple, "#f97316", "#ec4899", "#06b6d4", "#84cc16"];
+  const subtypePie = Object.entries(
+    filtered.reduce((acc,c) => { const k=c.subtype||"Other"; acc[k]=(acc[k]||0)+1; return acc; }, {})
+  ).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);
+
+  const smPie = Object.entries(
+    filtered.reduce((acc,c) => { const k=c.submarket||"Other"; acc[k]=(acc[k]||0)+1; return acc; }, {})
+  ).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);
+
+  const typeSplit = [
+    { name:"Sales", value: filtered.filter(c=>c.compType==="Sale").length },
+    { name:"Leases", value: filtered.filter(c=>c.compType==="Lease").length },
+  ].filter(d=>d.value>0);
+
+  // PSF trend over time (by quarter)
+  const psfTrend = (() => {
+    const byQ = {};
+    filtered.filter(c=>c.closeDate&&(c.psfSale>0||c.psfLease>0)).forEach(c=>{
+      const d = new Date(c.closeDate+"T00:00:00");
+      const q = `${d.getFullYear()} Q${Math.ceil((d.getMonth()+1)/3)}`;
+      if(!byQ[q]) byQ[q]={q, saleSum:0, saleCount:0, leaseSum:0, leaseCount:0};
+      if(c.compType==="Sale"&&c.psfSale>0){byQ[q].saleSum+=parseFloat(c.psfSale); byQ[q].saleCount++;}
+      if(c.compType==="Lease"&&c.psfLease>0){byQ[q].leaseSum+=parseFloat(c.psfLease)*1000; byQ[q].leaseCount++;}
+    });
+    return Object.values(byQ).sort((a,b)=>a.q.localeCompare(b.q)).map(r=>({
+      q: r.q,
+      "Sale $/SF": r.saleCount > 0 ? parseFloat((r.saleSum/r.saleCount).toFixed(2)) : null,
+      "Lease (×1000)": r.leaseCount > 0 ? parseFloat((r.leaseSum/r.leaseCount).toFixed(2)) : null,
+    }));
+  })();
+
+  // Submarket avg PSF table
+  const smStats = submarketList.map(sm => {
+    const smComps = filtered.filter(c=>c.submarket===sm);
+    const sales = smComps.filter(c=>c.compType==="Sale"&&c.psfSale>0);
+    const leases = smComps.filter(c=>c.compType==="Lease"&&c.psfLease>0);
+    return {
+      sm, count: smComps.length,
+      avgSale: sales.length ? (sales.reduce((s,c)=>s+parseFloat(c.psfSale),0)/sales.length).toFixed(2) : null,
+      avgLease: leases.length ? (leases.reduce((s,c)=>s+parseFloat(c.psfLease),0)/leases.length).toFixed(4) : null,
+      totalSF: smComps.reduce((s,c)=>s+(c.sqft||0),0),
+    };
+  }).filter(r=>r.count>0).sort((a,b)=>b.count-a.count);
+
+  const [showAnalytics, setShowAnalytics] = useState(false);
+
   function CompModal({ comp }) {
     const [form, setForm] = useState(comp || {
       name:"", address:"", submarket: submarketList[0]||"Northeast", subtype:"Distribution",
@@ -942,10 +1954,10 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
     const autoPsfLease = autoSf && form.monthlyRent > 0 ? (form.monthlyRent/form.sqft).toFixed(4) : "";
     return (
       <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:16, padding:26, width:660, maxHeight:"92vh", overflowY:"auto" }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:660, maxHeight:"92vh", overflowY:"auto" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
             <h2 style={{ color:"#f1f5f9", fontSize:17, fontWeight:800, margin:0 }}>{comp?.id ? "Edit Comp" : "Add Market Comp"}</h2>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}>✕</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
             <div style={{ gridColumn:"span 2" }}>{label("Property Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. Northgate Distribution Center" style={iStyle}/></div>
@@ -981,7 +1993,7 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
             <label htmlFor="verified" style={{ color:"#94a3b8", fontSize:12 }}>Verified / Confirmed comp</label>
           </div>
           <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"1px solid #1e3048", color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
             <button onClick={()=>saveComp(form)} style={{ background:"#34d399", border:"none", color:"#0f1e2e", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save Comp</button>
           </div>
         </div>
@@ -993,35 +2005,155 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
-          <div style={{ color:"#f1f5f9", fontWeight:800, fontSize:16 }}>Market Comps</div>
-          <div style={{ color:"#475569", fontSize:11 }}>Track what's trading in your submarkets — sales, leases, brokers, and pricing</div>
+          <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h2, letterSpacing:"-0.3px" }}>Market Comps</div>
+          <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:2 }}>Track what's trading in your submarkets — sales, leases, brokers, pricing</div>
         </div>
-        <button onClick={()=>setModal("new")} style={{ background:"#34d399", border:"none", color:"#0f1e2e", padding:"7px 16px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:800 }}>+ Add Comp</button>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={()=>setShowAnalytics(a=>!a)} style={{ background: showAnalytics ? DS.blueSoft : DS.panel, border:`1px solid ${showAnalytics ? DS.blue+"55" : DS.border}`, color: showAnalytics ? DS.blue : DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>
+            {showAnalytics ? "Hide Analytics" : "Analytics"}
+          </button>
+          <button onClick={()=>setModal("new")} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.black }}>+ Add Comp</button>
+        </div>
       </div>
 
       {/* Summary stats */}
       {comps.length > 0 && <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
         {[
-          { label:"Total Comps", value:comps.length, color:"#60a5fa" },
-          { label:"SF Tracked", value: totalSF > 0 ? totalSF.toLocaleString()+" SF" : "—", color:"#f59e0b" },
-          { label:"Avg Sale $/SF", value: avgPsfSale ? "$"+avgPsfSale : "—", color:"#34d399" },
-          { label:"Avg Lease $/SF/mo", value: avgPsfLease ? "$"+parseFloat(avgPsfLease).toFixed(3) : "—", color:"#8b5cf6" },
+          { label:"Total Comps", value:comps.length, color:DS.blue, sub:`${filtered.length} shown` },
+          { label:"SF Tracked", value: totalSF > 0 ? totalSF.toLocaleString()+" SF" : "—", color:DS.accent, sub:"in filtered view" },
+          { label:"Avg Sale $/SF", value: avgPsfSale ? "$"+avgPsfSale : "—", color:DS.green, sub:"sales only" },
+          { label:"Avg Lease $/SF/mo", value: avgPsfLease ? "$"+parseFloat(avgPsfLease).toFixed(3) : "—", color:DS.purple, sub:"leases only" },
         ].map(c=>(
-          <div key={c.label} style={{ flex:1, minWidth:130, background:"#162032", border:"1px solid #1e3048", borderRadius:10, padding:"12px 14px" }}>
-            <div style={{ color:c.color, fontWeight:800, fontSize:18 }}>{c.value}</div>
-            <div style={{ color:"#475569", fontSize:10, fontWeight:600 }}>{c.label}</div>
+          <div key={c.label} className="card-hover" style={{ flex:1, minWidth:130, background:DS.panel, border:`1px solid ${DS.border}`, borderLeft:`3px solid ${c.color}`, borderRadius:DS.r.md, padding:"13px 16px", position:"relative", overflow:"hidden" }}>
+            <div style={{ position:"absolute", top:0, right:0, width:50, height:50, background:`radial-gradient(circle at top right, ${c.color}10, transparent 70%)` }} />
+            <div style={{ color:c.color, fontWeight:DS.fw.black, fontSize:DS.fs.h2, fontFamily:"'DM Mono', monospace" }}>{c.value}</div>
+            <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.5px", marginTop:4 }}>{c.label}</div>
+            {c.sub && <div style={{ color:DS.textFaint, fontSize:9, marginTop:2 }}>{c.sub}</div>}
           </div>
         ))}
       </div>}
 
+      {/* Analytics panels */}
+      {showAnalytics && comps.length > 0 && (
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {/* Row 1: Pie charts */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+            {/* Sales vs Leases */}
+            <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+              <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:12 }}>Sales vs Leases</div>
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie data={typeSplit} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="value">
+                    {typeSplit.map((_, i) => <Cell key={i} fill={[DS.blue, DS.green][i]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v,n)=>[v+" comps",n]} contentStyle={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, fontSize:11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
+                {typeSplit.map((t,i) => (
+                  <div key={t.name} style={{ display:"flex", alignItems:"center", gap:5 }}>
+                    <div style={{ width:8, height:8, borderRadius:"50%", background:[DS.blue,DS.green][i] }} />
+                    <span style={{ color:DS.textSub, fontSize:DS.fs.xs }}>{t.name} ({t.value})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* By Subtype */}
+            <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+              <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:12 }}>By Subtype</div>
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie data={subtypePie} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={2} dataKey="value">
+                    {subtypePie.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v,n)=>[v+" comps",n]} contentStyle={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, fontSize:11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
+                {subtypePie.slice(0,4).map((t,i) => (
+                  <div key={t.name} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                    <div style={{ width:7, height:7, borderRadius:"50%", background:PIE_COLORS[i % PIE_COLORS.length] }} />
+                    <span style={{ color:DS.textSub, fontSize:DS.fs.xs }}>{t.name} ({t.value})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* By Submarket */}
+            <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+              <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:12 }}>By Submarket</div>
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie data={smPie} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={2} dataKey="value">
+                    {smPie.map((_, i) => <Cell key={i} fill={PIE_COLORS[(i+3) % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v,n)=>[v+" comps",n]} contentStyle={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, fontSize:11 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap" }}>
+                {smPie.slice(0,4).map((t,i) => (
+                  <div key={t.name} style={{ display:"flex", alignItems:"center", gap:4 }}>
+                    <div style={{ width:7, height:7, borderRadius:"50%", background:PIE_COLORS[(i+3) % PIE_COLORS.length] }} />
+                    <span style={{ color:DS.textSub, fontSize:DS.fs.xs }}>{t.name} ({t.value})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Row 2: PSF trend + submarket table */}
+          <div style={{ display:"grid", gridTemplateColumns:"1.6fr 1fr", gap:12 }}>
+            {/* PSF trend chart */}
+            {psfTrend.length > 1 && (
+              <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+                <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:4 }}>$/SF Trend by Quarter</div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginBottom:12 }}>Sale $/SF · Lease $/SF/mo ×1000 for scale</div>
+                <ResponsiveContainer width="100%" height={180}>
+                  <LineChart data={psfTrend} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={DS.border} />
+                    <XAxis dataKey="q" tick={{ fill:DS.textMute, fontSize:9 }} />
+                    <YAxis tick={{ fill:DS.textMute, fontSize:9 }} width={40} />
+                    <Tooltip contentStyle={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, fontSize:11 }} />
+                    <Legend wrapperStyle={{ fontSize:11, color:DS.textSub }} />
+                    <Line type="monotone" dataKey="Sale $/SF" stroke={DS.blue} strokeWidth={2} dot={{ fill:DS.blue, r:3 }} connectNulls />
+                    <Line type="monotone" dataKey="Lease (×1000)" stroke={DS.green} strokeWidth={2} dot={{ fill:DS.green, r:3 }} connectNulls />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Submarket pricing table */}
+            {smStats.length > 0 && (
+              <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+                <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:12 }}>Submarket Pricing</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 60px 60px 60px", gap:8, padding:"0 0 6px", borderBottom:`1px solid ${DS.border}` }}>
+                    {["Submarket","Comps","Sale/SF","Lease"].map(h=><div key={h} style={{ color:DS.textMute, fontSize:9, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.5px" }}>{h}</div>)}
+                  </div>
+                  {smStats.map((r,i) => (
+                    <div key={r.sm} style={{ display:"grid", gridTemplateColumns:"1fr 60px 60px 60px", gap:8, padding:"7px 0", borderBottom: i < smStats.length-1 ? `1px solid ${DS.border}` : "none", alignItems:"center" }}>
+                      <div style={{ color:DS.text, fontSize:DS.fs.sm, fontWeight:DS.fw.semi, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.sm}</div>
+                      <div style={{ color:DS.textSub, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{r.count}</div>
+                      <div style={{ color:r.avgSale ? DS.green : DS.textFaint, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{r.avgSale ? "$"+r.avgSale : "—"}</div>
+                      <div style={{ color:r.avgLease ? DS.blue : DS.textFaint, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{r.avgLease ? "$"+parseFloat(r.avgLease).toFixed(3) : "—"}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Filters */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property, buyer, seller, broker..." style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"7px 11px", fontSize:12, outline:"none", flex:1, minWidth:200 }}/>
-        <select value={filterSm} onChange={e=>setFilterSm(e.target.value)} style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property, buyer, seller, broker..." style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"7px 11px", fontSize:12, outline:"none", flex:1, minWidth:200 }}/>
+        <select value={filterSm} onChange={e=>setFilterSm(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
           <option value="All">All Submarkets</option>
           {submarketList.map(s=><option key={s}>{s}</option>)}
         </select>
-        <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
+        <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
           <option value="All">Sales + Leases</option>
           <option value="Sale">Sales Only</option>
           <option value="Lease">Leases Only</option>
@@ -1029,62 +2161,109 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
       </div>
 
       {/* Table */}
-      <div style={{ background:"#162032", borderRadius:12, border:"1px solid #1e3048", overflowX:"auto" }}>
+      <div style={{ background:DS.panel, borderRadius:DS.r.lg, border:`1px solid ${DS.border}`, overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", minWidth:900 }}>
           <thead>
-            <tr style={{ borderBottom:"2px solid #1e3048" }}>
-              {["Property","Submarket","Type","Sq Ft","Price / Rent","$/SF","Close Date","Seller/LL","Buyer/Tenant","Listing Broker","Tenant Broker","Source",""].map(h=>(
-                <th key={h} style={{ color:"#64748b", fontSize:10, fontWeight:700, textAlign:"left", padding:"9px 10px", whiteSpace:"nowrap" }}>{h}</th>
+            <tr style={{ borderBottom:`1px solid ${DS.border}`, background:"rgba(7,14,26,0.6)" }}>
+              {["Property","Submarket","Type","Sq Ft","Price / Rent","$/SF","Close Date","Seller/LL","Buyer/Tenant","Listing Broker","Tenant Broker","Src",""].map(h=>(
+                <th key={h} style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textAlign:"left", padding:"10px 12px", whiteSpace:"nowrap", letterSpacing:"0.6px", textTransform:"uppercase" }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.map(c=>(
-              <tr key={c.id} style={{ borderBottom:"1px solid #1e3048" }}
-                onMouseEnter={e=>e.currentTarget.style.background="#1a2d42"}
-                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <td style={{ padding:"10px", color:"#f1f5f9", fontWeight:600, fontSize:12, maxWidth:160 }}>
-                  <div>{c.name||"—"}</div>
-                  {c.address && <div style={{ color:"#475569", fontSize:10 }}>{c.address}</div>}
-                  {c.verified && <span style={{ background:"#0f2010", color:"#4ade80", border:"1px solid #14532d", padding:"1px 6px", borderRadius:20, fontSize:9, fontWeight:700 }}>✓ verified</span>}
-                </td>
-                <td style={{ padding:"10px", color:"#94a3b8", fontSize:11 }}>{c.submarket||"—"}</td>
-                <td style={{ padding:"10px" }}>
-                  <span style={{ background: c.compType==="Sale" ? "#1e3a5f":"#1a2a1a", color: c.compType==="Sale" ? "#60a5fa":"#4ade80", padding:"2px 8px", borderRadius:10, fontSize:10, fontWeight:700 }}>{c.compType}</span>
-                  <div style={{ color:"#334155", fontSize:9, marginTop:2 }}>{c.subtype}</div>
-                </td>
-                <td style={{ padding:"10px", color:"#cbd5e1", fontSize:12 }}>{c.sqft ? c.sqft.toLocaleString() : "—"}</td>
-                <td style={{ padding:"10px", color:"#f59e0b", fontWeight:700, fontSize:12 }}>
-                  {c.compType==="Sale" ? (c.salePrice > 0 ? fmt(c.salePrice) : "—") : (c.monthlyRent > 0 ? fmt(c.monthlyRent)+"/mo" : "—")}
-                  {c.compType==="Lease" && c.leaseTerm > 0 && <div style={{ color:"#475569", fontSize:9 }}>{c.leaseTerm}mo term</div>}
-                </td>
-                <td style={{ padding:"10px", color:"#34d399", fontWeight:700, fontSize:12 }}>
-                  {c.compType==="Sale" ? (c.psfSale > 0 ? "$"+parseFloat(c.psfSale).toFixed(2)+"/SF" : "—") : (c.psfLease > 0 ? "$"+parseFloat(c.psfLease).toFixed(3)+"/SF/mo" : "—")}
-                </td>
-                <td style={{ padding:"10px", color:"#64748b", fontSize:11 }}>{c.closeDate ? new Date(c.closeDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—"}</td>
-                <td style={{ padding:"10px", color:"#94a3b8", fontSize:11 }}>{c.seller||"—"}</td>
-                <td style={{ padding:"10px", color:"#94a3b8", fontSize:11 }}>{c.buyer||"—"}</td>
-                <td style={{ padding:"10px", color:"#60a5fa", fontSize:11 }}>{c.listingBroker||"—"}</td>
-                <td style={{ padding:"10px", color:"#8b5cf6", fontSize:11 }}>{c.tenantBroker||"—"}</td>
-                <td style={{ padding:"10px", color:"#475569", fontSize:10 }}>{c.source||"—"}</td>
-                <td style={{ padding:"10px" }}>
-                  <div style={{ display:"flex", gap:4 }}>
-                    <button onClick={()=>setModal(c)} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}>✏️</button>
-                    <button onClick={()=>{ if(window.confirm("Delete comp?")) setComps(prev=>prev.filter(x=>x.id!==c.id)); }} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}>🗑️</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {filtered.map(c=>{
+              const hasNotes = c.notes && c.notes.trim().length > 0;
+              const isExpanded = expandedComp === c.id;
+              return (
+                <React.Fragment key={c.id}>
+                  <tr
+                    style={{ borderBottom: isExpanded ? "none" : `1px solid ${DS.border}`, cursor:"pointer", transition:"background 0.1s" }}
+                    onClick={()=>setExpandedComp(isExpanded ? null : c.id)}
+                    onMouseEnter={e=>e.currentTarget.style.background=DS.panelHi}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <td style={{ padding:"11px 12px", color:DS.text, fontWeight:DS.fw.semi, fontSize:DS.fs.md, maxWidth:180 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                        <div>
+                          <div>{c.name||"—"}</div>
+                          {c.address && <div style={{ color:DS.textMute, fontSize:10, marginTop:1 }}>{c.address}</div>}
+                          {c.verified && <span style={{ background:DS.greenSoft, color:DS.green, border:`1px solid ${DS.green}33`, padding:"1px 7px", borderRadius:DS.r.full, fontSize:9, fontWeight:DS.fw.bold, display:"inline-block", marginTop:3 }}>verified</span>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding:"11px 12px", color:DS.textSub, fontSize:DS.fs.sm }}>{c.submarket||"—"}</td>
+                    <td style={{ padding:"11px 12px" }}>
+                      <span style={{ background: c.compType==="Sale" ? DS.blueSoft : DS.greenSoft, color: c.compType==="Sale" ? DS.blue : DS.green, padding:"2px 9px", borderRadius:DS.r.full, fontSize:10, fontWeight:DS.fw.bold }}>{c.compType}</span>
+                      {c.subtype && <div style={{ color:DS.textFaint, fontSize:9, marginTop:3 }}>{c.subtype}</div>}
+                    </td>
+                    <td style={{ padding:"11px 12px", color:DS.text, fontSize:DS.fs.md, fontFamily:"'DM Mono', monospace" }}>{c.sqft ? c.sqft.toLocaleString() : "—"}</td>
+                    <td style={{ padding:"11px 12px", color:DS.accent, fontWeight:DS.fw.bold, fontSize:DS.fs.md, fontFamily:"'DM Mono', monospace" }}>
+                      {c.compType==="Sale" ? (c.salePrice > 0 ? fmt(c.salePrice) : "—") : (c.monthlyRent > 0 ? fmt(c.monthlyRent)+"/mo" : "—")}
+                      {c.compType==="Lease" && c.leaseTerm > 0 && <div style={{ color:DS.textMute, fontSize:9, fontFamily:"sans-serif" }}>{c.leaseTerm}mo term</div>}
+                    </td>
+                    <td style={{ padding:"11px 12px", color:DS.green, fontWeight:DS.fw.bold, fontSize:DS.fs.md, fontFamily:"'DM Mono', monospace" }}>
+                      {c.compType==="Sale" ? (c.psfSale > 0 ? "$"+parseFloat(c.psfSale).toFixed(2)+"/SF" : "—") : (c.psfLease > 0 ? "$"+parseFloat(c.psfLease).toFixed(3)+"/SF/mo" : "—")}
+                    </td>
+                    <td style={{ padding:"11px 12px", color:DS.textSub, fontSize:DS.fs.sm }}>{c.closeDate ? new Date(c.closeDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "—"}</td>
+                    <td style={{ padding:"11px 12px", color:DS.textSub, fontSize:DS.fs.sm, maxWidth:120 }}><div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.seller||"—"}</div></td>
+                    <td style={{ padding:"11px 12px", color:DS.textSub, fontSize:DS.fs.sm, maxWidth:120 }}><div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.buyer||"—"}</div></td>
+                    <td style={{ padding:"11px 12px", color:DS.blue, fontSize:DS.fs.sm, maxWidth:130 }}><div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.listingBroker||"—"}</div></td>
+                    <td style={{ padding:"11px 12px", color:DS.purple, fontSize:DS.fs.sm, maxWidth:130 }}><div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.tenantBroker||"—"}</div></td>
+                    <td style={{ padding:"11px 12px", color:DS.textFaint, fontSize:10 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                        {c.source||"—"}
+                        {hasNotes && <span style={{ width:6, height:6, borderRadius:"50%", background:DS.accent, display:"inline-block", flexShrink:0 }} title="Has notes" />}
+                      </div>
+                    </td>
+                    <td style={{ padding:"11px 12px" }}>
+                      <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                        <button onClick={e=>{e.stopPropagation();setModal(c);}} style={{ background:DS.panelHi, border:`1px solid ${DS.border}`, color:DS.textSub, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm, fontWeight:DS.fw.semi }}>Edit</button>
+                        <button onClick={e=>{e.stopPropagation();if(window.confirm("Delete comp?")) setComps(prev=>prev.filter(x=>x.id!==c.id));}} style={{ background:"none", border:`1px solid ${DS.red}33`, color:DS.red, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm }}>Del</button>
+                      </div>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr style={{ borderBottom:`1px solid ${DS.border}` }}>
+                      <td colSpan={13} style={{ padding:"0 12px 14px 12px", background:DS.panelHi }}>
+                        <div style={{ display:"flex", gap:24, flexWrap:"wrap", paddingTop:12 }}>
+                          {hasNotes && (
+                            <div style={{ flex:2, minWidth:280 }}>
+                              <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:6 }}>Notes</div>
+                              <div style={{ color:DS.text, fontSize:DS.fs.md, lineHeight:1.7, background:DS.bg, borderRadius:DS.r.sm, padding:"10px 14px", border:`1px solid ${DS.border}`, whiteSpace:"pre-wrap" }}>{c.notes}</div>
+                            </div>
+                          )}
+                          <div style={{ flex:1, minWidth:200 }}>
+                            <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.7px", marginBottom:6 }}>Deal Summary</div>
+                            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 16px", fontSize:DS.fs.sm }}>
+                              {c.seller && <div><span style={{ color:DS.textMute }}>Seller/LL: </span><span style={{ color:DS.text }}>{c.seller}</span></div>}
+                              {c.buyer && <div><span style={{ color:DS.textMute }}>Buyer/Tenant: </span><span style={{ color:DS.text }}>{c.buyer}</span></div>}
+                              {c.listingBroker && <div><span style={{ color:DS.textMute }}>Listing: </span><span style={{ color:DS.blue }}>{c.listingBroker}</span></div>}
+                              {c.tenantBroker && <div><span style={{ color:DS.textMute }}>Tenant: </span><span style={{ color:DS.purple }}>{c.tenantBroker}</span></div>}
+                              {c.sqft && <div><span style={{ color:DS.textMute }}>Size: </span><span style={{ color:DS.text, fontFamily:"'DM Mono', monospace" }}>{parseInt(c.sqft).toLocaleString()} SF</span></div>}
+                              {c.closeDate && <div><span style={{ color:DS.textMute }}>Closed: </span><span style={{ color:DS.text }}>{new Date(c.closeDate+"T00:00:00").toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</span></div>}
+                            </div>
+                          </div>
+                          {!hasNotes && (
+                            <div style={{ flex:2, minWidth:200, display:"flex", alignItems:"center" }}>
+                              <button onClick={e=>{e.stopPropagation();setModal(c);}} style={{ background:"none", border:`1px dashed ${DS.border}`, color:DS.textMute, padding:"8px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>+ Add notes to this comp</button>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </tbody>
           {filtered.length > 0 && <tfoot>
-            <tr style={{ borderTop:"2px solid #1e3048", background:"#0f1e2e" }}>
-              <td colSpan={3} style={{ padding:"10px", color:"#475569", fontSize:11 }}>{filtered.length} comp{filtered.length!==1?"s":""}</td>
-              <td style={{ padding:"10px", color:"#f1f5f9", fontWeight:800, fontSize:11 }}>{totalSF.toLocaleString()} SF</td>
+            <tr style={{ borderTop:`1px solid ${DS.border}`, background:"rgba(7,14,26,0.4)" }}>
+              <td colSpan={3} style={{ padding:"10px 12px", color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.5px" }}>{filtered.length} comp{filtered.length!==1?"s":""}</td>
+              <td style={{ padding:"10px 12px", color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{totalSF.toLocaleString()} SF</td>
               <td colSpan={9}/>
             </tr>
           </tfoot>}
         </table>
-        {filtered.length === 0 && <div style={{ color:"#475569", fontSize:13, textAlign:"center", padding:"40px 0" }}>No comps yet. Start adding market transactions you see in CoStar, LoopNet, or from other brokers.</div>}
+        {filtered.length === 0 && <div style={{ color:DS.textMute, fontSize:DS.fs.lg, textAlign:"center", padding:"48px 0" }}>No comps yet. Add market transactions from CoStar, LoopNet, or broker intel.</div>}
       </div>
       {modal && <CompModal comp={modal==="new"?null:modal}/>}
     </div>
@@ -1132,22 +2311,22 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
           <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 16 }}>Submarket Intelligence</div>
           <div style={{ color: "#475569", fontSize: 11 }}>Your deal history, listings, and market comp data by geography</div>
         </div>
-        <button onClick={()=>setEditMode(e=>!e)} style={{ background: editMode?"#1e3048":"#162032", border:"1px solid #1e3048", color: editMode?"#f59e0b":"#64748b", padding:"6px 13px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight: editMode?700:400 }}>⚙️ Edit Submarkets</button>
+        <button onClick={()=>setEditMode(e=>!e)} style={{ background: editMode?"#1e3048":DS.panel, border:`1px solid ${DS.border}`, color: editMode?"#f59e0b":"#64748b", padding:"6px 13px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight: editMode?700:400 }}>Edit Submarkets</button>
       </div>
 
       {/* Submarket editor */}
       {editMode && (
-        <div style={{ background:"#162032", border:"1px solid #f59e0b", borderRadius:12, padding:"14px 18px" }}>
+        <div style={{ background:DS.panel, border:"1px solid #f59e0b", borderRadius:12, padding:"14px 18px" }}>
           <div style={{ color:"#f59e0b", fontWeight:700, fontSize:12, marginBottom:10 }}>Manage Your Submarkets</div>
           <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-            <input value={newSm} onChange={e=>setNewSm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSubmarket()} placeholder="Add new submarket name..." style={{ flex:1, background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none" }}/>
+            <input value={newSm} onChange={e=>setNewSm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSubmarket()} placeholder="Add new submarket name..." style={{ flex:1, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none" }}/>
             <button onClick={addSubmarket} style={{ background:"#f59e0b", border:"none", color:"#0d1826", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>+ Add</button>
           </div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
             {submarketList.map(sm => (
-              <div key={sm} style={{ display:"flex", alignItems:"center", gap:4, background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:20, padding:"4px 10px" }}>
+              <div key={sm} style={{ display:"flex", alignItems:"center", gap:4, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:20, padding:"4px 10px" }}>
                 <span style={{ color:"#f1f5f9", fontSize:12 }}>{sm}</span>
-                <button onClick={()=>{ if(window.confirm(`Remove "${sm}"? This won't delete deals or listings assigned to it.`)) setSubmarketList(prev=>prev.filter(s=>s!==sm)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:11, padding:0, lineHeight:1 }}>✕</button>
+                <button onClick={()=>{ if(window.confirm(`Remove "${sm}"? This won't delete deals or listings assigned to it.`)) setSubmarketList(prev=>prev.filter(s=>s!==sm)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:11, padding:0, lineHeight:1 }}></button>
               </div>
             ))}
           </div>
@@ -1157,7 +2336,7 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
       {rows.length === 0 && <div style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: "40px 0" }}>No submarket data yet. Assign submarkets to your deals and listings.</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {rows.sort((a,b) => (b.smDeals.length + b.smComps.length) - (a.smDeals.length + a.smComps.length)).map(r => (
-          <div key={r.sm} style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 12, padding: "16px 18px" }}>
+          <div key={r.sm} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "16px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
                 <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 15 }}>{r.sm}</div>
@@ -1180,7 +2359,7 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
                 ...(r.mktAvgLease ? [{ label: "Mkt Avg $/SF/mo", value: "$"+r.mktAvgLease.toFixed(3), color: "#a78bfa" }] : []),
                 ...(r.activeSF > 0 ? [{ label: "Available SF", value: r.activeSF.toLocaleString()+" SF", color: "#f97316" }] : []),
               ].map(s => (
-                <div key={s.label} style={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, padding: "10px 14px", minWidth: 110 }}>
+                <div key={s.label} style={{ background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, padding: "10px 14px", minWidth: 110 }}>
                   <div style={{ color: s.color, fontWeight: 800, fontSize: 15 }}>{s.value}</div>
                   <div style={{ color: "#475569", fontSize: 10, fontWeight: 600 }}>{s.label}</div>
                 </div>
@@ -1191,7 +2370,7 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
                 <div style={{ color:"#334155", fontSize:10, fontWeight:700, marginBottom:6 }}>RECENT COMPS</div>
                 <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                   {r.smComps.slice(0,4).map(c=>(
-                    <div key={c.id} style={{ background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:7, padding:"6px 10px" }}>
+                    <div key={c.id} style={{ background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:7, padding:"6px 10px" }}>
                       <div style={{ color:"#94a3b8", fontSize:11, fontWeight:600 }}>{c.name||c.address||"—"}</div>
                       <div style={{ color:"#475569", fontSize:9 }}>
                         {c.compType} · {c.sqft?c.sqft.toLocaleString()+" SF":""} · {c.compType==="Sale"&&c.psfSale>0?"$"+parseFloat(c.psfSale).toFixed(2)+"/SF":c.compType==="Lease"&&c.psfLease>0?"$"+parseFloat(c.psfLease).toFixed(3)+"/SF/mo":""}
@@ -1206,7 +2385,7 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
                 <div style={{ color: "#334155", fontSize: 10, fontWeight: 700, marginBottom: 6 }}>YOUR DEALS</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   {r.smDeals.slice(0,5).map(d => (
-                    <div key={d.id} style={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 7, padding: "5px 10px" }}>
+                    <div key={d.id} style={{ background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 7, padding: "5px 10px" }}>
                       <div style={{ color: "#94a3b8", fontSize: 11 }}>{d.name}</div>
                       <div style={{ color: "#475569", fontSize: 9 }}>{d.stage} · {d.dealType} · {d.sqft ? d.sqft.toLocaleString() + " SF" : "—"}</div>
                     </div>
@@ -1223,9 +2402,422 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
 
 // ── MAIN APP ────────────────────────────────────────────────
 // ── Contacts Tab ──────────────────────────────────────────────
+// ── Closed Deal Follow-Up Modal ───────────────────────────────
+function ClosedFollowUpModal({ deal, contacts, onAddTask, onUpdateContact, onClose }) {
+  const matchedContact = contacts.find(c =>
+    c.name?.toLowerCase() === deal.client?.toLowerCase() ||
+    c.company?.toLowerCase() === deal.client?.toLowerCase()
+  );
+  const isSale = deal.dealType === "Sale";
+  const isLease = deal.dealType === "Lease";
+  const leaseTerm = parseInt(deal.leaseTerm) || 0;
+
+  // Auto-suggest future follow-up date
+  const suggestDate = (() => {
+    const d = new Date();
+    if (isLease && leaseTerm > 0) {
+      // Suggest follow-up at 80% of lease term
+      const renewalWindowMonths = Math.max(6, Math.round(leaseTerm * 0.8));
+      d.setMonth(d.getMonth() + renewalWindowMonths);
+    } else if (isSale) {
+      d.setFullYear(d.getFullYear() + 3); // buyers/sellers often transact again in ~3 years
+    } else {
+      d.setFullYear(d.getFullYear() + 1);
+    }
+    return d.toISOString().split("T")[0];
+  })();
+
+  const [followUpDate, setFollowUpDate] = useState(suggestDate);
+  const [followUpNote, setFollowUpNote] = useState(
+    isLease && leaseTerm > 0
+      ? `Lease renewal outreach — ${deal.client} at ${deal.name}`
+      : `Post-close follow-up — ${deal.client}`
+  );
+  const [createTask, setCreateTask] = useState(true);
+  const [upgradeContact, setUpgradeContact] = useState(!!matchedContact && matchedContact.relationshipLevel !== "Key Relationship");
+  const [newRelLevel, setNewRelLevel] = useState("Active");
+
+  const handleSave = () => {
+    if (createTask && followUpDate) {
+      onAddTask({
+        id: Date.now(), title: followUpNote, category: "Prospecting", priority: "Medium",
+        dueDate: followUpDate, done: false, notes: `Auto-created from deal close: ${deal.name}`, linkedDealId: deal.id,
+        recurrence: "None"
+      });
+    }
+    if (upgradeContact && matchedContact) {
+      onUpdateContact({ ...matchedContact, relationshipLevel: newRelLevel, lastContact: today });
+    }
+    toast("Follow-up scheduled");
+    onClose();
+  };
+
+  const iStyle = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "8px 11px", fontSize: DS.fs.md, outline: "none", width: "100%", boxSizing: "border-box" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,8,18,0.92)", backdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1300 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.green}44`, borderRadius: DS.r.xl, width: 520, boxShadow: `${DS.shadow.xl}, 0 0 40px ${DS.green}15` }}>
+
+        {/* Header — celebration */}
+        <div style={{ background: `linear-gradient(135deg, ${DS.green}18, ${DS.green}08)`, borderBottom: `1px solid ${DS.green}33`, padding: "22px 28px 18px", borderRadius: `${DS.r.xl}px ${DS.r.xl}px 0 0` }}>
+          <div style={{ color: DS.green, fontSize: DS.fs.h1, fontWeight: DS.fw.black, letterSpacing: "-0.5px" }}>Deal Closed!</div>
+          <div style={{ color: DS.text, fontSize: DS.fs.lg, fontWeight: DS.fw.semi, marginTop: 4 }}>{deal.name}</div>
+          <div style={{ display: "flex", gap: 14, marginTop: 10, flexWrap: "wrap" }}>
+            <div><span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Client: </span><span style={{ color: DS.text, fontWeight: DS.fw.bold }}>{deal.client || "—"}</span></div>
+            <div><span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Net Commission: </span><span style={{ color: DS.green, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace" }}>{fmt(calcDeal(deal).netCommission)}</span></div>
+            {isLease && leaseTerm > 0 && <div><span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Lease Term: </span><span style={{ color: DS.accent, fontWeight: DS.fw.bold }}>{leaseTerm}mo</span></div>}
+          </div>
+        </div>
+
+        <div style={{ padding: "20px 28px", display: "flex", flexDirection: "column", gap: 18 }}>
+
+          {/* Future follow-up task */}
+          <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <input type="checkbox" id="createTask" checked={createTask} onChange={e => setCreateTask(e.target.checked)}
+                style={{ width: 16, height: 16, accentColor: DS.green, cursor: "pointer" }} />
+              <label htmlFor="createTask" style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.bold, cursor: "pointer" }}>
+                Schedule future follow-up task
+              </label>
+            </div>
+            {createTask && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 4 }}>Follow-up note</div>
+                  <input value={followUpNote} onChange={e => setFollowUpNote(e.target.value)} style={iStyle} />
+                </div>
+                <div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 4 }}>
+                    Date {isLease && leaseTerm > 0 ? `(suggested: ${Math.round(leaseTerm * 0.8)}mo out — renewal window)` : isSale ? "(suggested: 3 years — client may transact again)" : ""}
+                  </div>
+                  <input type="date" value={followUpDate} onChange={e => setFollowUpDate(e.target.value)} style={iStyle} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Contact upgrade */}
+          {matchedContact && (
+            <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "14px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: upgradeContact ? 12 : 0 }}>
+                <input type="checkbox" id="upgradeContact" checked={upgradeContact} onChange={e => setUpgradeContact(e.target.checked)}
+                  style={{ width: 16, height: 16, accentColor: DS.accent, cursor: "pointer" }} />
+                <label htmlFor="upgradeContact" style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.bold, cursor: "pointer" }}>
+                  Update {matchedContact.name}'s relationship level
+                </label>
+              </div>
+              {upgradeContact && (
+                <div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 6 }}>
+                    Currently: <span style={{ color: DS.accent }}>{matchedContact.relationshipLevel}</span> → set to:
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {["Warm", "Active", "Key Relationship"].map(lvl => (
+                      <button key={lvl} onClick={() => setNewRelLevel(lvl)} style={{ flex: 1, padding: "6px 0", borderRadius: DS.r.sm, border: `1px solid ${newRelLevel === lvl ? DS.accent : DS.border}`, background: newRelLevel === lvl ? DS.accentSoft : DS.surface, color: newRelLevel === lvl ? DS.accent : DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, cursor: "pointer" }}>
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "9px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Skip</button>
+            <button onClick={handleSave} style={{ background: DS.green, border: "none", color: "#0a0f1a", padding: "9px 24px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>
+              {createTask ? "Schedule & Done" : "Done"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Contact Activity Log Modal ─────────────────────────────────
+function ContactActivityModal({ contact, onSave, onClose }) {
+  const [log, setLog] = useState(contact.activityLog || []);
+  const [type, setType] = useState("Call");
+  const [note, setNote] = useState("");
+  const [date, setDate] = useState(today);
+  const [outcome, setOutcome] = useState("");
+  const actTypes = ["Call", "Email", "Meeting", "Text", "Showing", "Proposal Sent", "Other"];
+  const outcomeOpts = ["Left voicemail", "Spoke — follow up needed", "Spoke — no action", "Meeting set", "Deal progressed", "Not interested", "No answer"];
+
+  const addEntry = () => {
+    if (!note.trim()) return;
+    const entry = { id: Date.now(), type, note: note.trim(), date, outcome, addedAt: new Date().toISOString() };
+    const newLog = [entry, ...log];
+    setLog(newLog);
+    onSave({ ...contact, activityLog: newLog, lastContact: date });
+    setNote("");
+    setOutcome("");
+    setDate(today);
+  };
+
+  const typeColors = { "Call": DS.blue, "Email": DS.purple, "Meeting": DS.green, "Text": DS.accent, "Showing": "#f97316", "Proposal Sent": "#ec4899", "Other": DS.textMute };
+  const iStyle = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "7px 10px", fontSize: DS.fs.md, outline: "none", width: "100%", boxSizing: "border-box" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,8,18,0.88)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.xl, width: 560, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: DS.shadow.xl }}>
+
+        {/* Header */}
+        <div style={{ padding: "18px 24px 14px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Activity Log</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{contact.name} · {contact.company}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+
+        {/* Add new entry */}
+        <div style={{ padding: "14px 24px", borderBottom: `1px solid ${DS.border}`, flexShrink: 0, background: DS.panelHi }}>
+          <div style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 10 }}>Log New Activity</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 3 }}>Type</div>
+              <select value={type} onChange={e => setType(e.target.value)} style={iStyle}>
+                {actTypes.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 3 }}>Date</div>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} style={iStyle} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 3 }}>Notes *</div>
+            <textarea value={note} onChange={e => setNote(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) addEntry(); }}
+              placeholder="What happened? What was discussed? Any next steps?" rows={2}
+              style={{ ...iStyle, resize: "none", lineHeight: 1.5 }} />
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ flex: 1 }}>
+              <select value={outcome} onChange={e => setOutcome(e.target.value)} style={{ ...iStyle, color: outcome ? DS.text : DS.textFaint }}>
+                <option value="">Outcome (optional)</option>
+                {outcomeOpts.map(o => <option key={o}>{o}</option>)}
+              </select>
+            </div>
+            <button onClick={addEntry} style={{ background: DS.blue, border: "none", color: "#fff", padding: "8px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black, flexShrink: 0, whiteSpace: "nowrap" }}>
+              Log Activity
+            </button>
+          </div>
+          <div style={{ color: DS.textFaint, fontSize: 9, marginTop: 6 }}>⌘↵ to save</div>
+        </div>
+
+        {/* Activity history */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "14px 24px" }}>
+          {log.length === 0 ? (
+            <div style={{ color: DS.textFaint, fontSize: DS.fs.md, textAlign: "center", padding: "30px 0" }}>No activities logged yet — add your first above.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {log.map((e, i) => (
+                <div key={e.id} style={{ display: "flex", gap: 12, padding: "11px 0", borderBottom: i < log.length - 1 ? `1px solid ${DS.border}` : "none" }}>
+                  {/* Type dot + line */}
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0, width: 28, flexShrink: 0 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: (typeColors[e.type] || DS.textMute) + "22", border: `1px solid ${(typeColors[e.type] || DS.textMute)}44`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: typeColors[e.type] || DS.textMute }} />
+                    </div>
+                    {i < log.length - 1 && <div style={{ width: 1, flex: 1, background: DS.border, minHeight: 8, marginTop: 3 }} />}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                      <span style={{ background: (typeColors[e.type] || DS.textMute) + "22", color: typeColors[e.type] || DS.textMute, padding: "1px 8px", borderRadius: DS.r.full, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>{e.type}</span>
+                      <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{e.date ? new Date(e.date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</span>
+                      {e.outcome && <span style={{ color: DS.textMute, fontSize: DS.fs.xs, fontStyle: "italic" }}>{e.outcome}</span>}
+                    </div>
+                    <div style={{ color: DS.text, fontSize: DS.fs.md, lineHeight: 1.6 }}>{e.note}</div>
+                    <button onClick={() => { const nl = log.filter(x => x.id !== e.id); setLog(nl); onSave({ ...contact, activityLog: nl }); }}
+                      style={{ background: "none", border: "none", color: DS.textFaint, fontSize: DS.fs.xs, cursor: "pointer", marginTop: 2, padding: 0 }}>
+                      remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding: "12px 24px", borderTop: `1px solid ${DS.border}`, display: "flex", justifyContent: "flex-end", flexShrink: 0 }}>
+          <button onClick={onClose} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 24px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Pre-Meeting Contact Brief Modal ───────────────────────────
+function ContactBriefModal({ contact, deals, onClose }) {
+  const linkedDeals = deals.filter(d =>
+    d.client?.toLowerCase().includes(contact.name?.toLowerCase()) ||
+    d.counterparty?.toLowerCase().includes(contact.name?.toLowerCase()) ||
+    (contact.linkedDeals||[]).includes(d.id)
+  );
+  const daysSince = contact.lastContact
+    ? Math.floor((new Date() - new Date(contact.lastContact+"T00:00:00")) / 86400000)
+    : null;
+  const relColors = { "Cold":"#475569","Warm":DS.accent,"Active":DS.green,"Key Relationship":"#ec4899" };
+  const relColor = relColors[contact.relationshipLevel] || DS.textMute;
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(3,8,18,0.92)", backdropFilter:"blur(12px)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1200 }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.xl, width:560, maxHeight:"90vh", overflowY:"auto", boxShadow:DS.shadow.xl }}>
+
+        {/* Header */}
+        <div style={{ background:`linear-gradient(135deg, ${DS.panelHi}, ${DS.panel})`, padding:"24px 28px 20px", borderBottom:`1px solid ${DS.border}`, position:"relative" }}>
+          <button onClick={onClose} style={{ position:"absolute", top:16, right:20, background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}>×</button>
+          <div style={{ display:"flex", alignItems:"flex-start", gap:16 }}>
+            <div style={{ width:52, height:52, borderRadius:"50%", background:`linear-gradient(135deg, ${relColor}33, ${relColor}11)`, border:`2px solid ${relColor}55`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, fontWeight:DS.fw.black, color:relColor, flexShrink:0 }}>
+              {(contact.name||"?")[0].toUpperCase()}
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ color:DS.text, fontSize:DS.fs.h2, fontWeight:DS.fw.black, letterSpacing:"-0.3px" }}>{contact.name}</div>
+              <div style={{ color:DS.textSub, fontSize:DS.fs.md, marginTop:2 }}>{contact.company}</div>
+              <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+                <span style={{ background:relColor+"22", color:relColor, border:`1px solid ${relColor}44`, padding:"2px 10px", borderRadius:DS.r.full, fontSize:DS.fs.xs, fontWeight:DS.fw.bold }}>{contact.relationshipLevel}</span>
+                <span style={{ background:DS.panelHi, color:DS.textSub, padding:"2px 10px", borderRadius:DS.r.full, fontSize:DS.fs.xs }}>{contact.type}</span>
+                {contact.submarket && <span style={{ background:DS.panelHi, color:DS.textSub, padding:"2px 10px", borderRadius:DS.r.full, fontSize:DS.fs.xs }}>{contact.submarket}</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding:"20px 28px", display:"flex", flexDirection:"column", gap:20 }}>
+
+          {/* Contact info */}
+          <div>
+            <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.8px", marginBottom:10 }}>Contact Info</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {contact.phone && (
+                <a href={`tel:${contact.phone}`} style={{ display:"flex", alignItems:"center", gap:8, background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, padding:"8px 12px", textDecoration:"none" }}>
+                  <span style={{ color:DS.blue, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, minWidth:32 }}>CALL</span>
+                  <span style={{ color:DS.text, fontSize:DS.fs.sm }}>{contact.phone}</span>
+                </a>
+              )}
+              {contact.email && (
+                <a href={`mailto:${contact.email}`} style={{ display:"flex", alignItems:"center", gap:8, background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, padding:"8px 12px", textDecoration:"none" }}>
+                  <span style={{ color:DS.purple, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, minWidth:32 }}>EMAIL</span>
+                  <span style={{ color:DS.text, fontSize:DS.fs.sm, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{contact.email}</span>
+                </a>
+              )}
+            </div>
+          </div>
+
+          {/* Last contact + relationship intel */}
+          <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, padding:"14px 16px" }}>
+            <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.8px", marginBottom:10 }}>Relationship Intel</div>
+            <div style={{ display:"flex", gap:20, flexWrap:"wrap", marginBottom: contact.properties ? 12 : 0 }}>
+              <div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs }}>Last Contact</div>
+                <div style={{ color: daysSince !== null && daysSince > 60 ? DS.red : daysSince !== null && daysSince > 30 ? DS.accent : DS.green, fontWeight:DS.fw.bold, fontSize:DS.fs.md, marginTop:2 }}>
+                  {daysSince === null ? "Never recorded" : daysSince === 0 ? "Today" : `${daysSince} days ago`}
+                </div>
+              </div>
+              <div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs }}>Deals Together</div>
+                <div style={{ color:DS.text, fontWeight:DS.fw.bold, fontSize:DS.fs.md, marginTop:2 }}>{linkedDeals.length}</div>
+              </div>
+              <div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs }}>Relationship</div>
+                <div style={{ color:relColor, fontWeight:DS.fw.bold, fontSize:DS.fs.md, marginTop:2 }}>{contact.relationshipLevel}</div>
+              </div>
+            </div>
+            {contact.properties && (
+              <div style={{ marginTop:10, paddingTop:10, borderTop:`1px solid ${DS.border}` }}>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginBottom:4 }}>Properties / Holdings</div>
+                <div style={{ color:DS.textSub, fontSize:DS.fs.sm, lineHeight:1.6 }}>{contact.properties}</div>
+              </div>
+            )}
+          </div>
+
+          {/* Notes */}
+          {contact.notes && (
+            <div>
+              <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.8px", marginBottom:8 }}>Notes</div>
+              <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, padding:"12px 16px", color:DS.text, fontSize:DS.fs.md, lineHeight:1.7, whiteSpace:"pre-wrap" }}>{contact.notes}</div>
+            </div>
+          )}
+
+          {/* Active deals */}
+          {linkedDeals.length > 0 && (
+            <div>
+              <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.8px", marginBottom:8 }}>Active Deals</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {linkedDeals.map(d => {
+                  const c = calcDeal(d);
+                  return (
+                    <div key={d.id} style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, padding:"10px 14px", display:"flex", alignItems:"center", gap:12 }}>
+                      <StageBadge stage={d.stage} />
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ color:DS.text, fontSize:DS.fs.sm, fontWeight:DS.fw.semi, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{d.name}</div>
+                        <div style={{ color:DS.textMute, fontSize:10, marginTop:1 }}>{d.dealType} · {d.submarket}</div>
+                      </div>
+                      <div style={{ color:DS.accent, fontWeight:DS.fw.bold, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace", flexShrink:0 }}>{fmt(c.netCommission)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Talking points */}
+          {/* Activity history in brief */}
+          {(contact.activityLog||[]).length > 0 && (
+            <div>
+              <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.8px", marginBottom:8 }}>Recent Activity</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
+                {(contact.activityLog||[]).slice(0,4).map((e,i,arr) => {
+                  const typeColors = { "Call":DS.blue,"Email":DS.purple,"Meeting":DS.green,"Text":DS.accent,"Showing":"#f97316","Proposal Sent":"#ec4899","Other":DS.textMute };
+                  return (
+                    <div key={e.id} style={{ display:"flex", gap:10, padding:"9px 0", borderBottom: i<arr.length-1 ? `1px solid ${DS.border}` : "none" }}>
+                      <span style={{ background:(typeColors[e.type]||DS.textMute)+"22", color:typeColors[e.type]||DS.textMute, padding:"2px 9px", borderRadius:DS.r.full, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, flexShrink:0, alignSelf:"flex-start", marginTop:1 }}>{e.type}</span>
+                      <div style={{ flex:1 }}>
+                        <div style={{ color:DS.text, fontSize:DS.fs.sm }}>{e.note}</div>
+                        {e.outcome && <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginTop:2, fontStyle:"italic" }}>{e.outcome}</div>}
+                      </div>
+                      <div style={{ color:DS.textFaint, fontSize:DS.fs.xs, flexShrink:0 }}>{e.date ? new Date(e.date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : ""}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div style={{ background:`linear-gradient(135deg, ${DS.accentSoft}, transparent)`, border:`1px solid ${DS.accent}33`, borderRadius:DS.r.md, padding:"14px 16px" }}>
+            <div style={{ color:DS.accent, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.8px", marginBottom:10 }}>Pre-Meeting Checklist</div>
+            {[
+              daysSince !== null && daysSince > 60 ? `Re-establish contact — ${daysSince} days since last touch` : null,
+              linkedDeals.length > 0 ? `Update on ${linkedDeals.filter(d=>d.stage!=="Closed"&&d.stage!=="Lost").length} active deal(s)` : null,
+              contact.properties ? "Ask about current property plans / capital needs" : null,
+              contact.relationshipLevel === "Warm" || contact.relationshipLevel === "Cold" ? "Opportunity to deepen relationship — find a reason to add value" : null,
+              "Review their market — any new listings or comps in their submarket?",
+            ].filter(Boolean).map((pt, i) => (
+              <div key={i} style={{ display:"flex", gap:8, marginBottom:6, alignItems:"flex-start" }}>
+                <div style={{ width:16, height:16, borderRadius:"50%", border:`1px solid ${DS.accent}55`, flexShrink:0, marginTop:1, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <div style={{ width:6, height:6, borderRadius:"50%", background:DS.accent }} />
+                </div>
+                <div style={{ color:DS.textSub, fontSize:DS.fs.sm, lineHeight:1.5 }}>{pt}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+            <button onClick={onClose} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Done</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ContactsTab({ contacts, setContacts, deals, submarketList }) {
   const smList = submarketList || DEFAULT_SUBMARKETS;
   const [modal, setModal] = useState(null);
+  const [briefContact, setBriefContact] = useState(null);
+  const [activityContact, setActivityContact] = useState(null);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("All");
   const [activeView, setActiveView] = useState("all");
@@ -1262,14 +2854,14 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
   function ContactModal({ contact }) {
     const [form, setForm] = useState(contact || { name:"", company:"", type:"Owner", phone:"", email:"", submarket:smList[0]||"Northeast", properties:"", relationshipLevel:"Warm", lastContact:today, notes:"" });
     const set = (k,v) => setForm(f=>({...f,[k]:v}));
-    const iStyle = { background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+    const iStyle = { background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
     const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
     return (
       <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:16, padding:26, width:580, maxHeight:"90vh", overflowY:"auto" }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:580, maxHeight:"90vh", overflowY:"auto" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
             <h2 style={{ color:"#f1f5f9", fontSize:17, fontWeight:800, margin:0 }}>{contact?.id?"Edit Contact":"New Contact"}</h2>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}>✕</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
             <div style={{ gridColumn:"span 2" }}>{lbl("Full Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} style={iStyle}/></div>
@@ -1284,7 +2876,7 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
             <div style={{ gridColumn:"span 2" }}>{lbl("Notes")}<textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={3} style={{...iStyle,resize:"vertical"}} placeholder="Background, relationship history, opportunities..."/></div>
           </div>
           <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"1px solid #1e3048", color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
             <button onClick={()=>saveContact(form)} style={{ background:"#ec4899", border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save Contact</button>
           </div>
         </div>
@@ -1304,15 +2896,15 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
         <button onClick={()=>setModal("new")} style={{ background:"#ec4899", border:"none", color:"#fff", padding:"7px 16px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:800 }}>+ Add Contact</button>
       </div>
       <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        <div style={{ display:"flex", background:"#0f1e2e", borderRadius:8, border:"1px solid #1e3048", padding:2 }}>
+        <div style={{ display:"flex", background:"#0f1e2e", borderRadius:8, border:`1px solid ${DS.border}`, padding:2 }}>
           <button onClick={()=>setActiveView("all")} style={{ background: activeView==="all"?"#1e3048":"none", border:"none", color: activeView==="all"?"#f1f5f9":"#64748b", padding:"5px 13px", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight: activeView==="all"?700:400 }}>All Contacts ({contacts.length})</button>
           <button onClick={()=>setActiveView("outreach")} style={{ background: activeView==="outreach"?"#4a1a3a":"none", border:"none", color: activeView==="outreach"?"#ec4899":"#64748b", padding:"5px 13px", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight: activeView==="outreach"?700:400 }}>
-            📞 Outreach Queue {outreachQueue.length > 0 && <span style={{ background:"#ec4899", color:"#fff", borderRadius:20, padding:"0px 5px", fontSize:9, fontWeight:800 }}>{outreachQueue.length}</span>}
+            Outreach Queue {outreachQueue.length > 0 && <span style={{ background:"#ec4899", color:"#fff", borderRadius:20, padding:"0px 5px", fontSize:9, fontWeight:800 }}>{outreachQueue.length}</span>}
           </button>
         </div>
         {activeView === "all" && <>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, company, email..." style={{ flex:1, minWidth:200, background:"#162032", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"7px 11px", fontSize:12, outline:"none" }}/>
-          <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, company, email..." style={{ flex:1, minWidth:200, background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"7px 11px", fontSize:12, outline:"none" }}/>
+          <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
             <option value="All">All Types</option>
             {CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}
           </select>
@@ -1323,15 +2915,15 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
       {activeView === "outreach" && (
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
           <div style={{ background:"#1a0a1a", border:"1px solid #4a1a3a", borderRadius:10, padding:"10px 14px", fontSize:11, color:"#ec4899" }}>
-            📞 These contacts are overdue for a touchpoint based on their relationship level. Key Relationships → 30 days · Active → 45 days · Warm → 60 days · Cold → 90 days.
+            These contacts are overdue for a touchpoint based on their relationship level. Key Relationships → 30 days · Active → 45 days · Warm → 60 days · Cold → 90 days.
           </div>
-          {outreachQueue.length === 0 && <div style={{ color:"#475569", fontSize:13, textAlign:"center", padding:"40px 0" }}>🎉 All contacts have been recently touched. You're on top of your relationships.</div>}
+          {outreachQueue.length === 0 && <div style={{ color:"#475569", fontSize:13, textAlign:"center", padding:"40px 0" }}> All contacts have been recently touched. You're on top of your relationships.</div>}
           {outreachQueue.map(c => {
             const ds = daysSince(c.lastContact);
             const threshold = outreachThresholds[c.relationshipLevel] || 90;
             const overBy = ds !== null ? ds - threshold : null;
             return (
-              <div key={c.id} style={{ background:"#162032", border:`1px solid ${relColors[c.relationshipLevel]||"#1e3048"}44`, borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"center", gap:14 }}>
+              <div key={c.id} style={{ background:DS.panel, border:`1px solid ${relColors[c.relationshipLevel]||"#1e3048"}44`, borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"center", gap:14 }}>
                 <div style={{ flex:1 }}>
                   <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
                     <span style={{ color:"#f1f5f9", fontWeight:700, fontSize:13 }}>{c.name}</span>
@@ -1344,9 +2936,9 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
                   <div style={{ color: overBy > 30 ? "#fca5a5" : "#f59e0b", fontWeight:800, fontSize:14 }}>{ds === null ? "Never" : `${ds}d ago`}</div>
                   <div style={{ color:"#475569", fontSize:9 }}>{overBy !== null && overBy > 0 ? `${overBy}d overdue` : "due now"}</div>
                   <div style={{ display:"flex", gap:5, marginTop:6, justifyContent:"flex-end" }}>
-                    {c.phone && <a href={`tel:${c.phone}`} style={{ background:"#1e3048", color:"#60a5fa", padding:"4px 9px", borderRadius:6, fontSize:10, textDecoration:"none" }}>📞 Call</a>}
-                    {c.email && <a href={`mailto:${c.email}`} style={{ background:"#1e3048", color:"#60a5fa", padding:"4px 9px", borderRadius:6, fontSize:10, textDecoration:"none" }}>✉️ Email</a>}
-                    <button onClick={()=>markContacted(c.id)} style={{ background:"#10b981", border:"none", color:"#fff", padding:"4px 9px", borderRadius:6, fontSize:10, cursor:"pointer", fontWeight:700 }}>✓ Mark Contacted</button>
+                    {c.phone && <a href={`tel:${c.phone}`} style={{ background:"#1e3048", color:"#60a5fa", padding:"4px 9px", borderRadius:6, fontSize:10, textDecoration:"none" }}>Call</a>}
+                    {c.email && <a href={`mailto:${c.email}`} style={{ background:"#1e3048", color:"#60a5fa", padding:"4px 9px", borderRadius:6, fontSize:10, textDecoration:"none" }}>Email</a>}
+                    <button onClick={()=>markContacted(c.id)} style={{ background:"#10b981", border:"none", color:"#fff", padding:"4px 9px", borderRadius:6, fontSize:10, cursor:"pointer", fontWeight:700 }}>Mark Contacted</button>
                   </div>
                 </div>
               </div>
@@ -1362,7 +2954,7 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
           const stale = ds !== null && ds > 30;
           const linkedD = deals.filter(d => (c.linkedDeals||[]).includes(d.id));
           return (
-            <div key={c.id} style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:12, padding:"16px 18px" }}>
+            <div key={c.id} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"16px 18px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
                 <div>
                   <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:14 }}>{c.name}</div>
@@ -1374,20 +2966,40 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
                 </div>
               </div>
               <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
-                {c.phone && <a href={`tel:${c.phone}`} style={{ color:"#60a5fa", fontSize:11, textDecoration:"none" }}>📞 {c.phone}</a>}
-                {c.email && <a href={`mailto:${c.email}`} style={{ color:"#60a5fa", fontSize:11, textDecoration:"none" }}>✉️ {c.email}</a>}
+                {c.phone && <a href={`tel:${c.phone}`} style={{ color:"#60a5fa", fontSize:11, textDecoration:"none" }}>{c.phone}</a>}
+                {c.email && <a href={`mailto:${c.email}`} style={{ color:"#60a5fa", fontSize:11, textDecoration:"none" }}> {c.email}</a>}
               </div>
               <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
                 {c.submarket && <span style={{ background:"#1e3048", color:"#94a3b8", padding:"2px 8px", borderRadius:20, fontSize:10 }}>{c.submarket}</span>}
-                {ds !== null && <span style={{ background: stale?"#2d1515":"#0f1e2e", color: stale?"#fca5a5":"#475569", border:`1px solid ${stale?"#7f1d1d":"#1e3048"}`, padding:"2px 8px", borderRadius:20, fontSize:10 }}>{stale?"⚠️ ":""}{ds === 0 ? "Today" : `${ds}d ago`}</span>}
+                {ds !== null && <span style={{ background: stale?"#2d1515":"#0f1e2e", color: stale?"#fca5a5":"#475569", border:`1px solid ${stale?"#7f1d1d":"#1e3048"}`, padding:"2px 8px", borderRadius:20, fontSize:10 }}>{stale?"️ ":""}{ds === 0 ? "Today" : `${ds}d ago`}</span>}
               </div>
-              {c.properties && <div style={{ color:"#475569", fontSize:11, marginBottom:8 }}>🏢 {c.properties}</div>}
+              {c.properties && <div style={{ color:"#475569", fontSize:11, marginBottom:8 }}>{c.properties}</div>}
               {c.notes && <div style={{ color:"#475569", fontSize:11, marginBottom:10, fontStyle:"italic", borderLeft:"2px solid #1e3048", paddingLeft:8 }}>{c.notes}</div>}
               {linkedD.length > 0 && <div style={{ marginBottom:10 }}><div style={{ color:"#334155", fontSize:9, fontWeight:700, marginBottom:4 }}>LINKED DEALS</div>{linkedD.map(d=><span key={d.id} style={{ background:"#1e3048", color:"#94a3b8", padding:"2px 8px", borderRadius:20, fontSize:10, marginRight:4 }}>{d.name}</span>)}</div>}
+              {/* Recent activity preview */}
+              {(c.activityLog||[]).length > 0 && (() => {
+                const recent = (c.activityLog||[]).slice(0, 2);
+                const typeColors = { "Call":DS.blue, "Email":DS.purple, "Meeting":DS.green, "Text":DS.accent, "Showing":"#f97316", "Proposal Sent":"#ec4899", "Other":DS.textMute };
+                return (
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ color:"#334155", fontSize:9, fontWeight:700, marginBottom:5 }}>RECENT ACTIVITY</div>
+                    {recent.map(e => (
+                      <div key={e.id} style={{ display:"flex", gap:7, alignItems:"flex-start", marginBottom:4 }}>
+                        <span style={{ background:(typeColors[e.type]||DS.textMute)+"22", color:typeColors[e.type]||DS.textMute, fontSize:9, padding:"1px 6px", borderRadius:20, fontWeight:700, flexShrink:0, marginTop:1 }}>{e.type}</span>
+                        <span style={{ color:"#475569", fontSize:10, flex:1 }}>{e.note.substring(0,60)}{e.note.length>60?"...":""}</span>
+                        <span style={{ color:"#334155", fontSize:9, flexShrink:0 }}>{e.date ? new Date(e.date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"}) : ""}</span>
+                      </div>
+                    ))}
+                    {(c.activityLog||[]).length > 2 && <div style={{ color:"#334155", fontSize:9 }}>+{(c.activityLog||[]).length - 2} more entries — click Log to view all</div>}
+                  </div>
+                );
+              })()}
               <div style={{ display:"flex", gap:6 }}>
-                <button onClick={()=>markContacted(c.id)} style={{ background:"#0a2a1a", border:"1px solid #16a34a", color:"#4ade80", padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }}>✓ Contacted</button>
-                <button onClick={()=>setModal(c)} style={{ flex:1, background:"#1e3048", border:"none", color:"#94a3b8", padding:"6px", borderRadius:7, cursor:"pointer", fontSize:11 }}>✏️ Edit</button>
-                <button onClick={()=>{ if(window.confirm("Delete contact?")) setContacts(prev=>prev.filter(x=>x.id!==c.id)); }} style={{ background:"none", border:"1px solid #1e3048", color:"#475569", padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11 }}>🗑️</button>
+                <button onClick={()=>setActivityContact(c)} style={{ background:DS.blueSoft, border:`1px solid ${DS.blue}44`, color:DS.blue, padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }}>Log</button>
+                <button onClick={()=>setBriefContact(c)} style={{ background:DS.accentSoft, border:`1px solid ${DS.accent}44`, color:DS.accent, padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }}>Brief</button>
+                <button onClick={()=>markContacted(c.id)} style={{ background:"#0a2a1a", border:"1px solid #16a34a", color:"#4ade80", padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }}>Contacted</button>
+                <button onClick={()=>setModal(c)} style={{ flex:1, background:"#1e3048", border:"none", color:"#94a3b8", padding:"6px", borderRadius:7, cursor:"pointer", fontSize:11 }}>Edit</button>
+                <button onClick={()=>{ if(window.confirm("Delete contact?")) setContacts(prev=>prev.filter(x=>x.id!==c.id)); }} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#475569", padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11 }}></button>
               </div>
             </div>
           );
@@ -1395,6 +3007,8 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
         {filtered.length === 0 && <div style={{ color:"#475569", fontSize:13, textAlign:"center", padding:"40px 0", gridColumn:"1/-1" }}>No contacts yet. Add owners, tenants, brokers, and investors you work with.</div>}
       </div>}
       {modal && <ContactModal contact={modal==="new"?null:modal}/>}
+      {briefContact && <ContactBriefModal contact={briefContact} deals={deals} onClose={()=>setBriefContact(null)} />}
+      {activityContact && <ContactActivityModal contact={activityContact} onSave={updated => { setContacts(prev => prev.map(c => c.id === updated.id ? updated : c)); setActivityContact(updated); }} onClose={()=>setActivityContact(null)} />}
     </div>
   );
 }
@@ -1461,15 +3075,15 @@ function TasksTab({ tasks, setTasks, deals }) {
   function TaskModal({ task }) {
     const [form, setForm] = useState(task || { title:"", category:"Admin", priority:"Medium", dueDate:today, notes:"", linkedDealId:null, done:false, recurrence:"None" });
     const set = (k,v) => setForm(f=>({...f,[k]:v}));
-    const iStyle = { background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+    const iStyle = { background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
     const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
     const isRecurring = form.recurrence && form.recurrence !== "None";
     return (
       <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:16, padding:26, width:500 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:500 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
             <h2 style={{ color:"#f1f5f9", fontSize:17, fontWeight:800, margin:0 }}>{task?.id?"Edit Task":"New Task"}</h2>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}>✕</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             {lbl("Task")}
@@ -1488,14 +3102,14 @@ function TasksTab({ tasks, setTasks, deals }) {
             </div>
             {isRecurring && (
               <div style={{ background:"#1a2a0a", border:"1px solid #365314", borderRadius:8, padding:"9px 12px", fontSize:11, color:"#86efac" }}>
-                🔁 When you check this off, a new copy will auto-schedule {form.recurrence.toLowerCase()} starting {form.dueDate ? new Date(nextDueDate(form.dueDate, form.recurrence)+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "from the due date"}.
+                 When you check this off, a new copy will auto-schedule {form.recurrence.toLowerCase()} starting {form.dueDate ? new Date(nextDueDate(form.dueDate, form.recurrence)+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}) : "from the due date"}.
               </div>
             )}
             {lbl("Notes")}
             <textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={2} style={{...iStyle,resize:"vertical"}} placeholder="Details, context..."/>
           </div>
           <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:18 }}>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"1px solid #1e3048", color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
             <button onClick={()=>saveTask(form)} style={{ background:"#f97316", border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save Task</button>
           </div>
         </div>
@@ -1512,22 +3126,22 @@ function TasksTab({ tasks, setTasks, deals }) {
             {pending} pending
             {overdue > 0 && <span style={{ color:"#fca5a5", fontWeight:700 }}> · {overdue} overdue</span>}
             {dueToday > 0 && <span style={{ color:"#4ade80", fontWeight:700 }}> · {dueToday} due today</span>}
-            {recurring > 0 && <span style={{ color:"#f59e0b" }}> · 🔁 {recurring} recurring</span>}
+            {recurring > 0 && <span style={{ color:"#f59e0b" }}> ·  {recurring} recurring</span>}
           </div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:7, color:"#94a3b8", padding:"6px 10px", fontSize:11, outline:"none" }}>
+          <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:7, color:"#94a3b8", padding:"6px 10px", fontSize:11, outline:"none" }}>
             <option value="All">All Categories</option>
             {categories.map(c=><option key={c}>{c}</option>)}
           </select>
-          <button onClick={()=>setShowDone(s=>!s)} style={{ background:"#162032", border:"1px solid #1e3048", color:"#64748b", padding:"6px 12px", borderRadius:7, cursor:"pointer", fontSize:11 }}>{showDone?"Hide Done":"Show Done"}</button>
+          <button onClick={()=>setShowDone(s=>!s)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, color:"#64748b", padding:"6px 12px", borderRadius:7, cursor:"pointer", fontSize:11 }}>{showDone?"Hide Done":"Show Done"}</button>
           <button onClick={()=>setModal("new")} style={{ background:"#f97316", border:"none", color:"#fff", padding:"7px 16px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:800 }}>+ Add Task</button>
         </div>
       </div>
 
       {/* Quick recurring task templates */}
       {tasks.length === 0 && (
-        <div style={{ background:"#162032", border:"1px dashed #1e3048", borderRadius:10, padding:"14px 16px" }}>
+        <div style={{ background:DS.panel, border:"1px dashed #1e3048", borderRadius:10, padding:"14px 16px" }}>
           <div style={{ color:"#475569", fontSize:11, marginBottom:10 }}>Quick-add common recurring tasks:</div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
             {[
@@ -1538,8 +3152,8 @@ function TasksTab({ tasks, setTasks, deals }) {
               { title:"Review expenses", recurrence:"Monthly", category:"Admin", priority:"Low" },
             ].map(t=>(
               <button key={t.title} onClick={()=>saveTask({ ...t, id:null, dueDate:today, done:false, notes:"", linkedDealId:null })}
-                style={{ background:"#0f1e2e", border:"1px solid #1e3048", color:"#94a3b8", padding:"5px 11px", borderRadius:20, fontSize:11, cursor:"pointer" }}>
-                🔁 {t.title} ({t.recurrence})
+                style={{ background:"#0f1e2e", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"5px 11px", borderRadius:20, fontSize:11, cursor:"pointer" }}>
+                {t.title} — {t.recurrence}
               </button>
             ))}
           </div>
@@ -1553,25 +3167,25 @@ function TasksTab({ tasks, setTasks, deals }) {
           const isRecurring = t.recurrence && t.recurrence !== "None";
           const linkedDeal = t.linkedDealId ? deals.find(d=>d.id===t.linkedDealId) : null;
           return (
-            <div key={t.id} style={{ background: t.done?"#0d1826":"#162032", border:`1px solid ${isOver?"#7f1d1d":isDue?"#16a34a":isRecurring?"#78350f":"#1e3048"}`, borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"flex-start", gap:12, opacity: t.done ? 0.5 : 1 }}>
-              <button onClick={()=>toggleDone(t.id)} style={{ background:"none", border:`2px solid ${t.done?"#10b981":"#1e3048"}`, borderRadius:"50%", width:20, height:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:2, color:"#10b981", fontSize:11 }}>{t.done?"✓":""}</button>
+            <div key={t.id} style={{ background: t.done?"#0d1826":DS.panel, border:`1px solid ${isOver?"#7f1d1d":isDue?"#16a34a":isRecurring?"#78350f":"#1e3048"}`, borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"flex-start", gap:12, opacity: t.done ? 0.5 : 1 }}>
+              <button onClick={()=>toggleDone(t.id)} style={{ background:"none", border:`2px solid ${t.done?"#10b981":"#1e3048"}`, borderRadius:"50%", width:20, height:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:2, color:"#10b981", fontSize:11 }}>{t.done?"":""}</button>
               <div style={{ flex:1 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
                   <span style={{ color: t.done?"#475569":"#f1f5f9", fontWeight:600, fontSize:13, textDecoration: t.done?"line-through":"none" }}>{t.title}</span>
                   <span style={{ background:"#1e3048", color: priorityColors[t.priority]||"#64748b", border:`1px solid ${priorityColors[t.priority]||"#1e3048"}`, padding:"1px 7px", borderRadius:20, fontSize:9, fontWeight:700 }}>{t.priority}</span>
                   <span style={{ background:"#0f1e2e", color:"#475569", padding:"1px 7px", borderRadius:20, fontSize:9 }}>{t.category}</span>
-                  {isRecurring && <span style={{ background:"#292524", color:"#f59e0b", border:"1px solid #78350f", padding:"1px 7px", borderRadius:20, fontSize:9, fontWeight:700 }}>🔁 {t.recurrence}</span>}
-                  {linkedDeal && <span style={{ background:"#1e3a5f", color:"#60a5fa", padding:"1px 7px", borderRadius:20, fontSize:9 }}>📈 {linkedDeal.name}</span>}
+                  {isRecurring && <span style={{ background:"#292524", color:"#f59e0b", border:"1px solid #78350f", padding:"1px 7px", borderRadius:20, fontSize:9, fontWeight:700 }}> {t.recurrence}</span>}
+                  {linkedDeal && <span style={{ background:"#1e3a5f", color:"#60a5fa", padding:"1px 7px", borderRadius:20, fontSize:9 }}> {linkedDeal.name}</span>}
                 </div>
                 {t.notes && <div style={{ color:"#475569", fontSize:11, marginTop:4 }}>{t.notes}</div>}
                 <div style={{ display:"flex", gap:12, marginTop:4, flexWrap:"wrap" }}>
-                  {t.dueDate && <span style={{ color: isOver?"#fca5a5":isDue?"#4ade80":"#475569", fontSize:10, fontWeight: (isOver||isDue)?700:400 }}>{isOver?"⚠️ Overdue · ":isDue?"📅 Due today · ":""}{new Date(t.dueDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>}
+                  {t.dueDate && <span style={{ color: isOver?"#fca5a5":isDue?"#4ade80":"#475569", fontSize:10, fontWeight: (isOver||isDue)?700:400 }}>{isOver?"Overdue · ":isDue?"Due today · ":""}{new Date(t.dueDate+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>}
                   {isRecurring && !t.done && t.dueDate && <span style={{ color:"#64748b", fontSize:10 }}>Next after done: {new Date(nextDueDate(t.dueDate,t.recurrence)+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>}
                 </div>
               </div>
               <div style={{ display:"flex", gap:4 }}>
-                <button onClick={()=>setModal(t)} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}>✏️</button>
-                <button onClick={()=>{ if(window.confirm("Delete task?")) setTasks(prev=>prev.filter(x=>x.id!==t.id)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}>🗑️</button>
+                <button onClick={()=>setModal(t)} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}></button>
+                <button onClick={()=>{ if(window.confirm("Delete task?")) setTasks(prev=>prev.filter(x=>x.id!==t.id)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}></button>
               </div>
             </div>
           );
@@ -1608,14 +3222,14 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
   function ExpenseModal({ expense }) {
     const [form, setForm] = useState(expense || { category: EXPENSE_CATEGORIES[0], description:"", amount:"", date:today, notes:"" });
     const set = (k,v) => setForm(f=>({...f,[k]:v}));
-    const iStyle = { background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+    const iStyle = { background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
     const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
     return (
       <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:16, padding:26, width:460 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:460 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
             <h2 style={{ color:"#f1f5f9", fontSize:17, fontWeight:800, margin:0 }}>{expense?.id?"Edit Expense":"Log Expense"}</h2>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}>✕</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
             <div style={{ gridColumn:"span 2" }}>{lbl("Category")}<select value={form.category} onChange={e=>set("category",e.target.value)} style={iStyle}>{EXPENSE_CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
@@ -1625,7 +3239,7 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
             <div style={{ gridColumn:"span 2" }}>{lbl("Notes")}<textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={2} style={{...iStyle,resize:"vertical"}}/></div>
           </div>
           <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"1px solid #1e3048", color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
             <button onClick={()=>saveExpense(form)} style={{ background:"#ef4444", border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save</button>
           </div>
         </div>
@@ -1641,7 +3255,7 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
           <div style={{ color:"#475569", fontSize:11 }}>Track your business costs against commission income</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <select value={filterYear} onChange={e=>setFilterYear(e.target.value)} style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:7, color:"#94a3b8", padding:"6px 10px", fontSize:12, outline:"none" }}>
+          <select value={filterYear} onChange={e=>setFilterYear(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:7, color:"#94a3b8", padding:"6px 10px", fontSize:12, outline:"none" }}>
             {years.map(y=><option key={y}>{y}</option>)}
           </select>
           <button onClick={()=>setModal("new")} style={{ background:"#ef4444", border:"none", color:"#fff", padding:"7px 16px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:800 }}>+ Log Expense</button>
@@ -1655,7 +3269,7 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
           { label:"Net Income", value: fmt(netIncome), color: netIncome >= 0 ? "#34d399":"#fca5a5", sub:"commission - expenses" },
           { label:"Expense Ratio", value: closedYTD > 0 ? (totalExpenses/closedYTD*100).toFixed(1)+"%" : "—", color:"#f59e0b", sub:"expenses / gross" },
         ].map(c=>(
-          <div key={c.label} style={{ flex:1, minWidth:150, background:"#162032", border:"1px solid #1e3048", borderRadius:12, padding:"14px 16px" }}>
+          <div key={c.label} style={{ flex:1, minWidth:150, background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"14px 16px" }}>
             <div style={{ color:c.color, fontWeight:800, fontSize:20 }}>{c.value}</div>
             <div style={{ color:"#94a3b8", fontSize:11, fontWeight:600, marginTop:2 }}>{c.label}</div>
             <div style={{ color:"#475569", fontSize:10 }}>{c.sub}</div>
@@ -1664,7 +3278,7 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:12 }}>
         {/* By category */}
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:12, padding:"14px 18px" }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"14px 18px" }}>
           <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:13, marginBottom:12 }}>By Category</div>
           {byCategory.length === 0 && <div style={{ color:"#475569", fontSize:12 }}>No expenses logged yet.</div>}
           {byCategory.map(c=>(
@@ -1680,19 +3294,19 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
           ))}
         </div>
         {/* Expense list */}
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:12, padding:"14px 18px", overflowY:"auto", maxHeight:400 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"14px 18px", overflowY:"auto", maxHeight:400 }}>
           <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:13, marginBottom:12 }}>All Expenses — {filterYear}</div>
           {yearExpenses.length === 0 && <div style={{ color:"#475569", fontSize:12 }}>No expenses logged for {filterYear}.</div>}
           {yearExpenses.sort((a,b)=>b.date.localeCompare(a.date)).map(e=>(
-            <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid #1e3048", padding:"9px 0" }}>
+            <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:`1px solid ${DS.border}`, padding:"9px 0" }}>
               <div>
                 <div style={{ color:"#f1f5f9", fontSize:12, fontWeight:600 }}>{e.description||e.category}</div>
                 <div style={{ color:"#475569", fontSize:10 }}>{e.category} · {new Date(e.date+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
               </div>
               <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                 <span style={{ color:"#ef4444", fontWeight:700, fontSize:13 }}>{fmt(e.amount)}</span>
-                <button onClick={()=>setModal(e)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:12 }}>✏️</button>
-                <button onClick={()=>{ if(window.confirm("Delete?")) setExpenses(prev=>prev.filter(x=>x.id!==e.id)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:12 }}>🗑️</button>
+                <button onClick={()=>setModal(e)} style={{ background:"none", border:"none", color:"#94a3b8", cursor:"pointer", fontSize:14, padding:"4px 8px" }}>✎</button>
+                <button onClick={()=>{ if(window.confirm("Delete this expense?")) setExpenses(prev=>prev.filter(x=>x.id!==e.id)); }} style={{ background:"none", border:"none", color:"#ef4444", cursor:"pointer", fontSize:14, padding:"4px 8px", fontWeight:700 }}>✕</button>
               </div>
             </div>
           ))}
@@ -1703,7 +3317,6 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
   );
 }
 
-// ── Property Database Tab ─────────────────────────────────────
 function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
   const smList = submarketList || DEFAULT_SUBMARKETS;
   const [modal, setModal] = useState(null);
@@ -1723,14 +3336,14 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
   function PropertyModal({ property }) {
     const [form, setForm] = useState(property || { name:"", address:"", submarket:smList[0]||"Northeast", subtype:"Distribution", sqft:"", owner:"", ownerContact:"", yearBuilt:"", clearHeight:"", dockDoors:"", lastSalePrice:"", notes:"", tags:"" });
     const set = (k,v) => setForm(f=>({...f,[k]:v}));
-    const iStyle = { background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+    const iStyle = { background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
     const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
     return (
       <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:16, padding:26, width:620, maxHeight:"90vh", overflowY:"auto" }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:620, maxHeight:"90vh", overflowY:"auto" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
             <h2 style={{ color:"#f1f5f9", fontSize:17, fontWeight:800, margin:0 }}>{property?.id?"Edit Property":"Add Property"}</h2>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}>✕</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
             <div style={{ gridColumn:"span 2" }}>{lbl("Property Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} style={iStyle}/></div>
@@ -1748,7 +3361,7 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
             <div style={{ gridColumn:"span 2" }}>{lbl("Notes")}<textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={3} style={{...iStyle,resize:"vertical"}} placeholder="Condition, ownership history, opportunities..."/></div>
           </div>
           <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"1px solid #1e3048", color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+            <button onClick={()=>setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
             <button onClick={()=>saveProperty(form)} style={{ background:"#6366f1", border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save Property</button>
           </div>
         </div>
@@ -1765,11 +3378,11 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
         </div>
         <button onClick={()=>setModal("new")} style={{ background:"#6366f1", border:"none", color:"#fff", padding:"7px 16px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:800 }}>+ Add Property</button>
       </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property name, address, owner, submarket..." style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:8, color:"#f1f5f9", padding:"8px 12px", fontSize:12, outline:"none" }}/>
-      <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:12, overflowX:"auto" }}>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property name, address, owner, submarket..." style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 12px", fontSize:12, outline:"none" }}/>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", minWidth:800 }}>
           <thead>
-            <tr style={{ borderBottom:"2px solid #1e3048" }}>
+            <tr style={{ borderBottom:`2px solid ${DS.border}` }}>
               {["Property","Submarket","Subtype","Sq Ft","Yr Built","Clear Ht","Docks","Owner","Contact","Last Sale","Tags",""].map(h=>(
                 <th key={h} style={{ color:"#64748b", fontSize:10, fontWeight:700, textAlign:"left", padding:"9px 10px", whiteSpace:"nowrap" }}>{h}</th>
               ))}
@@ -1777,7 +3390,7 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
           </thead>
           <tbody>
             {filtered.map(p=>(
-              <tr key={p.id} style={{ borderBottom:"1px solid #1e3048" }}
+              <tr key={p.id} style={{ borderBottom:`1px solid ${DS.border}` }}
                 onMouseEnter={e=>e.currentTarget.style.background="#1a2d42"}
                 onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <td style={{ padding:"10px", color:"#f1f5f9", fontWeight:600, fontSize:12 }}>
@@ -1796,8 +3409,8 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
                 <td style={{ padding:"10px" }}>{p.tags&&p.tags.split(",").map(t=>t.trim()).filter(Boolean).map(t=><span key={t} style={{ background:"#1e3048", color:"#94a3b8", padding:"1px 6px", borderRadius:20, fontSize:9, marginRight:3 }}>{t}</span>)}</td>
                 <td style={{ padding:"10px" }}>
                   <div style={{ display:"flex", gap:4 }}>
-                    <button onClick={()=>setModal(p)} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}>✏️</button>
-                    <button onClick={()=>{ if(window.confirm("Delete?")) setProperties(prev=>prev.filter(x=>x.id!==p.id)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}>🗑️</button>
+                    <button onClick={()=>setModal(p)} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}></button>
+                    <button onClick={()=>{ if(window.confirm("Delete?")) setProperties(prev=>prev.filter(x=>x.id!==p.id)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}></button>
                   </div>
                 </td>
               </tr>
@@ -1844,11 +3457,11 @@ function TimelineTab({ deals }) {
         <div style={{ color:"#f1f5f9", fontWeight:800, fontSize:16 }}>Deal Timeline</div>
         <div style={{ color:"#475569", fontSize:11 }}>Visual close date calendar — see where your deals cluster</div>
       </div>
-      <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:12, padding:"18px 20px", overflowX:"auto" }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"18px 20px", overflowX:"auto" }}>
         {/* Month headers */}
         <div style={{ display:"flex", position:"relative", marginBottom:8, marginLeft:200 }}>
           {months.map((m,i) => (
-            <div key={i} style={{ flex:1, color:"#64748b", fontSize:10, fontWeight:700, borderLeft:"1px solid #1e3048", paddingLeft:4, paddingBottom:4 }}>{m.label}</div>
+            <div key={i} style={{ flex:1, color:"#64748b", fontSize:10, fontWeight:700, borderLeft:`1px solid ${DS.border}`, paddingLeft:4, paddingBottom:4 }}>{m.label}</div>
           ))}
         </div>
         {/* Today line overlay - positioned relative to chart area */}
@@ -1869,7 +3482,7 @@ function TimelineTab({ deals }) {
                   <div style={{ position:"absolute", left:`${todayPct}%`, top:0, bottom:0, width:2, background:"#f59e0b", zIndex:2, opacity:0.8 }}/>
                   {bar && (
                     <div style={{ position:"absolute", left:`${Math.max(0,bar.pct-1)}%`, top:"50%", transform:"translateY(-50%)", zIndex:3 }}>
-                      <div style={{ width:12, height:12, borderRadius:"50%", background:color, border:"2px solid #162032", boxShadow:`0 0 0 3px ${color}33` }} title={`${d.name} — ${d.expectedClose}`}/>
+                      <div style={{ width:12, height:12, borderRadius:"50%", background:color, border:"2px solid DS.panel", boxShadow:`0 0 0 3px ${color}33` }} title={`${d.name} — ${d.expectedClose}`}/>
                     </div>
                   )}
                   {!bar && (
@@ -1883,13 +3496,13 @@ function TimelineTab({ deals }) {
           {/* Month grid lines */}
           <div style={{ position:"absolute", top:0, bottom:0, left:200, right:100, pointerEvents:"none" }}>
             {months.map((m,i) => (
-              <div key={i} style={{ position:"absolute", left:`${(i/months.length)*100}%`, top:0, bottom:0, borderLeft:"1px solid #1e3048" }}/>
+              <div key={i} style={{ position:"absolute", left:`${(i/months.length)*100}%`, top:0, bottom:0, borderLeft:`1px solid ${DS.border}` }}/>
             ))}
             <div style={{ position:"absolute", left:`${todayPct*((100)/(months.length))/100*100}%`, display:"none" }}/>
           </div>
         </div>
         {/* Legend */}
-        <div style={{ display:"flex", gap:12, marginTop:14, flexWrap:"wrap", borderTop:"1px solid #1e3048", paddingTop:12 }}>
+        <div style={{ display:"flex", gap:12, marginTop:14, flexWrap:"wrap", borderTop:`1px solid ${DS.border}`, paddingTop:12 }}>
           {Object.entries(stageBar).map(([stage,color])=>(
             <div key={stage} style={{ display:"flex", alignItems:"center", gap:5 }}>
               <div style={{ width:10, height:10, borderRadius:"50%", background:color }}/>
@@ -1903,7 +3516,7 @@ function TimelineTab({ deals }) {
         </div>
       </div>
       {/* Monthly commission clusters */}
-      <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:12, padding:"14px 18px" }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"14px 18px" }}>
         <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:13, marginBottom:12 }}>Closing Clusters by Month</div>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
           {months.slice(1, 7).map((m,i) => {
@@ -1914,7 +3527,7 @@ function TimelineTab({ deals }) {
             });
             const weighted = mDeals.reduce((s,d)=>s+d.weighted,0);
             return (
-              <div key={i} style={{ flex:1, minWidth:120, background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:8, padding:"10px 12px" }}>
+              <div key={i} style={{ flex:1, minWidth:120, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, padding:"10px 12px" }}>
                 <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, marginBottom:4 }}>{m.label}</div>
                 <div style={{ color:"#f59e0b", fontWeight:800, fontSize:16 }}>{fmt(weighted)}</div>
                 <div style={{ color:"#475569", fontSize:10 }}>{mDeals.length} deal{mDeals.length!==1?"s":""}</div>
@@ -1933,16 +3546,16 @@ function DealTimelineModal({ deal, onClose }) {
   // Build unified chronological event list
   const events = [];
   (deal.stageHistory || []).forEach(h => {
-    events.push({ date: h.enteredDate + "T00:00:00", type: "stage", label: h.stage, note: h.note || "", icon: "🔄" });
+    events.push({ date: h.enteredDate + "T00:00:00", type: "stage", label: h.stage, note: h.note || "", icon: "" });
   });
   (deal.activities || []).forEach(a => {
-    events.push({ date: a.date, type: "activity", label: a.type, note: a.text, icon: "📋" });
+    events.push({ date: a.date, type: "activity", label: a.type, note: a.text, icon: "" });
   });
   (deal.richNotes || []).forEach(n => {
-    events.push({ date: n.date + "T00:00:00", type: "note", label: n.type, note: n.text?.substring(0,120) || "", icon: "📎" });
+    events.push({ date: n.date + "T00:00:00", type: "note", label: n.type, note: n.text?.substring(0,120) || "", icon: "" });
   });
   (deal.documents || []).forEach(doc => {
-    events.push({ date: doc.addedDate + "T00:00:00", type: "document", label: doc.type, note: doc.name, icon: "📁", url: doc.url });
+    events.push({ date: doc.addedDate + "T00:00:00", type: "document", label: doc.type, note: doc.name, icon: "", url: doc.url });
   });
   events.sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -1951,17 +3564,17 @@ function DealTimelineModal({ deal, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
-      <div style={{ background: "#162032", border: "1px solid #1e3048", borderRadius: 16, padding: 26, width: 620, maxHeight: "88vh", overflowY: "auto" }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 620, maxHeight: "88vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
           <div>
-            <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>🕐 Deal Timeline</h2>
+            <h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}> Deal Timeline</h2>
             <div style={{ color: "#475569", fontSize: 12, marginTop: 3 }}>{deal.name} · {deal.client}</div>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
         </div>
 
         {/* Deal summary bar */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20, background: "#0f1e2e", borderRadius: 10, padding: "12px 16px" }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 20, background: "#070e1a", borderRadius: 10, padding: "12px 16px" }}>
           <div><div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>STAGE</div><div style={{ marginTop: 3 }}><StageBadge stage={deal.stage} /></div></div>
           <div><div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>VALUE</div><div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 14, marginTop: 3 }}>{fmt(enriched.netCommission)}</div></div>
           <div><div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>DAYS IN STAGE</div><div style={{ color: "#94a3b8", fontWeight: 700, fontSize: 14, marginTop: 3 }}>{enriched.daysInStage}d</div></div>
@@ -1978,7 +3591,7 @@ function DealTimelineModal({ deal, onClose }) {
         {/* Health issues */}
         {enriched.health && enriched.health.issues.length > 0 && (
           <div style={{ background: enriched.health.score < 50 ? "#1a0a0a" : "#1a1400", border: `1px solid ${enriched.health.color}44`, borderRadius: 9, padding: "10px 14px", marginBottom: 16 }}>
-            <div style={{ color: enriched.health.color, fontSize: 11, fontWeight: 700, marginBottom: 6 }}>⚠️ Health Issues</div>
+            <div style={{ color: enriched.health.color, fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Health Issues</div>
             {enriched.health.issues.map((issue, i) => <div key={i} style={{ color: "#94a3b8", fontSize: 11, marginBottom: 2 }}>· {issue}</div>)}
           </div>
         )}
@@ -2003,7 +3616,7 @@ function DealTimelineModal({ deal, onClose }) {
                   <span style={{ color: "#334155", fontSize: 10, flexShrink: 0, marginLeft: 8 }}>{formatDate(e.date)}</span>
                 </div>
                 {e.note && <div style={{ color: "#64748b", fontSize: 11, marginTop: 5, lineHeight: 1.5 }}>{e.note}</div>}
-                {e.url && <a href={e.url} target="_blank" rel="noreferrer" style={{ color: "#60a5fa", fontSize: 11, marginTop: 4, display: "block" }}>🔗 Open link</a>}
+                {e.url && <a href={e.url} target="_blank" rel="noreferrer" style={{ color: "#60a5fa", fontSize: 11, marginTop: 4, display: "block" }}> Open link</a>}
               </div>
             </div>
           ))}
@@ -2093,7 +3706,7 @@ function IntelTab({ deals, expenses, gciGoal }) {
   const prospectsNeeded = typeof proposalsNeeded === "number" ? Math.ceil(proposalsNeeded / proposalToLOI) : "—";
 
   const Card = ({ title, children, accent = "#1e3048" }) => (
-    <div style={{ background: "#162032", border: `1px solid ${accent}`, borderRadius: 12, padding: "18px 20px" }}>
+    <div style={{ background: DS.panel, border: `1px solid ${accent}`, borderRadius: 12, padding: "18px 20px" }}>
       <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, letterSpacing: 1, marginBottom: 14 }}>{title}</div>
       {children}
     </div>
@@ -2113,7 +3726,7 @@ function IntelTab({ deals, expenses, gciGoal }) {
               const actualCount = stage === "Closed" ? closed.length : deals.filter(d => d.stage === stage).length;
               const barW = totalEver > 0 ? Math.max(8, (actualCount / totalEver) * 100) : 8;
               const convRate = i > 0 ? pct(actualCount, deals.filter(d => d.stage === stageOrder[i - 1]).length) : 100;
-              const sc = STAGE_COLORS[stage] || { bg: "#1e3048", text: "#94a3b8", border: "#1e3048" };
+              const sc = STAGE_COLORS[stage] || { bg: DS.panel, text: DS.textSub, border: DS.border, glow: "transparent" };
               return (
                 <div key={stage}>
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
@@ -2125,14 +3738,14 @@ function IntelTab({ deals, expenses, gciGoal }) {
                       <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700 }}>{actualCount}</span>
                     </div>
                   </div>
-                  <div style={{ background: "#0f1e2e", borderRadius: 999, height: 8, overflow: "hidden" }}>
+                  <div style={{ background: "#070e1a", borderRadius: 999, height: 8, overflow: "hidden" }}>
                     <div style={{ width: `${barW}%`, height: "100%", background: sc.text, borderRadius: 999, opacity: 0.8 }} />
                   </div>
                 </div>
               );
             })}
           </div>
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #1e3048", display: "flex", gap: 16 }}>
+          <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${DS.border}`, display: "flex", gap: 16 }}>
             <div><div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>WIN RATE</div><div style={{ color: "#10b981", fontWeight: 800, fontSize: 16 }}>{overallWinRate > 0 ? Math.round(overallWinRate * 100) : "—"}%</div></div>
             <div><div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>CLOSED</div><div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16 }}>{closed.length}</div></div>
             <div><div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>LOST</div><div style={{ color: "#ef4444", fontWeight: 800, fontSize: 16 }}>{lost.length}</div></div>
@@ -2148,19 +3761,19 @@ function IntelTab({ deals, expenses, gciGoal }) {
                 <span style={{ color: "#94a3b8", fontSize: 11 }}>{reason}</span>
                 <span style={{ color: "#fca5a5", fontSize: 11, fontWeight: 700 }}>{count} deal{count > 1 ? "s" : ""}</span>
               </div>
-              <div style={{ background: "#0f1e2e", borderRadius: 999, height: 6 }}>
+              <div style={{ background: "#070e1a", borderRadius: 999, height: 6 }}>
                 <div style={{ width: `${pct(count, lost.length)}%`, height: "100%", background: "#ef4444", borderRadius: 999, opacity: 0.7 }} />
               </div>
             </div>
           ))}
           {sourceWinRates.length > 0 && (
-            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #1e3048" }}>
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${DS.border}` }}>
               <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, marginBottom: 10 }}>WIN RATE BY LEAD SOURCE</div>
               {sourceWinRates.slice(0, 5).map(s => (
                 <div key={s.src} style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, alignItems: "center" }}>
                   <span style={{ color: "#64748b", fontSize: 10 }}>{s.src} ({s.total})</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 60, background: "#0f1e2e", borderRadius: 999, height: 5 }}>
+                    <div style={{ width: 60, background: "#070e1a", borderRadius: 999, height: 5 }}>
                       <div style={{ width: `${s.rate}%`, height: "100%", background: s.rate >= 60 ? "#10b981" : s.rate >= 40 ? "#f59e0b" : "#ef4444", borderRadius: 999 }} />
                     </div>
                     <span style={{ color: s.rate >= 60 ? "#10b981" : s.rate >= 40 ? "#f59e0b" : "#ef4444", fontSize: 10, fontWeight: 700, minWidth: 28 }}>{s.rate}%</span>
@@ -2195,7 +3808,7 @@ function IntelTab({ deals, expenses, gciGoal }) {
             );
           })}
         </div>
-        <div style={{ display: "flex", gap: 16, marginTop: 12, paddingTop: 10, borderTop: "1px solid #1e3048" }}>
+        <div style={{ display: "flex", gap: 16, marginTop: 12, paddingTop: 10, borderTop: `1px solid ${DS.border}` }}>
           {[["#10b981", "80%+ probability"], ["#f59e0b", "50–79%"], ["#3b82f6", "< 50%"]].map(([c, l]) => (
             <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <div style={{ width: 10, height: 10, background: c + "44", border: `1px solid ${c}`, borderRadius: 2 }} />
@@ -2217,7 +3830,7 @@ function IntelTab({ deals, expenses, gciGoal }) {
               { label: "Active proposals needed", value: proposalsNeeded, color: "#f59e0b", sub: `at ${Math.round(loiToCloseRate * 100 * 1.3)}% proposal→close rate` },
               { label: "Prospects to work", value: prospectsNeeded, color: "#60a5fa", sub: `at ~55% prospect→proposal rate` },
             ].map(item => (
-              <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #1e3048" }}>
+              <div key={item.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: `1px solid ${DS.border}` }}>
                 <div>
                   <div style={{ color: "#94a3b8", fontSize: 12 }}>{item.label}</div>
                   <div style={{ color: "#475569", fontSize: 10 }}>{item.sub}</div>
@@ -2240,7 +3853,7 @@ function IntelTab({ deals, expenses, gciGoal }) {
                     <span style={{ color: sc.text || "#94a3b8", fontSize: 11 }}>{stage}</span>
                     <span style={{ color: covered >= 100 ? "#10b981" : "#f59e0b", fontSize: 11, fontWeight: 700 }}>{have} / {needed}</span>
                   </div>
-                  <div style={{ background: "#0f1e2e", borderRadius: 999, height: 7 }}>
+                  <div style={{ background: "#070e1a", borderRadius: 999, height: 7 }}>
                     <div style={{ width: `${covered}%`, height: "100%", background: covered >= 100 ? "#10b981" : covered >= 60 ? "#f59e0b" : "#ef4444", borderRadius: 999 }} />
                   </div>
                 </div>
@@ -2259,7 +3872,7 @@ function IntelTab({ deals, expenses, gciGoal }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {active.length === 0 && <div style={{ color: "#475569", fontSize: 12 }}>No active deals to score.</div>}
           {active.sort((a, b) => (a.health?.score ?? 100) - (b.health?.score ?? 100)).map(d => (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "#0f1e2e", borderRadius: 9, border: `1px solid ${d.health?.color || "#1e3048"}33` }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "#070e1a", borderRadius: 9, border: `1px solid ${d.health?.color || "#1e3048"}33` }}>
               <div style={{ width: 44, height: 44, borderRadius: "50%", background: (d.health?.color || "#475569") + "22", border: `2px solid ${d.health?.color || "#475569"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <span style={{ color: d.health?.color || "#475569", fontWeight: 900, fontSize: 13 }}>{d.health?.score ?? "—"}</span>
               </div>
@@ -2321,7 +3934,7 @@ function LeaseRadarTab({ deals, contacts, onNavigate }) {
       </div>
 
       {tenantLeases.length === 0 ? (
-        <div style={{ background: "#162032", border: "1px dashed #1e3048", borderRadius: 12, padding: "32px", textAlign: "center" }}>
+        <div style={{ background: DS.panel, border: "1px dashed #1e3048", borderRadius: 12, padding: "32px", textAlign: "center" }}>
           <div style={{ color: "#475569", fontSize: 14, marginBottom: 8 }}>No lease expirations tracked yet</div>
           <div style={{ color: "#334155", fontSize: 12 }}>When you close a Lease deal with an expected close date and lease term, expirations will automatically appear here.</div>
           <div style={{ color: "#334155", fontSize: 12, marginTop: 6 }}>Make sure your closed lease deals have: Expected Close Date + Lease Term (months).</div>
@@ -2330,17 +3943,17 @@ function LeaseRadarTab({ deals, contacts, onNavigate }) {
         <>
           {/* Summary bands */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <UrgencyBand label="⚠️ Expired — call immediately" count={urgencyCounts.expired} color="#ef4444" />
-            <UrgencyBand label="🔴 Critical — expiring within 90 days" count={urgencyCounts.critical} color="#f97316" />
-            <UrgencyBand label="🟡 Urgent — expiring within 6 months" count={urgencyCounts.urgent} color="#f59e0b" />
-            <UrgencyBand label="🔵 Watch — expiring within 1 year" count={urgencyCounts.watch} color="#60a5fa" />
-            <UrgencyBand label="🟢 Monitor — 1+ year remaining" count={urgencyCounts.monitor} color="#10b981" />
+            <UrgencyBand label="️ Expired — call immediately" count={urgencyCounts.expired} color="#ef4444" />
+            <UrgencyBand label=" Critical — expiring within 90 days" count={urgencyCounts.critical} color="#f97316" />
+            <UrgencyBand label=" Urgent — expiring within 6 months" count={urgencyCounts.urgent} color="#f59e0b" />
+            <UrgencyBand label=" Watch — expiring within 1 year" count={urgencyCounts.watch} color="#60a5fa" />
+            <UrgencyBand label=" Monitor — 1+ year remaining" count={urgencyCounts.monitor} color="#10b981" />
           </div>
 
           {/* Lease list */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {tenantLeases.map(d => (
-              <div key={d.id} style={{ background: "#162032", border: `1px solid ${d.urgencyColor}33`, borderRadius: 11, padding: "14px 18px", display: "flex", gap: 16, alignItems: "center" }}>
+              <div key={d.id} style={{ background: DS.panel, border: `1px solid ${d.urgencyColor}33`, borderRadius: 11, padding: "14px 18px", display: "flex", gap: 16, alignItems: "center" }}>
                 <div style={{ width: 56, height: 56, borderRadius: 10, background: d.urgencyColor + "22", border: `2px solid ${d.urgencyColor}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <div style={{ color: d.urgencyColor, fontWeight: 900, fontSize: 15, lineHeight: 1 }}>
                     {d.daysUntilExpiry < 0 ? "EXP" : d.daysUntilExpiry > 365 ? Math.round(d.daysUntilExpiry / 30) + "mo" : d.daysUntilExpiry + "d"}
@@ -2376,7 +3989,7 @@ function LeaseRadarTab({ deals, contacts, onNavigate }) {
 }
 
 // ── Morning Briefing / Home Tab ────────────────────────────────
-function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, totalWeighted, onNavigate }) {
+function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, totalWeighted, onNavigate, onStartSync }) {
   const enriched = useMemo(() => deals.map(calcDeal), [deals]);
   const now = new Date();
 
@@ -2433,12 +4046,12 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
   const urgentCount = followUpsDue.length + urgentTasks.length + goneCold.length + outreachDue.length;
 
   const SectionCard = ({ title, count, color, children, tabId, emptyMsg }) => (
-    <div style={{ background:"#162032", border:`1px solid ${count > 0 ? color+"33" : "#1e3048"}`, borderRadius:12, overflow:"hidden" }}>
+    <div style={{ background:DS.panel, border:`1px solid ${count > 0 ? color+"33" : "#1e3048"}`, borderRadius:12, overflow:"hidden" }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 16px", borderBottom: count > 0 ? `1px solid ${color}22` : "none", cursor: tabId ? "pointer" : "default" }}
         onClick={tabId ? ()=>onNavigate(tabId) : undefined}>
         <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:13 }}>{title}</div>
         {count > 0 ? <span style={{ background:color+"22", color, border:`1px solid ${color}44`, padding:"2px 9px", borderRadius:20, fontSize:11, fontWeight:800 }}>{count}</span>
-          : <span style={{ color:"#334155", fontSize:11 }}>✓ Clear</span>}
+          : <span style={{ color:"#334155", fontSize:11 }}>Clear</span>}
       </div>
       {count > 0 ? <div style={{ padding:"10px 16px", display:"flex", flexDirection:"column", gap:6 }}>{children}</div>
         : <div style={{ padding:"10px 16px", color:"#334155", fontSize:11 }}>{emptyMsg}</div>}
@@ -2446,7 +4059,7 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
   );
 
   const ItemRow = ({ label, sub, badge, color="#94a3b8", badgeColor="#f59e0b" }) => (
-    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 0", borderBottom:"1px solid #1e3048" }}>
+    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 0", borderBottom:`1px solid ${DS.border}` }}>
       <div>
         <div style={{ color, fontSize:12, fontWeight:600 }}>{label}</div>
         {sub && <div style={{ color:"#475569", fontSize:10 }}>{sub}</div>}
@@ -2460,23 +4073,30 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
       {/* Header greeting */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={{ color:"#f1f5f9", fontWeight:900, fontSize:22 }}>{greeting} 👋</div>
+          <div style={{ color:"#f1f5f9", fontWeight:900, fontSize:22 }}>{greeting}</div>
           <div style={{ color:"#475569", fontSize:12, marginTop:2 }}>{now.toLocaleDateString("en-US",{ weekday:"long", month:"long", day:"numeric", year:"numeric" })}</div>
-          {urgentCount > 0 && <div style={{ color:"#fca5a5", fontSize:12, marginTop:4, fontWeight:600 }}>⚠️ {urgentCount} item{urgentCount!==1?"s":""} need your attention today</div>}
+          {urgentCount > 0 && <div style={{ color:"#fca5a5", fontSize:12, marginTop:4, fontWeight:600 }}>️ {urgentCount} item{urgentCount!==1?"s":""} need your attention today</div>}
         </div>
-        {/* GCI progress */}
-        <div style={{ background:"#162032", border:"1px solid #1e3048", borderRadius:12, padding:"14px 20px", minWidth:220 }}>
-          <div style={{ color:"#94a3b8", fontSize:10, fontWeight:700, marginBottom:6 }}>GCI GOAL PROGRESS — {now.getFullYear()}</div>
-          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-            <span style={{ color:"#f59e0b", fontWeight:800, fontSize:18 }}>{fmt(closedYTD)}</span>
-            <span style={{ color:"#475569", fontSize:12 }}>of {fmt(gciGoal)}</span>
-          </div>
-          <div style={{ background:"#0f1e2e", borderRadius:999, height:8, overflow:"hidden" }}>
-            <div style={{ width:`${gciProgress}%`, height:"100%", background: gciProgress >= 100 ? "#10b981" : gciProgress >= 75 ? "#f59e0b" : "#3b82f6", borderRadius:999, transition:"width 0.3s" }}/>
-          </div>
-          <div style={{ display:"flex", justifyContent:"space-between", marginTop:6 }}>
-            <span style={{ color:"#475569", fontSize:10 }}>{gciProgress.toFixed(1)}% complete</span>
-            <span style={{ color:"#34d399", fontSize:10 }}>Weighted: {fmt(totalWeighted)}</span>
+        <div style={{ display:"flex", flexDirection:"column", gap:10, alignItems:"flex-end" }}>
+          {/* 3-Minute Sync button */}
+          <button onClick={onStartSync} style={{ background:`linear-gradient(135deg, ${DS.accent} 0%, #f97316 100%)`, border:"none", color:"#0a0f1a", padding:"11px 20px", borderRadius:DS.r.md, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black, boxShadow:`0 4px 20px ${DS.accent}44`, display:"flex", alignItems:"center", gap:8 }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            3-Minute Sync {urgentCount > 0 && <span style={{ background:"rgba(0,0,0,0.25)", borderRadius:20, padding:"1px 7px", fontSize:10 }}>{urgentCount}</span>}
+          </button>
+          {/* GCI progress */}
+          <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"16px 24px", minWidth:260, boxShadow: DS.shadow.sm }}>
+            <div style={{ color:"#94a3b8", fontSize:10, fontWeight:800, marginBottom:10, letterSpacing: "0.5px" }}>GCI GOAL PROGRESS — {now.getFullYear()}</div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <span style={{ color:"#f59e0b", fontWeight:900, fontSize:22, fontFamily: "'DM Mono', monospace" }}>{fmt(closedYTD)}</span>
+              <span style={{ color:"#475569", fontSize:13, fontWeight: 600 }}>of {fmt(gciGoal)}</span>
+            </div>
+            <div style={{ background:"#0f1e2e", borderRadius:999, height:10, overflow:"hidden", marginBottom: 10, border: `1px solid ${DS.border}` }}>
+              <div style={{ width:`${gciProgress}%`, height:"100%", background: gciProgress >= 100 ? "#10b981" : gciProgress >= 75 ? "#f59e0b" : "#3b82f6", borderRadius:999, transition:"width 0.5s cubic-bezier(0.4, 0, 0.2, 1)" }}/>
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems: "center" }}>
+              <span style={{ color:"#94a3b8", fontSize:11, fontWeight: 700 }}>{gciProgress.toFixed(1)}% COMPLETE</span>
+              <span style={{ color:"#34d399", fontSize:11, fontWeight: 700 }}>WEIGHTED: {fmt(totalWeighted)}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -2490,7 +4110,7 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
           { label:"Contacts Due", value: outreachDue.length, sub:"overdue for outreach", color: outreachDue.length > 0 ? "#ec4899" : "#4ade80", alert: outreachDue.length > 0 },
           { label:"Stale Listings", value: staleListings.length, sub:"no showings 30+ days", color: staleListings.length > 0 ? "#f97316" : "#4ade80", alert: staleListings.length > 0 },
         ].map(s => (
-          <div key={s.label} style={{ flex:1, minWidth:130, background: s.alert ? "#1a0a0a" : "#162032", border:`1px solid ${s.alert ? "#7f1d1d" : "#1e3048"}`, borderRadius:10, padding:"11px 14px" }}>
+          <div key={s.label} style={{ flex:1, minWidth:130, background: s.alert ? "#1a0a0a" : DS.panel, border:`1px solid ${s.alert ? "#7f1d1d" : "#1e3048"}`, borderRadius:10, padding:"11px 14px" }}>
             <div style={{ color:s.color, fontWeight:800, fontSize:20 }}>{s.value}</div>
             <div style={{ color:"#94a3b8", fontSize:10, fontWeight:600 }}>{s.label}</div>
             <div style={{ color:"#475569", fontSize:10 }}>{s.sub}</div>
@@ -2500,28 +4120,28 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
 
       {/* Action sections */}
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-        <SectionCard title="📅 Follow-ups Due" count={followUpsDue.length} color="#4ade80" tabId="pipeline" emptyMsg="No follow-ups due today — nice.">
+        <SectionCard title="Follow-ups Due" count={followUpsDue.length} color="#4ade80" tabId="pipeline" emptyMsg="No follow-ups due today — nice.">
           {followUpsDue.slice(0,5).map(d => (
-            <ItemRow key={d.id} label={d.name} sub={`${d.client} · ${d.stage}`} badge={d.isOverdue ? "⚠️ Overdue" : "Due today"} badgeColor={d.isOverdue?"#fca5a5":"#4ade80"}/>
+            <ItemRow key={d.id} label={d.name} sub={`${d.client} · ${d.stage}`} badge={d.isOverdue ? "️ Overdue" : "Due today"} badgeColor={d.isOverdue?"#fca5a5":"#4ade80"}/>
           ))}
           {followUpsDue.length > 5 && <div style={{ color:"#475569", fontSize:10 }}>+{followUpsDue.length-5} more — go to Pipeline tab</div>}
         </SectionCard>
 
-        <SectionCard title="✅ Urgent Tasks" count={urgentTasks.length} color="#fb923c" tabId="tasks" emptyMsg="No urgent tasks — you're on top of it.">
+        <SectionCard title="Urgent Tasks" count={urgentTasks.length} color="#fb923c" tabId="tasks" emptyMsg="No urgent tasks — you're on top of it.">
           {urgentTasks.slice(0,5).map(t => (
-            <ItemRow key={t.id} label={t.title} sub={`${t.category} · ${t.priority}`} badge={t.dueDate < today ? "⚠️ Overdue" : "Due today"} badgeColor={t.dueDate < today?"#fca5a5":"#fb923c"}/>
+            <ItemRow key={t.id} label={t.title} sub={`${t.category} · ${t.priority}`} badge={t.dueDate < today ? "️ Overdue" : "Due today"} badgeColor={t.dueDate < today?"#fca5a5":"#fb923c"}/>
           ))}
           {urgentTasks.length > 5 && <div style={{ color:"#475569", fontSize:10 }}>+{urgentTasks.length-5} more — go to Tasks tab</div>}
         </SectionCard>
 
-        <SectionCard title="🧊 Deals Gone Cold" count={goneCold.length} color="#60a5fa" tabId="pipeline" emptyMsg="No deals are stagnating — pipeline is moving.">
+        <SectionCard title="Deals Gone Cold" count={goneCold.length} color="#60a5fa" tabId="pipeline" emptyMsg="No deals are stagnating — pipeline is moving.">
           {goneCold.slice(0,5).map(d => (
             <ItemRow key={d.id} label={d.name} sub={`${d.stage} · ${d.client}`} badge={`${d.daysInStage}d in stage`} badgeColor="#60a5fa"/>
           ))}
           {goneCold.length > 5 && <div style={{ color:"#475569", fontSize:10 }}>+{goneCold.length-5} more</div>}
         </SectionCard>
 
-        <SectionCard title="📞 Contact Outreach Queue" count={outreachDue.length} color="#ec4899" tabId="contacts" emptyMsg="All contacts recently touched — great work.">
+        <SectionCard title="Contact Outreach Queue" count={outreachDue.length} color="#ec4899" tabId="contacts" emptyMsg="All contacts recently touched — great work.">
           {outreachDue.slice(0,5).map(c => {
             const days = c.lastContact ? Math.floor((now - new Date(c.lastContact+"T00:00:00")) / 86400000) : null;
             return <ItemRow key={c.id} label={c.name} sub={`${c.company} · ${c.relationshipLevel}`} badge={days !== null ? `${days}d since contact` : "Never contacted"} badgeColor="#ec4899"/>;
@@ -2530,7 +4150,7 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
         </SectionCard>
 
         {staleListings.length > 0 && (
-          <SectionCard title="🏢 Listings Needing Attention" count={staleListings.length} color="#f97316" tabId="listings" emptyMsg="">
+          <SectionCard title="Listings Needing Attention" count={staleListings.length} color="#f97316" tabId="listings" emptyMsg="">
             {staleListings.slice(0,4).map(l => (
               <ItemRow key={l.id} label={l.name} sub={`${l.submarket} · ${l.sqft?.toLocaleString()} SF`} badge="No showings 30d+" badgeColor="#f97316"/>
             ))}
@@ -2538,7 +4158,7 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
         )}
 
         {upcomingExpirations.length > 0 && (
-          <SectionCard title="📡 Lease Expirations (Next 12mo)" count={upcomingExpirations.length} color="#ec4899" tabId="lease-radar" emptyMsg="">
+          <SectionCard title="Lease Expirations — Next 12mo" count={upcomingExpirations.length} color="#ec4899" tabId="lease-radar" emptyMsg="">
             {upcomingExpirations.slice(0,4).map(d => {
               const days = Math.floor((new Date(d.leaseExpiresDate + "T00:00:00") - now) / 86400000);
               return <ItemRow key={d.id} label={d.name} sub={`${d.client} · ${d.submarket}`} badge={days < 0 ? "Expired" : days < 90 ? `${days}d left` : `${Math.round(days/30)}mo left`} badgeColor={days < 90 ? "#ef4444" : days < 180 ? "#f59e0b" : "#60a5fa"}/>;
@@ -2548,7 +4168,7 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
 
         {/* Closing this month detail */}
         {closingThisMonth.length > 0 && (
-          <SectionCard title="💰 Closing This Month" count={closingThisMonth.length} color="#f59e0b" tabId="pipeline" emptyMsg="">
+          <SectionCard title="Closing This Month" count={closingThisMonth.length} color="#f59e0b" tabId="pipeline" emptyMsg="">
             {closingThisMonth.map(d => (
               <ItemRow key={d.id} label={d.name} sub={`${d.stage} · ${d.probability}% probability`} badge={fmt(d.weighted)} badgeColor="#f59e0b"/>
             ))}
@@ -2559,6 +4179,615 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
   );
 }
 
+
+// ── Underwriting Tab ────────────────────────────────────────────
+
+// ── Underwriting Tab (FIXED VERSION) ────────────────────────────────────────────
+// ── INSTITUTIONAL-GRADE INVESTMENT ANALYSIS & DEAL MODELER (Cushman/CBRE/JLL Style) ────────────────────────────────────────────
+
+function UnderwritingTab() {
+  const [uwData, setUwData] = useState({
+    // PROPERTY INFO
+    propertyName: "Industrial Distribution Center",
+    propertyType: "Industrial",
+    location: "Dallas-Fort Worth",
+    sqft: 150000,
+    yearBuilt: 2015,
+    
+    // ACQUISITION
+    purchasePrice: 15000000,
+    closingCosts: 450000,
+    capitalReserves: 300000,
+    
+    // RENT ROLL (Units)
+    rentRoll: [
+      { id: 1, tenant: "Tenant A", sqft: 50000, rentPerSqft: 6.50, leaseExpiry: "2026-12-31", type: "Industrial" },
+      { id: 2, tenant: "Tenant B", sqft: 50000, rentPerSqft: 6.75, leaseExpiry: "2027-06-30", type: "Industrial" },
+      { id: 3, tenant: "Tenant C", sqft: 50000, rentPerSqft: 7.00, leaseExpiry: "2028-03-31", type: "Industrial" },
+    ],
+    
+    // FINANCING
+    seniorDebt: 10500000,
+    seniorRate: 6.75,
+    seniorAmort: 25,
+    seniorTerm: 10,
+    mezDebt: 0,
+    mezRate: 10.0,
+    mezTerm: 7,
+    
+    // OPERATING EXPENSES (T-12 Annual)
+    realEstateTax: 180000,
+    insurance: 60000,
+    utilities: 45000,
+    repairs: 75000,
+    management: 90000, // 6% of EGI
+    cam: 30000,
+    reserves: 60000, // 4% of EGI
+    otherOpex: 25000,
+    
+    // ASSUMPTIONS
+    vacancyRate: 5,
+    rentGrowth: 2.5,
+    opexGrowth: 2.0,
+    exitCapRate: 7.0,
+    saleExpenses: 1.0,
+    holdingPeriod: 5,
+  });
+
+  const [activeTab, setActiveTab] = useState("property");
+  const [rentRollEdit, setRentRollEdit] = useState(null);
+  const [projectionYears, setProjectionYears] = useState(5);
+
+  const calcs = useMemo(() => {
+    // ACQUISITION COSTS
+    const purchasePrice = parseFloat(uwData.purchasePrice) || 0;
+    const closingCosts = parseFloat(uwData.closingCosts) || 0;
+    const capitalReserves = parseFloat(uwData.capitalReserves) || 0;
+    const totalAcquisitionCost = purchasePrice + closingCosts + capitalReserves;
+    const sqft = parseFloat(uwData.sqft) || 1;
+
+    // SOURCES & USES
+    const loanAmount = parseFloat(uwData.loanAmount) || 0;
+    const equity = totalAcquisitionCost - loanAmount;
+    const ltv = purchasePrice > 0 ? (loanAmount / purchasePrice) * 100 : 0;
+    const ltc = totalAcquisitionCost > 0 ? (loanAmount / totalAcquisitionCost) * 100 : 0;
+
+    // FINANCING METRICS
+    const interestRate = parseFloat(uwData.interestRate) || 0;
+    const amortization = parseInt(uwData.amortization) || 25;
+    const monthlyRate = interestRate / 100 / 12;
+    const numPayments = amortization * 12;
+    const monthlyPayment = monthlyRate > 0 
+      ? loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1)
+      : 0;
+    const annualDebtService = monthlyPayment * 12;
+
+    // INCOME PROJECTIONS
+    const grossPotentialRent = parseFloat(uwData.grossPotentialRent) || 0;
+    const otherIncome = parseFloat(uwData.otherIncome) || 0;
+    const vacancyRate = parseFloat(uwData.vacancyRate) || 0;
+    const rentGrowth = parseFloat(uwData.rentGrowth) || 0;
+    const vacancyLoss = (grossPotentialRent * vacancyRate) / 100;
+    const effectiveGrossIncome = grossPotentialRent + otherIncome - vacancyLoss;
+
+    // OPERATING EXPENSES (Year 1)
+    const propertyTax = parseFloat(uwData.propertyTax) || 0;
+    const insurance = parseFloat(uwData.insurance) || 0;
+    const utilities = parseFloat(uwData.utilities) || 0;
+    const maintenance = parseFloat(uwData.maintenance) || 0;
+    const management = parseFloat(uwData.management) || 0;
+    const capReserves = parseFloat(uwData.capReserves) || 0;
+    const otherOpex = parseFloat(uwData.otherOpex) || 0;
+    const totalOpex = propertyTax + insurance + utilities + maintenance + management + capReserves + otherOpex;
+    const opexRatio = effectiveGrossIncome > 0 ? (totalOpex / effectiveGrossIncome) * 100 : 0;
+    const opexGrowth = parseFloat(uwData.opexGrowth) || 0;
+
+    // YEAR 1 NOI
+    const noi = effectiveGrossIncome - totalOpex;
+    const capRate = purchasePrice > 0 ? (noi / purchasePrice) * 100 : 0;
+    const dscr = annualDebtService > 0 ? noi / annualDebtService : 0;
+    const cashFlowAfterDebt = noi - annualDebtService;
+    const cashOnCash = equity > 0 ? (cashFlowAfterDebt / equity) * 100 : 0;
+
+    // PRICE METRICS
+    const pricePerSqft = sqft > 0 ? purchasePrice / sqft : 0;
+    const rentPerSqft = sqft > 0 ? grossPotentialRent / sqft : 0;
+
+    // MULTI-YEAR PROJECTION
+    let projections = [];
+    let remainingBalance = loanAmount;
+    let cumulativeCashFlow = 0;
+
+    for (let year = 1; year <= projectionYears; year++) {
+      const yearRent = grossPotentialRent * Math.pow(1 + rentGrowth / 100, year - 1);
+      const yearVacancy = (yearRent * vacancyRate) / 100;
+      const yearEgi = yearRent + otherIncome - yearVacancy;
+      const yearOpex = totalOpex * Math.pow(1 + opexGrowth / 100, year - 1);
+      const yearNoi = yearEgi - yearOpex;
+      
+      // Principal paydown
+      const yearInterest = remainingBalance * (interestRate / 100);
+      const yearPrincipal = annualDebtService - yearInterest;
+      remainingBalance = Math.max(0, remainingBalance - yearPrincipal);
+      
+      const yearCashFlow = yearNoi - annualDebtService;
+      cumulativeCashFlow += yearCashFlow;
+
+      projections.push({
+        year,
+        rent: yearRent,
+        egi: yearEgi,
+        opex: yearOpex,
+        noi: yearNoi,
+        debtService: annualDebtService,
+        interest: yearInterest,
+        principal: yearPrincipal,
+        cashFlow: yearCashFlow,
+        cumulativeCashFlow,
+        remainingBalance,
+      });
+    }
+
+    // EXIT ANALYSIS
+    const exitYear = projections[projectionYears - 1];
+    const exitCapRate = parseFloat(uwData.exitCapRate) || 7.0;
+    const projectedExitValue = exitYear ? (exitYear.noi / (exitCapRate / 100)) : purchasePrice;
+    const saleExpenses = (projectedExitValue * (parseFloat(uwData.saleExpenses) || 0)) / 100;
+    const proceedsAfterDebt = projectedExitValue - saleExpenses - remainingBalance;
+    const totalCashReturned = cumulativeCashFlow + proceedsAfterDebt;
+    const equityMultiple = equity > 0 ? totalCashReturned / equity : 0;
+
+    // IRR Calculation (simplified)
+    let irr = 0;
+    if (equity > 0 && totalCashReturned > 0) {
+      const totalReturn = (totalCashReturned - equity) / equity;
+      irr = (Math.pow(1 + totalReturn, 1 / projectionYears) - 1) * 100;
+    }
+
+    return {
+      // Acquisition
+      totalAcquisitionCost,
+      equity,
+      ltv: ltv.toFixed(2),
+      ltc: ltc.toFixed(2),
+      
+      // Financing
+      monthlyPayment: monthlyPayment.toFixed(2),
+      annualDebtService: annualDebtService.toFixed(2),
+      
+      // Income
+      grossPotentialRent: grossPotentialRent.toFixed(2),
+      vacancyLoss: vacancyLoss.toFixed(2),
+      effectiveGrossIncome: effectiveGrossIncome.toFixed(2),
+      
+      // Expenses
+      totalOpex: totalOpex.toFixed(2),
+      opexRatio: opexRatio.toFixed(2),
+      
+      // Returns
+      noi: noi.toFixed(2),
+      capRate: capRate.toFixed(2),
+      dscr: dscr.toFixed(2),
+      cashFlowAfterDebt: cashFlowAfterDebt.toFixed(2),
+      cashOnCash: cashOnCash.toFixed(2),
+      
+      // Metrics
+      pricePerSqft: pricePerSqft.toFixed(2),
+      rentPerSqft: rentPerSqft.toFixed(2),
+      
+      // Exit
+      projectedExitValue: projectedExitValue.toFixed(2),
+      proceedsAfterDebt: proceedsAfterDebt.toFixed(2),
+      totalCashReturned: totalCashReturned.toFixed(2),
+      equityMultiple: equityMultiple.toFixed(2),
+      irr: irr.toFixed(2),
+      
+      // Projections
+      projections,
+    };
+  }, [uwData, projectionYears]);
+
+  const handleChange = (field, value) => {
+    setUwData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const inputStyle = {
+    background: DS.panel,
+    border: `1px solid ${DS.border}`,
+    borderRadius: DS.r.sm,
+    color: DS.text,
+    padding: "10px 12px",
+    fontSize: DS.fs.lg,
+    outline: "none",
+    width: "100%",
+    boxSizing: "border-box",
+  };
+
+  const labelStyle = {
+    color: DS.textMute,
+    fontSize: DS.fs.xs,
+    fontWeight: DS.fw.bold,
+    marginBottom: 6,
+    display: "block",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+  };
+
+  const metricStyle = {
+    background: DS.panel,
+    border: `1px solid ${DS.border}`,
+    borderRadius: DS.r.lg,
+    padding: "16px 18px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  };
+
+  const metricValue = (value, color = DS.accent) => ({
+    fontSize: DS.fs.h2,
+    fontWeight: DS.fw.black,
+    color: color,
+    fontFamily: "'DM Mono', monospace",
+  });
+
+  const metricLabel = {
+    fontSize: DS.fs.xs,
+    color: DS.textMute,
+    fontWeight: DS.fw.bold,
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+  };
+
+  return (
+    <div style={{ padding: "20px", maxWidth: "1600px", margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 24 }}>
+        <div>
+          <h1 style={{ color: DS.text, fontSize: DS.fs.h1, fontWeight: DS.fw.black, marginBottom: 4 }}>Investment Analysis & Deal Modeler</h1>
+          <p style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Professional commercial real estate underwriting with multi-year projections</p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ color: DS.textMute, fontSize: 10, fontWeight: 700, marginBottom: 4 }}>PURCHASE PRICE</div>
+          <div style={{ color: DS.accent, fontSize: 24, fontWeight: 900, fontFamily: "'DM Mono', monospace" }}>${parseFloat(uwData.purchasePrice).toLocaleString()}</div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 8, borderBottom: `1px solid ${DS.border}`, paddingBottom: 12, marginBottom: 24, overflowX: "auto" }}>
+        {[
+          { id: "sources", label: "Sources & Uses" },
+          { id: "income", label: "Income Analysis" },
+          { id: "expenses", label: "Operating Expenses" },
+          { id: "financing", label: "Financing" },
+          { id: "projections", label: "5-Year Projection" },
+          { id: "exit", label: "Exit Analysis" }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              background: activeTab === tab.id ? DS.accent : "transparent",
+              color: activeTab === tab.id ? "#0f1e2e" : DS.textMute,
+              border: "none",
+              padding: "8px 16px",
+              borderRadius: DS.r.sm,
+              cursor: "pointer",
+              fontSize: DS.fs.lg,
+              fontWeight: DS.fw.semi,
+              transition: "all 0.2s ease",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content Grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        {/* Inputs */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {activeTab === "sources" && (
+            <>
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+                <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: 13, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.5px" }}>SOURCES</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <div>
+                    <label style={labelStyle}>Loan Amount ($)</label>
+                    <input type="number" value={uwData.loanAmount} onChange={e => handleChange("loanAmount", e.target.value)} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Equity ($)</label>
+                    <input type="number" value={calcs.equity} disabled style={{...inputStyle, opacity: 0.6}} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+                <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: 13, marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.5px" }}>USES</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  <div>
+                    <label style={labelStyle}>Purchase Price ($)</label>
+                    <input type="number" value={uwData.purchasePrice} onChange={e => handleChange("purchasePrice", e.target.value)} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Closing Costs ($)</label>
+                    <input type="number" value={uwData.closingCosts} onChange={e => handleChange("closingCosts", e.target.value)} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Capital Reserves ($)</label>
+                    <input type="number" value={uwData.capitalReserves} onChange={e => handleChange("capitalReserves", e.target.value)} style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Square Footage (SF)</label>
+                    <input type="number" value={uwData.sqft} onChange={e => handleChange("sqft", e.target.value)} style={inputStyle} />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "income" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <label style={labelStyle}>Gross Potential Rent ($)</label>
+                  <input type="number" value={uwData.grossPotentialRent} onChange={e => handleChange("grossPotentialRent", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Other Income ($)</label>
+                  <input type="number" value={uwData.otherIncome} onChange={e => handleChange("otherIncome", e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <label style={labelStyle}>Vacancy Rate (%)</label>
+                  <input type="number" step="0.1" value={uwData.vacancyRate} onChange={e => handleChange("vacancyRate", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Annual Rent Growth (%)</label>
+                  <input type="number" step="0.1" value={uwData.rentGrowth} onChange={e => handleChange("rentGrowth", e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "expenses" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <label style={labelStyle}>Property Tax ($)</label>
+                  <input type="number" value={uwData.propertyTax} onChange={e => handleChange("propertyTax", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Insurance ($)</label>
+                  <input type="number" value={uwData.insurance} onChange={e => handleChange("insurance", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Utilities ($)</label>
+                  <input type="number" value={uwData.utilities} onChange={e => handleChange("utilities", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Maintenance ($)</label>
+                  <input type="number" value={uwData.maintenance} onChange={e => handleChange("maintenance", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Management ($)</label>
+                  <input type="number" value={uwData.management} onChange={e => handleChange("management", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Cap Reserves ($)</label>
+                  <input type="number" value={uwData.capReserves} onChange={e => handleChange("capReserves", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Other OpEx ($)</label>
+                  <input type="number" value={uwData.otherOpex} onChange={e => handleChange("otherOpex", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Annual OpEx Growth (%)</label>
+                  <input type="number" step="0.1" value={uwData.opexGrowth} onChange={e => handleChange("opexGrowth", e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "financing" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <label style={labelStyle}>Interest Rate (%)</label>
+                  <input type="number" step="0.01" value={uwData.interestRate} onChange={e => handleChange("interestRate", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Amortization (Years)</label>
+                  <input type="number" value={uwData.amortization} onChange={e => handleChange("amortization", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Loan Term (Years)</label>
+                  <input type="number" value={uwData.loanTerm} onChange={e => handleChange("loanTerm", e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "projections" && (
+            <>
+              <div>
+                <label style={labelStyle}>Projection Period (Years)</label>
+                <input type="number" min="1" max="30" value={projectionYears} onChange={e => setProjectionYears(parseInt(e.target.value) || 5)} style={inputStyle} />
+              </div>
+            </>
+          )}
+
+          {activeTab === "exit" && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <label style={labelStyle}>Exit Cap Rate (%)</label>
+                  <input type="number" step="0.1" value={uwData.exitCapRate} onChange={e => handleChange("exitCapRate", e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Sale Expenses (% of Price)</label>
+                  <input type="number" step="0.1" value={uwData.saleExpenses} onChange={e => handleChange("saleExpenses", e.target.value)} style={inputStyle} />
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Metrics Display */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {activeTab === "sources" && (
+            <>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Total Acquisition Cost</div>
+                <div style={metricValue(calcs.totalAcquisitionCost)}>${parseFloat(calcs.totalAcquisitionCost).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>LTV (Loan-to-Value)</div>
+                <div style={metricValue(calcs.ltv, parseFloat(calcs.ltv) <= 75 ? DS.green : DS.red)}>{calcs.ltv}%</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>LTC (Loan-to-Cost)</div>
+                <div style={metricValue(calcs.ltc)}>{calcs.ltc}%</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Price per SF</div>
+                <div style={metricValue(calcs.pricePerSqft)}>${parseFloat(calcs.pricePerSqft).toLocaleString()}</div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "income" && (
+            <>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Effective Gross Income</div>
+                <div style={metricValue(calcs.effectiveGrossIncome)}>${parseFloat(calcs.effectiveGrossIncome).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Vacancy Loss</div>
+                <div style={metricValue(calcs.vacancyLoss, DS.red)}>${parseFloat(calcs.vacancyLoss).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Rent per SF (Annual)</div>
+                <div style={metricValue(calcs.rentPerSqft)}>${parseFloat(calcs.rentPerSqft).toLocaleString()}</div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "expenses" && (
+            <>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Total Operating Expenses</div>
+                <div style={metricValue(calcs.totalOpex)}>${parseFloat(calcs.totalOpex).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>OpEx Ratio</div>
+                <div style={metricValue(calcs.opexRatio)}>{calcs.opexRatio}%</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Annual NOI</div>
+                <div style={metricValue(calcs.noi)}>${parseFloat(calcs.noi).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Cap Rate</div>
+                <div style={metricValue(calcs.capRate)}>{calcs.capRate}%</div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "financing" && (
+            <>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Monthly Payment</div>
+                <div style={metricValue(calcs.monthlyPayment)}>${parseFloat(calcs.monthlyPayment).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Annual Debt Service</div>
+                <div style={metricValue(calcs.annualDebtService)}>${parseFloat(calcs.annualDebtService).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>DSCR</div>
+                <div style={metricValue(calcs.dscr, parseFloat(calcs.dscr) >= 1.25 ? DS.green : parseFloat(calcs.dscr) >= 1.0 ? DS.accent : DS.red)}>{calcs.dscr}x</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Year 1 Cash Flow</div>
+                <div style={metricValue(calcs.cashFlowAfterDebt, parseFloat(calcs.cashFlowAfterDebt) > 0 ? DS.green : DS.red)}>${parseFloat(calcs.cashFlowAfterDebt).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "projections" && (
+            <>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Cumulative Cash Flow</div>
+                <div style={metricValue(calcs.projections[calcs.projections.length - 1]?.cumulativeCashFlow || 0, DS.green)}>${parseFloat(calcs.projections[calcs.projections.length - 1]?.cumulativeCashFlow || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Remaining Loan Balance</div>
+                <div style={metricValue(calcs.projections[calcs.projections.length - 1]?.remainingBalance || 0)}>${parseFloat(calcs.projections[calcs.projections.length - 1]?.remainingBalance || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+            </>
+          )}
+
+          {activeTab === "exit" && (
+            <>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Projected Exit Value</div>
+                <div style={metricValue(calcs.projectedExitValue)}>${parseFloat(calcs.projectedExitValue).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Proceeds After Debt</div>
+                <div style={metricValue(calcs.proceedsAfterDebt, DS.green)}>${parseFloat(calcs.proceedsAfterDebt).toLocaleString("en-US", { maximumFractionDigits: 0 })}</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>Equity Multiple</div>
+                <div style={metricValue(calcs.equityMultiple)}>{calcs.equityMultiple}x</div>
+              </div>
+              <div style={metricStyle}>
+                <div style={metricLabel}>IRR</div>
+                <div style={metricValue(calcs.irr, parseFloat(calcs.irr) > 15 ? DS.green : DS.accent)}>{calcs.irr}%</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 5-Year Projection Table */}
+      {activeTab === "projections" && (
+        <div style={{ marginTop: 24, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "20px", overflowX: "auto" }}>
+          <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: 14, marginBottom: 16 }}>5-Year Cash Flow Projection</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: `2px solid ${DS.border}` }}>
+                <th style={{ textAlign: "left", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Year</th>
+                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Rent</th>
+                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>EGI</th>
+                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>OpEx</th>
+                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>NOI</th>
+                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Debt Service</th>
+                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Cash Flow</th>
+                <th style={{ textAlign: "right", padding: "10px", color: DS.textMute, fontWeight: DS.fw.bold }}>Remaining Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {calcs.projections.map(p => (
+                <tr key={p.year} style={{ borderBottom: `1px solid ${DS.border}` }}>
+                  <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.bold }}>Year {p.year}</td>
+                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.rent / 1000).toFixed(1)}k</td>
+                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.egi / 1000).toFixed(1)}k</td>
+                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.opex / 1000).toFixed(1)}k</td>
+                  <td style={{ textAlign: "right", padding: "10px", color: DS.green, fontWeight: DS.fw.bold }}>${(p.noi / 1000).toFixed(1)}k</td>
+                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.debtService / 1000).toFixed(1)}k</td>
+                  <td style={{ textAlign: "right", padding: "10px", color: p.cashFlow > 0 ? DS.green : DS.red, fontWeight: DS.fw.bold }}>${(p.cashFlow / 1000).toFixed(1)}k</td>
+                  <td style={{ textAlign: "right", padding: "10px", color: DS.textMute }}>${(p.remainingBalance / 1000).toFixed(1)}k</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 export default function PipelineDashboard() {
   const [deals, setDeals] = useState(() => {
     try { const s = localStorage.getItem("cre-industrial-v5"); return s ? JSON.parse(s) : initialDeals; } catch { return initialDeals; }
@@ -2603,6 +4832,14 @@ export default function PipelineDashboard() {
   useEffect(() => { localStorage.setItem("cre-pipeline-goal", String(gciGoal)); }, [gciGoal]);
 
   const [activeTab, setActiveTab] = useState("home");
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setShowSearch(s => !s); }
+      if (e.key === "Escape") { setShowSearch(false); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
   const [modal, setModal] = useState(null);
   const [quickAdd, setQuickAdd] = useState(false);
   const [activityDeal, setActivityDeal] = useState(null);
@@ -2610,10 +4847,18 @@ export default function PipelineDashboard() {
   const [documentsDeal, setDocumentsDeal] = useState(null);
   const [timelineDeal, setTimelineDeal] = useState(null);
   const [winLossDeal, setWinLossDeal] = useState(null);
+  const [closedFollowUp, setClosedFollowUp] = useState(null);
+  const [inlineEdit, setInlineEdit] = useState(null);
+  const [showDailySync, setShowDailySync] = useState(false);
+  const [checklistDeal, setChecklistDeal] = useState(null);
+  const [showCSVImport, setShowCSVImport] = useState(false);
   const [filters, setFilters] = useState({ search: "", stages: [], subtypes: [], dealTypes: [], leadSources: [], dateFrom: "", dateTo: "" });
   const [sortKey, setSortKey] = useState("expectedClose");
   const [sortDir, setSortDir] = useState("asc");
   const [showFilters, setShowFilters] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const enriched = useMemo(() => deals.map(calcDeal), [deals]);
   const activeEnriched = enriched.filter(d => d.stage !== "Lost");
@@ -2647,7 +4892,13 @@ export default function PipelineDashboard() {
   const lossBreakdown = LOSS_REASONS.map(r => ({ reason: r, count: lostDeals.filter(d => d.lossReason === r).length })).filter(x => x.count > 0);
   const monthlyData = MONTHS.map((month, i) => {
     const ms = String(thisYear) + "-" + String(i + 1).padStart(2, "0");
-    return { month, commission: closedDeals.filter(d => d.expectedClose?.startsWith(ms)).reduce((s, d) => s + d.netCommission, 0), goal: gciGoal / 12 };
+    const msLY = String(thisYear - 1) + "-" + String(i + 1).padStart(2, "0");
+    return {
+      month,
+      commission: closedDeals.filter(d => d.expectedClose?.startsWith(ms)).reduce((s, d) => s + d.netCommission, 0),
+      lastYear: closedDeals.filter(d => d.expectedClose?.startsWith(msLY)).reduce((s, d) => s + d.netCommission, 0),
+      goal: gciGoal / 12
+    };
   });
   const stageChartData = STAGES.filter(s => s !== "Lost").map(stage => ({
     stage, "Deals": enriched.filter(d => d.stage === stage).length,
@@ -2657,6 +4908,11 @@ export default function PipelineDashboard() {
     source: src, deals: enriched.filter(d => d.leadSource === src).length,
     commission: enriched.filter(d => d.leadSource === src && d.stage === "Closed").reduce((s, d) => s + d.netCommission, 0),
   })).filter(s => s.deals > 0).sort((a,b) => b.deals - a.deals);
+  const lastYearClosed = closedDeals.filter(d => d.expectedClose?.startsWith(String(thisYear - 1))).reduce((s,d) => s + d.netCommission, 0);
+  const lastYearDeals = closedDeals.filter(d => d.expectedClose?.startsWith(String(thisYear - 1))).length;
+  const thisYearDeals = closedDeals.filter(d => d.expectedClose?.startsWith(String(thisYear))).length;
+  const yoyCommPct = lastYearClosed > 0 ? ((closedYTD - lastYearClosed) / lastYearClosed * 100) : null;
+  const yoyDealsPct = lastYearDeals > 0 ? ((thisYearDeals - lastYearDeals) / lastYearDeals * 100) : null;
 
   const saveModal = (form) => {
     const existing = deals.find(x => x.id === form.id);
@@ -2677,23 +4933,56 @@ export default function PipelineDashboard() {
   };
   const saveQuickAdd = (form) => {
     const d = { name: form.name, client: "", counterparty: "", stage: form.stage || "Prospect", dealType: form.dealType || "Sale", repType: "Seller/Landlord Rep", subtype: "Distribution", sqft: parseFloat(form.sqft) || 0, dealTotal: 0, monthlyRent: 0, leaseTerm: 0, commissionRate: 5, probability: 25, expectedClose: "", notes: "", broker: "Me", daysInStage: 0, activities: [], followUpDate: "", leadSource: "Other", coBroker: "", splitPct: 100, won: null, lossReason: "", id: Date.now(), richNotes: [], submarket: "Northeast", tags: [], documents: [], stageHistory: [{ stage: form.stage || "Prospect", enteredDate: today, note: "Deal created (quick add)" }] };
+    toast("Deal added");
     setDeals(prev => [...prev, d]);
     setQuickAdd(false);
   };
-  const saveActivity = (updated) => { setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); setActivityDeal(updated); };
-  const saveRichNotes = (updated) => { setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); setRichNotesDeal(updated); };
-  const saveDocuments = (updated) => { setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); setDocumentsDeal(updated); };
-  const saveWinLoss = (updated) => {
+  const saveActivity = (updated) => { toast("Activity logged"); setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); setActivityDeal(updated); };
+  const saveRichNotes = (updated) => { toast("Note saved"); setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); setRichNotesDeal(updated); };
+  const saveDocuments = (updated) => { toast("Documents saved"); setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); setDocumentsDeal(updated); };
+  const saveWinLoss = (updated) => { toast(updated.stage === "Closed" ? "Deal marked won!" : "Deal marked lost", updated.stage === "Closed" ? "success" : "info");
     const existing = deals.find(x => x.id === updated.id);
     const newStage = updated.won ? "Closed" : "Lost";
     const stageHistory = [...(existing?.stageHistory || [{ stage: existing?.stage || "Unknown", enteredDate: today }]),
       { stage: newStage, enteredDate: today, note: updated.won ? "Deal closed/won" : `Lost: ${updated.lossReason||""}` }];
-    setDeals(prev => prev.map(d => d.id === updated.id ? { ...updated, stageHistory } : d));
+    const saved = { ...updated, stageHistory };
+    setDeals(prev => prev.map(d => d.id === updated.id ? saved : d));
     setWinLossDeal(null);
+    if (updated.won) setTimeout(() => setClosedFollowUp({ deal: saved, wasWon: true }), 300);
   };
-  const deleteDeal = (id) => { if (window.confirm("Delete this deal?")) setDeals(prev => prev.filter(d => d.id !== id)); };
+  const deleteDeal = (id) => { if (window.confirm("Delete this deal?")) { setDeals(prev => prev.filter(d => d.id !== id)); toast("Deal deleted", "error"); } };
   const sortBy = (key) => { if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc"); else { setSortKey(key); setSortDir("asc"); } };
   const toggleFilter = (key, val) => setFilters(f => ({ ...f, [key]: f[key].includes(val) ? f[key].filter(x => x !== val) : [...f[key], val] }));
+
+  const saveInlineField = (dealId, field, value) => {
+    let update = { [field]: value };
+    if (field === "stage") {
+      const d = deals.find(x => x.id === dealId);
+      if (d && d.stage !== value) {
+        update.stageHistory = [...(d.stageHistory || []), { stage: value, enteredDate: today, note: "Updated inline" }];
+        const stageProbMap = { "Prospect": 20, "Proposal": 45, "LOI": 65, "Under Contract": 85, "Closed": 100, "Lost": 0 };
+        if (stageProbMap[value] !== undefined && !d.probability) update.probability = stageProbMap[value];
+      }
+    }
+    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, ...update } : d));
+    setInlineEdit(null);
+    toast("Updated");
+  };
+
+  const saveChecklist = (updated) => {
+    setDeals(prev => prev.map(d => d.id === updated.id ? updated : d));
+    toast("Checklist saved");
+  };
+
+  const handleCSVImport = (type, records) => {
+    if (type === "deals") {
+      setDeals(prev => [...prev, ...records]);
+      toast(`${records.length} deals imported`);
+    } else {
+      setContacts(prev => [...prev, ...records]);
+      toast(`${records.length} contacts imported`);
+    }
+  };
 
   const printReport = () => {
     const win = window.open("", "_blank");
@@ -2772,7 +5061,7 @@ export default function PipelineDashboard() {
       <span>Industrial Pipeline CRE Tracker · Confidential</span>
       <span>Generated ${dateStr}</span>
     </div>
-    <br/><button onclick="window.print()" style="background:#f59e0b;border:none;padding:10px 24px;border-radius:8px;font-weight:800;font-size:14px;cursor:pointer;">🖨️ Print / Save as PDF</button>
+    <br/><button onclick="window.print()" style="background:#f59e0b;border:none;padding:10px 24px;border-radius:8px;font-weight:800;font-size:14px;cursor:pointer;">️ Print / Save as PDF</button>
     </body></html>`);
     win.document.close();
   };
@@ -2784,10 +5073,10 @@ export default function PipelineDashboard() {
     const a = document.createElement("a"); a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv); a.download="industrial-pipeline.csv"; a.click();
   };
 
-  const iStyle = { background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", padding: "7px 11px", fontSize: 12, outline: "none", width: "100%", boxSizing: "border-box" };
-  const fbtn = (active) => ({ background: active ? "#f59e0b" : "#0f1e2e", color: active ? "#0f1e2e" : "#94a3b8", border: `1px solid ${active ? "#f59e0b" : "#1e3048"}`, padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer" });
-  const th = (col) => ({ color: "#64748b", fontSize: 10, fontWeight: 700, textAlign: "left", padding: "9px 10px", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", background: sortKey === col ? "#1a2d42" : "transparent" });
-  const td = { padding: "11px 10px", color: "#cbd5e1", fontSize: 12, borderBottom: "1px solid #1e3048" };
+  const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "7px 11px", fontSize: 12, outline: "none", width: "100%", boxSizing: "border-box" };
+  const fbtn = (active) => ({ background: active ? DS.accent : DS.panel, color: active ? "#0a0f1a" : DS.textSub, border: `1px solid ${active ? DS.accent : DS.border}`, padding: "4px 12px", borderRadius: DS.r.full, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, cursor: "pointer", transition: "all 0.12s" });
+  const th = (col) => ({ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, textAlign: "left", padding: "9px 12px", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", letterSpacing: "0.6px", textTransform: "uppercase", background: sortKey === col ? DS.panelHi : "transparent", transition: "background 0.12s" });
+  const td = { padding: "11px 12px", color: DS.textSub, fontSize: DS.fs.md, borderBottom: `1px solid ${DS.border}` };
 
   const pendingTasks = tasks.filter(t=>!t.done).length;
   const overdueTasks = tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<today).length;
@@ -2809,252 +5098,331 @@ export default function PipelineDashboard() {
     return days <= 180;
   }).length;
 
-  const tabs = [
-    { id: "home", label: "Home", icon: "🏠", badge: (followUpsDue.length + urgentTasksCount + goneColdCount + outreachDueCount + criticalLeases) || 0 },
-    { id: "pipeline", label: "Pipeline", icon: "📈" },
-    { id: "analytics", label: "Analytics", icon: "📊" },
-    { id: "listings", label: "Listings", icon: "🏢", badge: listings.filter(l=>l.status==="Active").length },
-    { id: "forecast", label: "Forecast", icon: "💰" },
-    { id: "timeline", label: "Timeline", icon: "📅" },
-    { id: "prospecting", label: "Prospecting", icon: "📬", badge: campaigns.length },
-    { id: "comps", label: "Market Comps", icon: "🔍", badge: comps.length },
-    { id: "submarkets", label: "Submarkets", icon: "🗺️" },
-    { id: "contacts", label: "Contacts", icon: "👥", badge: contacts.length },
-    { id: "properties", label: "Properties", icon: "🏭", badge: properties.length },
-    { id: "tasks", label: "Tasks", icon: "✅", badge: overdueTasks > 0 ? overdueTasks : pendingTasks },
-    { id: "expenses", label: "Expenses", icon: "💸" },
-    { id: "intel", label: "Intel", icon: "🧠" },
-    { id: "lease-radar", label: "Lease Radar", icon: "📡" },
+  const brokerName = localStorage.getItem("cre-broker-name") || "Broker";
+  const brokerage = localStorage.getItem("cre-brokerage") || "SVN";
+
+  const NAV_GROUPS = [
+    { label: "Overview", items: [
+      { id: "home", label: "Home", badge: (followUpsDue.length + urgentTasksCount + goneColdCount + outreachDueCount + criticalLeases) || 0 },
+      { id: "pipeline", label: "Pipeline" },
+      { id: "analytics", label: "Analytics" },
+      { id: "intel", label: "Intel" },
+      { id: "underwriting", label: "Underwriting" },
+    ]},
+    { label: "Transactions", items: [
+      { id: "listings", label: "Listings", badge: listings.filter(l=>l.status==="Active").length },
+      { id: "forecast", label: "Forecast" },
+      { id: "timeline", label: "Timeline" },
+      { id: "comps", label: "Market Comps", badge: comps.length },
+      { id: "lease-radar", label: "Lease Radar" },
+    ]},
+    { label: "Relationships", items: [
+      { id: "contacts", label: "Contacts", badge: contacts.length },
+      { id: "properties", label: "Properties", badge: properties.length },
+      { id: "prospecting", label: "Prospecting", badge: campaigns.length },
+      { id: "submarkets", label: "Submarkets" },
+    ]},
+    { label: "Operations", items: [
+      { id: "tasks", label: "Tasks", badge: overdueTasks > 0 ? overdueTasks : pendingTasks },
+      { id: "expenses", label: "Expenses" },
+    ]},
   ];
 
-  return (
-    <div style={{ background: "#0d1826", minHeight: "100vh", fontFamily: "system-ui, sans-serif", color: "#f1f5f9" }}>
+  const activeLabel = NAV_GROUPS.flatMap(g => g.items).find(i => i.id === activeTab)?.label || "";
 
-      {/* ── Header ── */}
-      <div style={{ background: "#0f1e2e", borderBottom: "1px solid #1e3048", padding: "13px 22px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
-          <div style={{ background: "#f59e0b", borderRadius: 9, width: 38, height: 38, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 11, color: "#0d1826" }}>IND</div>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 900, color: "#f1f5f9" }}>Industrial Pipeline</div>
-            <div style={{ fontSize: 10, color: "#475569" }}>CRE Deal Tracking · {thisYear}</div>
+  const NavItem = ({ item }) => {
+    const isActive = activeTab === item.id;
+    return (
+      <button onClick={() => setActiveTab(item.id)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: sidebarCollapsed ? "center" : "space-between", gap: 8, padding: sidebarCollapsed ? "9px 4px" : "8px 16px 8px 18px", background: isActive ? `linear-gradient(90deg, ${DS.accent}14, transparent)` : "none", border: "none", borderLeft: isActive ? `2px solid ${DS.accent}` : "2px solid transparent", color: isActive ? DS.accent : DS.textMute, cursor: "pointer", fontSize: DS.fs.md, fontWeight: isActive ? DS.fw.semi : DS.fw.normal, transition: "all 0.12s", whiteSpace: "nowrap", overflow: "hidden" }}
+        onMouseEnter={e => { if (!isActive) { e.currentTarget.style.color = DS.textSub; e.currentTarget.style.background = DS.panelHi; }}}
+        onMouseLeave={e => { if (!isActive) { e.currentTarget.style.color = DS.textMute; e.currentTarget.style.background = "none"; }}}>
+        {!sidebarCollapsed && <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{item.label}</span>}
+        {!sidebarCollapsed && item.badge > 0 && <span style={{ background: isActive ? DS.accent : DS.borderHi, color: isActive ? DS.bg : DS.textSub, borderRadius: 20, fontSize: 9, padding: "1px 6px", fontWeight: DS.fw.black, flexShrink: 0 }}>{item.badge}</span>}
+        {sidebarCollapsed && item.badge > 0 && <span style={{ position: "absolute", top: 4, right: 4, background: DS.accent, color: DS.bg, borderRadius: "50%", width: 8, height: 8, fontSize: 0 }} />}
+      </button>
+    );
+  };
+
+  return (
+    <div className="noise-bg" style={{ background: DS.bg, minHeight: "100vh", fontFamily: "'DM Sans', system-ui, sans-serif", color: DS.text, display: "flex", flexDirection: "column", backgroundImage: "radial-gradient(ellipse 80% 50% at 20% -10%, #0f2040 0%, transparent 60%), radial-gradient(ellipse 60% 40% at 80% 110%, #0a1f30 0%, transparent 60%)" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-size: 14px; }
+        body { font-family: 'DM Sans', system-ui, sans-serif !important; background: #070e1a; }
+        ::-webkit-scrollbar { width: 4px; height: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #1a2d45; border-radius: 999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #243d5a; }
+        @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInLeft { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        button:focus-visible { outline: 2px solid ${DS.accent}; outline-offset: 2px; }
+        input:focus, select:focus, textarea:focus { border-color: ${DS.accent}66 !important; box-shadow: 0 0 0 3px ${DS.accent}12 !important; outline: none; }
+        input, select, textarea, button { font-family: 'DM Sans', system-ui, sans-serif; }
+        .tab-content { animation: fadeIn 0.18s ease; }
+        .card-hover { transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s; }
+        .card-hover:hover { border-color: ${DS.borderHi} !important; box-shadow: 0 4px 20px rgba(0,0,0,0.4); transform: translateY(-1px); }
+        .nav-item-active { position: relative; }
+        .nav-item-active::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 60%; background: ${DS.accent}; border-radius: 0 3px 3px 0; }
+        /* Noise texture overlay */
+        .noise-bg::after { content: ''; position: fixed; inset: 0; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E"); pointer-events: none; z-index: 9998; opacity: 0.4; }
+        .mono { font-family: 'DM Mono', monospace; }
+        .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; }
+        .glow-accent { box-shadow: 0 0 16px rgba(245,158,11,0.2); }
+      `}</style>
+
+      {/* ── Top bar ── */}
+      <div style={{ background: "rgba(11,21,36,0.85)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: `1px solid ${DS.border}`, padding: "0 20px", height: 54, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, zIndex: 100, position: "sticky", top: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={() => setSidebarCollapsed(c => !c)} style={{ background: "none", border: "none", color: DS.textMute, cursor: "pointer", padding: 4, display: "flex", alignItems: "center", borderRadius: 6 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <div style={{ background: `linear-gradient(135deg, ${DS.accent} 0%, #f97316 100%)`, borderRadius: DS.r.sm, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: DS.fw.black, fontSize: 10, color: "#0a0f1a", letterSpacing: "1px", boxShadow: "0 2px 8px rgba(245,158,11,0.4)", fontFamily: "'DM Mono', monospace" }}>IND</div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.3px" }}>Industrial Pipeline</div>
+              <div style={{ fontSize: 10, color: DS.textMute }}>{brokerage}</div>
+            </div>
+          </div>
+          <div style={{ width: 1, height: 24, background: DS.border, marginLeft: 4 }} />
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>{activeLabel}</div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {/* Status pills */}
+          {dueTodayDeals.length > 0 && <div onClick={() => setActiveTab("pipeline")} style={{ background: DS.green + "18", border: `1px solid ${DS.green}44`, borderRadius: 20, padding: "3px 10px", fontSize: DS.fs.xs, color: DS.green, fontWeight: DS.fw.bold, cursor: "pointer" }}>{dueTodayDeals.length} follow-up{dueTodayDeals.length > 1 ? "s" : ""} due</div>}
+          {agingDeals.length > 0 && <div onClick={() => setActiveTab("pipeline")} style={{ background: DS.red + "18", border: `1px solid ${DS.red}44`, borderRadius: 20, padding: "3px 10px", fontSize: DS.fs.xs, color: DS.red, fontWeight: DS.fw.bold, cursor: "pointer" }}>{agingDeals.length} gone cold</div>}
+          {overdueTasks > 0 && <div onClick={() => setActiveTab("tasks")} style={{ background: DS.accent + "18", border: `1px solid ${DS.accent}44`, borderRadius: 20, padding: "3px 10px", fontSize: DS.fs.xs, color: DS.accent, fontWeight: DS.fw.bold, cursor: "pointer" }}>{overdueTasks} overdue task{overdueTasks > 1 ? "s" : ""}</div>}
+
+          {/* Search */}
+          <button onClick={() => setShowSearch(true)} style={{ display: "flex", alignItems: "center", gap: 8, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "6px 12px", color: DS.textMute, fontSize: DS.fs.sm, cursor: "pointer" }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            Search
+            <kbd style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: 3, padding: "1px 5px", fontSize: 9, color: DS.textFaint }}>⌘K</kbd>
+          </button>
+
+          {/* Pipeline actions */}
+          {activeTab === "pipeline" && <>
+            <button onClick={() => setShowFilters(f => !f)} style={{ background: showFilters ? DS.borderHi : DS.panel, border: `1px solid ${DS.border}`, color: showFilters ? DS.text : DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: showFilters ? DS.fw.semi : DS.fw.normal }}>Filters</button>
+            <button onClick={printReport} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>PDF Report</button>
+            <button onClick={exportCSV} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>Export CSV</button>
+            <button onClick={() => setShowCSVImport(true)} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>Import CSV</button>
+            <button onClick={() => setQuickAdd(true)} style={{ background: DS.panel, border: `1px solid ${DS.accent}`, color: DS.accent, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>Quick Add</button>
+            <button onClick={() => setModal("new")} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "6px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>+ New Deal</button>
+          </>}
+
+          {/* Settings */}
+          <button onClick={() => setShowSettings(true)} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textMute, width: 32, height: 32, borderRadius: DS.r.sm, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+
+          {/* Profile */}
+          <div style={{ display: "flex", alignItems: "center", gap: 9, background: DS.panelHi, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.full, padding: "5px 12px 5px 5px", cursor: "default" }}>
+            <div style={{ width: 26, height: 26, borderRadius: "50%", background: `linear-gradient(135deg, ${DS.accent}, #f97316)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: DS.fw.black, color: "#0a0f1a", boxShadow: "0 2px 6px rgba(245,158,11,0.3)", flexShrink: 0 }}>{brokerName.charAt(0).toUpperCase()}</div>
+            <span style={{ color: DS.textSub, fontSize: DS.fs.sm, fontWeight: DS.fw.semi, letterSpacing: "-0.1px" }}>{brokerName}</span>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
-          {dueTodayDeals.length > 0 && <div style={{ background: "#0f2010", border: "1px solid #16a34a", borderRadius: 7, padding: "5px 11px", fontSize: 11, color: "#4ade80", fontWeight: 700 }}>📅 {dueTodayDeals.length} follow-up{dueTodayDeals.length > 1 ? "s" : ""} due</div>}
-          {agingDeals.length > 0 && <div style={{ background: "#2d1515", border: "1px solid #dc2626", borderRadius: 7, padding: "5px 11px", fontSize: 11, color: "#fca5a5", fontWeight: 700 }}>⚠️ {agingDeals.length} gone cold</div>}
-          {overdueTasks > 0 && <div onClick={()=>setActiveTab("tasks")} style={{ background: "#2d1a0a", border: "1px solid #c2410c", borderRadius: 7, padding: "5px 11px", fontSize: 11, color: "#fb923c", fontWeight: 700, cursor:"pointer" }}>🔔 {overdueTasks} overdue task{overdueTasks>1?"s":""}</div>}
-          {activeTab === "pipeline" && <>
-            <button onClick={() => setShowFilters(f => !f)} style={{ background: showFilters ? "#1e3048" : "#162032", border: "1px solid #1e3048", color: "#94a3b8", padding: "6px 13px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}>⚡ Filters</button>
-            <button onClick={printReport} style={{ background: "#162032", border: "1px solid #1e3048", color: "#94a3b8", padding: "6px 13px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}>🖨️ PDF</button>
-            <button onClick={exportCSV} style={{ background: "#162032", border: "1px solid #1e3048", color: "#94a3b8", padding: "6px 13px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}>↓ CSV</button>
-            <button onClick={() => setQuickAdd(true)} style={{ background: "#162032", border: "1px solid #f59e0b", color: "#f59e0b", padding: "6px 13px", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>⚡ Quick Add</button>
-            <button onClick={() => setModal("new")} style={{ background: "#f59e0b", border: "none", color: "#0f1e2e", padding: "6px 14px", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 800 }}>+ Full Deal</button>
-          </>}
+      </div>
+
+      {/* ── Body: sidebar + content ── */}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+
+        {/* ── Sidebar ── */}
+        <div style={{ width: sidebarCollapsed ? 48 : 210, flexShrink: 0, background: DS.surface, borderRight: `1px solid ${DS.border}`, display: "flex", flexDirection: "column", transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)", overflowY: "auto", overflowX: "hidden", boxShadow: "2px 0 20px rgba(0,0,0,0.3)" }}>
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={group.label} style={{ padding: sidebarCollapsed ? "10px 0" : "14px 0 6px", borderBottom: gi < NAV_GROUPS.length - 1 ? `1px solid ${DS.border}` : "none" }}>
+              {!sidebarCollapsed && <div style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.black, letterSpacing: "1.2px", textTransform: "uppercase", padding: "0 16px 8px", opacity: 0.7 }}>{group.label}</div>}
+              {group.items.map(item => <NavItem key={item.id} item={item} />)}
+            </div>
+          ))}
+
+          {/* Sidebar footer */}
+          {!sidebarCollapsed && (
+            <div style={{ marginTop: "auto", padding: "14px 16px", borderTop: `1px solid ${DS.border}`, background: `linear-gradient(to top, ${DS.bg}, transparent)` }}>
+              <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, lineHeight: 1.7 }}>
+                <div style={{ fontWeight: DS.fw.bold, color: DS.textSub, marginBottom: 1, fontSize: DS.fs.sm }}>{brokerName}</div>
+                <div style={{ color: DS.textMute }}>{brokerage}</div>
+                <div style={{ marginTop: 6, color: DS.textFaint, fontSize: 10 }}>{thisYear} · All data local</div>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
 
-      {/* ── Tab Bar ── */}
-      <div style={{ background: "#0f1e2e", borderBottom: "1px solid #1e3048", padding: "0 22px", display: "flex", gap: 2, overflowX: "auto" }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ background: "none", border: "none", borderBottom: activeTab === t.id ? "2px solid #f59e0b" : "2px solid transparent", color: activeTab === t.id ? "#f59e0b" : "#64748b", padding: "11px 16px", fontSize: 12, fontWeight: activeTab === t.id ? 800 : 500, cursor: "pointer", display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
-            {t.icon} {t.label}
-            {t.badge > 0 && <span style={{ background: activeTab === t.id ? "#f59e0b" : "#1e3048", color: activeTab === t.id ? "#0d1826" : "#64748b", borderRadius: 20, fontSize: 9, padding: "1px 6px", fontWeight: 800 }}>{t.badge}</span>}
-          </button>
-        ))}
-      </div>
+        {/* ── Main content ── */}
+        <div className="tab-content" style={{ flex: 1, overflowY: "auto", padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18 }}>
 
-      <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
+          {activeTab === "home" && <HomeBriefing deals={deals} tasks={tasks} contacts={contacts} listings={listings} gciGoal={gciGoal} closedYTD={closedYTD} totalWeighted={totalWeighted} onNavigate={setActiveTab} onStartSync={() => setShowDailySync(true)} />}
+          {activeTab === "listings" && <ListingsTab listings={listings} setListings={setListings} submarketList={submarketList} />}
+          {activeTab === "forecast" && <ForecastTab deals={deals} />}
+          {activeTab === "prospecting" && <ProspectingTab campaigns={campaigns} setCampaigns={setCampaigns} deals={deals} submarketList={submarketList} />}
+          {activeTab === "comps" && <MarketCompsTab comps={comps} setComps={setComps} submarketList={submarketList} />}
+          {activeTab === "submarkets" && <SubmarketTab deals={deals} listings={listings} comps={comps} submarketList={submarketList} setSubmarketList={setSubmarketList} />}
+          {activeTab === "contacts" && <ContactsTab contacts={contacts} setContacts={setContacts} deals={deals} submarketList={submarketList} />}
+          {activeTab === "tasks" && <TasksTab tasks={tasks} setTasks={setTasks} deals={deals} />}
+          {activeTab === "expenses" && <ExpenseTab expenses={expenses} setExpenses={setExpenses} closedYTD={closedYTD} gciGoal={gciGoal} />}
+          {activeTab === "properties" && <PropertyDBTab properties={properties} setProperties={setProperties} submarketList={submarketList} contacts={contacts} />}
+          {activeTab === "timeline" && <TimelineTab deals={deals} />}
+          {activeTab === "intel" && <IntelTab deals={deals} expenses={expenses} gciGoal={gciGoal} />}
+          {activeTab === "lease-radar" && <LeaseRadarTab deals={deals} contacts={contacts} onNavigate={setActiveTab} />}
 
-        {/* ── LISTINGS TAB ── */}
-        {activeTab === "home" && <HomeBriefing deals={deals} tasks={tasks} contacts={contacts} listings={listings} gciGoal={gciGoal} closedYTD={closedYTD} totalWeighted={totalWeighted} onNavigate={setActiveTab} />}
-        {activeTab === "listings" && <ListingsTab listings={listings} setListings={setListings} submarketList={submarketList} />}
+          {/* ── UNDERWRITING TAB ── */}
+          {activeTab === "underwriting" && <UnderwritingTab />}
 
-        {/* ── FORECAST TAB ── */}
-        {activeTab === "forecast" && <ForecastTab deals={deals} />}
-
-        {/* ── PROSPECTING TAB ── */}
-        {activeTab === "prospecting" && <ProspectingTab campaigns={campaigns} setCampaigns={setCampaigns} deals={deals} submarketList={submarketList} />}
-
-        {/* ── COMPS TAB ── */}
-        {activeTab === "comps" && <MarketCompsTab comps={comps} setComps={setComps} submarketList={submarketList} />}
-
-        {/* ── SUBMARKETS TAB ── */}
-        {activeTab === "submarkets" && <SubmarketTab deals={deals} listings={listings} comps={comps} submarketList={submarketList} setSubmarketList={setSubmarketList} />}
-
-        {/* ── CONTACTS TAB ── */}
-        {activeTab === "contacts" && <ContactsTab contacts={contacts} setContacts={setContacts} deals={deals} submarketList={submarketList} />}
-
-        {/* ── TASKS TAB ── */}
-        {activeTab === "tasks" && <TasksTab tasks={tasks} setTasks={setTasks} deals={deals} />}
-
-        {/* ── EXPENSES TAB ── */}
-        {activeTab === "expenses" && <ExpenseTab expenses={expenses} setExpenses={setExpenses} closedYTD={closedYTD} gciGoal={gciGoal} />}
-
-        {/* ── PROPERTIES TAB ── */}
-        {activeTab === "properties" && <PropertyDBTab properties={properties} setProperties={setProperties} submarketList={submarketList} contacts={contacts} />}
-
-        {/* ── TIMELINE TAB ── */}
-        {activeTab === "timeline" && <TimelineTab deals={deals} />}
-        {activeTab === "intel" && <IntelTab deals={deals} expenses={expenses} gciGoal={gciGoal} />}
-        {activeTab === "lease-radar" && <LeaseRadarTab deals={deals} contacts={contacts} onNavigate={setActiveTab} />}
-
-        {/* ── PIPELINE + ANALYTICS TABS ── */}
-        {(activeTab === "pipeline" || activeTab === "analytics") && <>
-          {/* ── Morning Briefing ── */}
-          <div style={{ background: "linear-gradient(135deg, #162032 0%, #1a2a40 100%)", borderRadius: 14, padding: "18px 22px", border: "1px solid #1e3048" }}>
-            <div style={{ color: "#f59e0b", fontSize: 13, fontWeight: 800, marginBottom: 12 }}>☀️ {greeting} — Here's your day</div>
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-              {dueTodayDeals.length > 0 ? (
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ color: "#4ade80", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>📅 FOLLOW-UPS DUE</div>
-                  {dueTodayDeals.slice(0,3).map(d => (
-                    <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0f2010", borderRadius: 7, padding: "7px 10px", marginBottom: 5, border: "1px solid #14532d" }}>
-                      <div><div style={{ color: "#f1f5f9", fontSize: 12, fontWeight: 600 }}>{d.name}</div><div style={{ color: "#64748b", fontSize: 10 }}>{d.client} {d.isOverdue ? "· ⚠️ Overdue" : ""}</div></div>
-                      <button onClick={() => setActivityDeal(d)} style={{ background: "#16a34a", border: "none", color: "#fff", padding: "4px 10px", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Log</button>
-                    </div>
-                  ))}
-                </div>
-              ) : <div style={{ flex: 1, minWidth: 200, color: "#475569", fontSize: 12 }}>✅ No follow-ups due today</div>}
-
-              {agingDeals.length > 0 ? (
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ color: "#fca5a5", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>⚠️ GONE COLD</div>
-                  {agingDeals.slice(0,3).map(d => (
-                    <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1a0f0f", borderRadius: 7, padding: "7px 10px", marginBottom: 5, border: "1px solid #3d1515" }}>
-                      <div><div style={{ color: "#f1f5f9", fontSize: 12, fontWeight: 600 }}>{d.name}</div><div style={{ color: "#64748b", fontSize: 10 }}>{d.daysInStage} days in {d.stage}</div></div>
-                      <button onClick={() => setModal(d)} style={{ background: "#7f1d1d", border: "none", color: "#fca5a5", padding: "4px 10px", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>Edit</button>
-                    </div>
-                  ))}
-                </div>
-              ) : <div style={{ flex: 1, minWidth: 200, color: "#475569", fontSize: 12 }}>✅ No deals gone cold</div>}
-
-              <div style={{ flex: 1, minWidth: 160 }}>
-                <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>📊 GOAL PACE</div>
-                <div style={{ background: "#0f1e2e", borderRadius: 7, padding: "10px 12px", border: "1px solid #1e3048" }}>
-                  <div style={{ color: "#f1f5f9", fontSize: 18, fontWeight: 800 }}>{gciProgress.toFixed(1)}%</div>
-                  <div style={{ color: "#64748b", fontSize: 10, marginBottom: 6 }}>{fmt(closedYTD)} of {fmt(gciGoal)}</div>
-                  <div style={{ background: "#1e3048", borderRadius: 999, height: 6, overflow: "hidden" }}>
-                    <div style={{ width: `${gciProgress}%`, height: "100%", borderRadius: 999, background: gciProgress >= 75 ? "#10b981" : gciProgress >= 40 ? "#f59e0b" : "#3b82f6" }} />
+          {/* ── PIPELINE + ANALYTICS TABS ── */}
+          {(activeTab === "pipeline" || activeTab === "analytics") && <>
+            {/* ── Morning Briefing ── */}
+            <div style={{ background: `linear-gradient(135deg, ${DS.panel} 0%, #0d1e30 100%)`, borderRadius: DS.r.lg, padding: "18px 22px", border: `1px solid ${DS.border}`, boxShadow: DS.shadow.md }}>
+              <div style={{ color: DS.accent, fontSize: DS.fs.lg, fontWeight: DS.fw.black, marginBottom: 12, letterSpacing: "-0.2px" }}>{greeting} — Here's your day</div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {dueTodayDeals.length > 0 ? (
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ color: DS.green, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Follow-ups due</div>
+                    {dueTodayDeals.slice(0,3).map(d => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: DS.bg, borderRadius: DS.r.sm, padding: "7px 10px", marginBottom: 5, border: `1px solid ${DS.border}` }}>
+                        <div><div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>{d.name}</div><div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{d.client} {d.isOverdue ? "· Overdue" : ""}</div></div>
+                        <button onClick={() => setActivityDeal(d)} style={{ background: DS.green, border: "none", color: "#fff", padding: "4px 10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>Log</button>
+                      </div>
+                    ))}
                   </div>
-                  <div style={{ color: "#475569", fontSize: 10, marginTop: 5 }}>Month {thisMonth + 1} of 12 · {winRate !== null ? `${winRate}% win rate` : "No closed deals yet"}</div>
+                ) : <div style={{ flex: 1, minWidth: 200, color: DS.textMute, fontSize: DS.fs.md }}>No follow-ups due today</div>}
+                {agingDeals.length > 0 ? (
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ color: DS.red, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Gone cold</div>
+                    {agingDeals.slice(0,3).map(d => (
+                      <div key={d.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: DS.bg, borderRadius: DS.r.sm, padding: "7px 10px", marginBottom: 5, border: `1px solid ${DS.border}` }}>
+                        <div><div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>{d.name}</div><div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{d.daysInStage} days in {d.stage}</div></div>
+                        <button onClick={() => setModal(d)} style={{ background: DS.red + "22", border: `1px solid ${DS.red}44`, color: DS.red, padding: "4px 10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>Edit</button>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div style={{ flex: 1, minWidth: 200, color: DS.textMute, fontSize: DS.fs.md }}>No stalled deals</div>}
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <div style={{ color: DS.textSub, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Goal Pace</div>
+                  <div style={{ background: DS.bg, borderRadius: DS.r.sm, padding: "10px 12px", border: `1px solid ${DS.border}` }}>
+                    <div style={{ color: DS.text, fontSize: 18, fontWeight: DS.fw.black }}>{gciProgress.toFixed(1)}%</div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 6 }}>{fmt(closedYTD)} of {fmt(gciGoal)}</div>
+                    <div style={{ background: DS.border, borderRadius: 999, height: 5, overflow: "hidden" }}>
+                      <div style={{ width: `${gciProgress}%`, height: "100%", borderRadius: 999, background: gciProgress >= 75 ? DS.green : gciProgress >= 40 ? DS.accent : DS.blue }} />
+                    </div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 4 }}>Month {thisMonth + 1} of 12 · {winRate !== null ? `${winRate}% win rate` : "No closed deals yet"}</div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* ── Stat Cards ── */}
+          {/* Stat Cards */}
           <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-            <StatCard label="Total Pipeline" sub="Active deal value" value={fmt(totalPipeline)} icon="📈" accent="#3b82f6" />
-            <StatCard label="Weighted Pipeline" sub="Prob-adjusted" value={fmt(totalWeighted)} icon="💲" accent="#8b5cf6" />
-            <StatCard label="Closed YTD" sub="Net commissions" value={fmt(closedYTD)} icon="✅" accent="#10b981" />
-            <StatCard label="SF in Pipeline" sub="Active sqft" value={totalSqft > 0 ? totalSqft.toLocaleString() + " SF" : "0 SF"} icon="📐" accent="#f59e0b" />
-            <StatCard label="Win Rate" sub="Closed vs. lost" value={winRate !== null ? winRate + "%" : "—"} icon="🏆" accent="#ec4899" />
-            <StatCard label="Follow-ups Due" sub="Today & overdue" value={dueTodayDeals.length} icon="📅" accent="#16a34a" alert={dueTodayDeals.length > 0} />
-            <StatCard label="Aging Deals" sub="30+ days stale" value={agingDeals.length} icon="⚠️" accent="#dc2626" alert={agingDeals.length > 0} />
-            <StatCard label="Active Listings" sub="Currently marketed" value={listings.filter(l=>l.status==="Active").length} icon="🏢" accent="#10b981" />
+            <StatCard label="Total Pipeline" sub="Active deal value" value={fmt(totalPipeline)} accent={DS.blue} />
+            <StatCard label="Weighted Pipeline" sub="Prob-adjusted" value={fmt(totalWeighted)} accent={DS.purple} />
+            <StatCard label="Closed YTD" sub="Net commissions" value={fmt(closedYTD)} accent={DS.green} />
+            <StatCard label="SF in Pipeline" sub="Active sqft" value={totalSqft > 0 ? totalSqft.toLocaleString() + " SF" : "0 SF"} accent={DS.accent} />
+            <StatCard label="Win Rate" sub="Closed vs. lost" value={winRate !== null ? winRate + "%" : "—"} accent="#ec4899" />
+            <StatCard label="Follow-ups Due" sub="Today & overdue" value={dueTodayDeals.length} accent={DS.green} alert={dueTodayDeals.length > 0} />
+            <StatCard label="Aging Deals" sub="30+ days stale" value={agingDeals.length} accent={DS.red} alert={agingDeals.length > 0} />
+            <StatCard label="Active Listings" sub="Currently marketed" value={listings.filter(l=>l.status==="Active").length} accent={DS.green} />
           </div>
 
-          {/* ── GCI Goal ── */}
-          <div style={{ background: "#162032", borderRadius: 12, padding: "14px 18px", border: "1px solid #1e3048" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-              <div><div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13 }}>Annual GCI Goal</div><div style={{ color: "#475569", fontSize: 10 }}>Net closed commissions vs. target</div></div>
+          {/* GCI Goal */}
+          <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 20px", border: `1px solid ${DS.border}`, borderLeft: `3px solid ${DS.accent}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div><div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.xl, letterSpacing: "-0.3px" }}>Annual GCI Goal</div><div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>Net closed commissions vs. target</div></div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ color: "#64748b", fontSize: 11 }}>Goal: $</span>
-                <input type="number" value={gciGoal} onChange={e => setGciGoal(parseFloat(e.target.value) || 0)} style={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 7, color: "#f59e0b", padding: "5px 9px", fontSize: 12, fontWeight: 700, width: 100, outline: "none" }} />
+                <span style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Goal: $</span>
+                <input type="number" value={gciGoal} onChange={e => setGciGoal(parseFloat(e.target.value) || 0)} style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.accent, padding: "5px 9px", fontSize: DS.fs.md, fontWeight: DS.fw.bold, width: 100, outline: "none" }} />
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ flex: 1, background: "#0f1e2e", borderRadius: 999, height: 9, overflow: "hidden", border: "1px solid #1e3048" }}>
-                <div style={{ width: `${gciProgress}%`, height: "100%", borderRadius: 999, background: gciProgress >= 100 ? "#10b981" : gciProgress >= 50 ? "#f59e0b" : "#3b82f6", transition: "width 0.4s ease" }} />
+              <div style={{ flex: 1, background: DS.bg, borderRadius: 999, height: 8, overflow: "hidden", border: `1px solid ${DS.border}` }}>
+                <div style={{ width: `${gciProgress}%`, height: "100%", borderRadius: 999, background: gciProgress >= 100 ? DS.green : gciProgress >= 50 ? DS.accent : DS.blue, transition: "width 0.4s ease" }} />
               </div>
-              <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 12, minWidth: 100, textAlign: "right" }}>{fmt(closedYTD)} <span style={{ color: "#475569", fontWeight: 400 }}>/ {fmt(gciGoal)}</span></div>
-              <div style={{ color: "#f59e0b", fontWeight: 800, minWidth: 40, fontSize: 12 }}>{gciProgress.toFixed(1)}%</div>
+              <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.md, minWidth: 100, textAlign: "right" }}>{fmt(closedYTD)} <span style={{ color: DS.textMute, fontWeight: DS.fw.normal }}>/ {fmt(gciGoal)}</span></div>
+              <div style={{ color: DS.accent, fontWeight: DS.fw.black, minWidth: 40, fontSize: DS.fs.md }}>{gciProgress.toFixed(1)}%</div>
             </div>
           </div>
 
           {activeTab === "analytics" && <>
-            {/* ── Charts ── */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div style={{ background: "#162032", borderRadius: 12, padding: "16px 18px", border: "1px solid #1e3048" }}>
-                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>Pipeline by Stage</div>
-                <div style={{ color: "#475569", fontSize: 10, marginBottom: 12 }}>Deal count and total value</div>
+              <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
+                <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Pipeline by Stage</div>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 12 }}>Deal count and total value</div>
                 <ResponsiveContainer width="100%" height={160}>
                   <BarChart data={stageChartData} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e3048" vertical={false} />
-                    <XAxis dataKey="stage" tick={{ fill: "#64748b", fontSize: 9 }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="l" tick={{ fill: "#64748b", fontSize: 9 }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="r" orientation="right" tick={{ fill: "#64748b", fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000000 ? (v/1000000).toFixed(1)+"M" : v >= 1000 ? (v/1000).toFixed(0)+"k" : v} />
-                    <Tooltip contentStyle={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", fontSize: 12 }} formatter={(val, name) => name === "Value" ? [fmt(val), name] : [val, name]} />
-                    <Legend wrapperStyle={{ color: "#94a3b8", fontSize: 10 }} />
-                    <Bar yAxisId="l" dataKey="Deals" fill="#3b82f6" radius={[3,3,0,0]} />
-                    <Bar yAxisId="r" dataKey="Value" fill="#f59e0b" radius={[3,3,0,0]} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={DS.border} vertical={false} />
+                    <XAxis dataKey="stage" tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="l" tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="r" orientation="right" tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000000 ? (v/1000000).toFixed(1)+"M" : v >= 1000 ? (v/1000).toFixed(0)+"k" : v} />
+                    <Tooltip contentStyle={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: 8, color: DS.text, fontSize: 12 }} formatter={(val, name) => name === "Value" ? [fmt(val), name] : [val, name]} />
+                    <Legend wrapperStyle={{ color: DS.textSub, fontSize: 10 }} />
+                    <Bar yAxisId="l" dataKey="Deals" fill={DS.blue} radius={[3,3,0,0]} />
+                    <Bar yAxisId="r" dataKey="Value" fill={DS.accent} radius={[3,3,0,0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <div style={{ background: "#162032", borderRadius: 12, padding: "16px 18px", border: "1px solid #1e3048" }}>
-                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>Monthly Commissions</div>
-                <div style={{ color: "#475569", fontSize: 10, marginBottom: 12 }}>Closed vs. monthly target ({thisYear})</div>
+              <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
+                <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Monthly Commissions</div>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 12 }}>Closed vs. monthly target ({thisYear})</div>
                 <ResponsiveContainer width="100%" height={160}>
                   <BarChart data={monthlyData} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e3048" vertical={false} />
-                    <XAxis dataKey="month" tick={{ fill: "#64748b", fontSize: 9 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "#64748b", fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={v => "$"+(v>=1000?(v/1000).toFixed(0)+"k":v)} />
-                    <Tooltip contentStyle={{ background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, color: "#f1f5f9", fontSize: 12 }} formatter={v => [fmt(v)]} />
-                    <Legend wrapperStyle={{ color: "#94a3b8", fontSize: 10 }} />
-                    <Bar dataKey="commission" name="Closed" fill="#10b981" radius={[3,3,0,0]} />
-                    <Bar dataKey="goal" name="Target" fill="#1e3048" radius={[3,3,0,0]} />
+                    <CartesianGrid strokeDasharray="3 3" stroke={DS.border} vertical={false} />
+                    <XAxis dataKey="month" tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={v => "$"+(v>=1000?(v/1000).toFixed(0)+"k":v)} />
+                    <Tooltip contentStyle={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: 8, color: DS.text, fontSize: 12 }} formatter={v => [fmt(v)]} />
+                    <Legend wrapperStyle={{ color: DS.textSub, fontSize: 10 }} />
+                    <Bar dataKey="commission" name="Closed" fill={DS.green} radius={[3,3,0,0]} />
+                    <Bar dataKey="goal" name="Target" fill={DS.border} radius={[3,3,0,0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>
 
-            {/* ── Lead Source + Win/Loss ── */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {sourceData.length > 0 && (
-                <div style={{ background: "#162032", borderRadius: 12, padding: "16px 18px", border: "1px solid #1e3048" }}>
-                  <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>Lead Source Performance</div>
-                  <div style={{ color: "#475569", fontSize: 10, marginBottom: 12 }}>Which sources drive your business</div>
+                <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
+                  <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Lead Source Performance</div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 12 }}>Which sources drive your business</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {sourceData.map(s => (
-                      <div key={s.source} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0f1e2e", borderRadius: 7, padding: "8px 12px", border: "1px solid #1e3048" }}>
-                        <div style={{ color: "#f1f5f9", fontSize: 12, fontWeight: 600 }}>{s.source}</div>
+                      <div key={s.source} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: DS.bg, borderRadius: DS.r.sm, padding: "8px 12px", border: `1px solid ${DS.border}` }}>
+                        <div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>{s.source}</div>
                         <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                          <span style={{ color: "#94a3b8", fontSize: 11 }}>{s.deals} deal{s.deals !== 1 ? "s" : ""}</span>
-                          {s.commission > 0 && <span style={{ color: "#10b981", fontSize: 11, fontWeight: 700 }}>{fmt(s.commission)}</span>}
+                          <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{s.deals} deal{s.deals !== 1 ? "s" : ""}</span>
+                          {s.commission > 0 && <span style={{ color: DS.green, fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>{fmt(s.commission)}</span>}
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              <div style={{ background: "#162032", borderRadius: 12, padding: "16px 18px", border: "1px solid #1e3048" }}>
-                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13, marginBottom: 2 }}>Win / Loss Tracker</div>
-                <div style={{ color: "#475569", fontSize: 10, marginBottom: 12 }}>Conversion rate & why deals die</div>
+              <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
+                <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Win / Loss Tracker</div>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 12 }}>Conversion rate & why deals die</div>
                 {closedDeals.length === 0 && lostDeals.length === 0 ? (
-                  <div style={{ color: "#475569", fontSize: 12, textAlign: "center", padding: "20px 0" }}>No closed or lost deals yet.<br/>Mark deals won or lost to track your conversion rate.</div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.md, textAlign: "center", padding: "20px 0" }}>No closed or lost deals yet.<br/>Mark deals won or lost to track your conversion rate.</div>
                 ) : (
                   <>
                     <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                      <div style={{ flex: 1, background: "#0f2010", border: "1px solid #14532d", borderRadius: 8, padding: "10px 14px", textAlign: "center" }}>
-                        <div style={{ color: "#4ade80", fontSize: 20, fontWeight: 800 }}>{closedDeals.length}</div>
-                        <div style={{ color: "#16a34a", fontSize: 10, fontWeight: 700 }}>WON</div>
+                      <div style={{ flex: 1, background: DS.green + "11", border: `1px solid ${DS.green}33`, borderRadius: DS.r.md, padding: "10px 14px", textAlign: "center" }}>
+                        <div style={{ color: DS.green, fontSize: 20, fontWeight: DS.fw.black }}>{closedDeals.length}</div>
+                        <div style={{ color: DS.green, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>WON</div>
                       </div>
-                      <div style={{ flex: 1, background: "#1a0f0f", border: "1px solid #3d1515", borderRadius: 8, padding: "10px 14px", textAlign: "center" }}>
-                        <div style={{ color: "#fca5a5", fontSize: 20, fontWeight: 800 }}>{lostDeals.length}</div>
-                        <div style={{ color: "#dc2626", fontSize: 10, fontWeight: 700 }}>LOST</div>
+                      <div style={{ flex: 1, background: DS.red + "11", border: `1px solid ${DS.red}33`, borderRadius: DS.r.md, padding: "10px 14px", textAlign: "center" }}>
+                        <div style={{ color: DS.red, fontSize: 20, fontWeight: DS.fw.black }}>{lostDeals.length}</div>
+                        <div style={{ color: DS.red, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>LOST</div>
                       </div>
-                      <div style={{ flex: 1, background: "#0f1e2e", border: "1px solid #1e3048", borderRadius: 8, padding: "10px 14px", textAlign: "center" }}>
-                        <div style={{ color: "#f59e0b", fontSize: 20, fontWeight: 800 }}>{winRate !== null ? winRate + "%" : "—"}</div>
-                        <div style={{ color: "#ca8a04", fontSize: 10, fontWeight: 700 }}>WIN RATE</div>
+                      <div style={{ flex: 1, background: DS.accent + "11", border: `1px solid ${DS.accent}33`, borderRadius: DS.r.md, padding: "10px 14px", textAlign: "center" }}>
+                        <div style={{ color: DS.accent, fontSize: 20, fontWeight: DS.fw.black }}>{winRate !== null ? winRate + "%" : "—"}</div>
+                        <div style={{ color: DS.accent, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>WIN RATE</div>
                       </div>
                     </div>
                     {lossBreakdown.length > 0 && (
                       <div>
-                        <div style={{ color: "#475569", fontSize: 10, fontWeight: 700, marginBottom: 6 }}>WHY WE LOSE</div>
+                        <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>Why we lose</div>
                         {lossBreakdown.map(l => (
-                          <div key={l.reason} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #1e3048" }}>
-                            <span style={{ color: "#94a3b8", fontSize: 11 }}>{l.reason}</span>
-                            <span style={{ color: "#fca5a5", fontSize: 11, fontWeight: 700 }}>{l.count}x</span>
+                          <div key={l.reason} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: `1px solid ${DS.border}` }}>
+                            <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{l.reason}</span>
+                            <span style={{ color: DS.red, fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>{l.count}x</span>
                           </div>
                         ))}
                       </div>
@@ -3063,50 +5431,105 @@ export default function PipelineDashboard() {
                 )}
               </div>
             </div>
+
+            {/* Year-over-Year comparison */}
+            <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+                <div>
+                  <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Year-over-Year</div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{thisYear} vs {thisYear - 1} — net commissions by month</div>
+                </div>
+                <div style={{ display:"flex", gap:16 }}>
+                  {yoyCommPct !== null && (
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ color: yoyCommPct >= 0 ? DS.green : DS.red, fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>
+                        {yoyCommPct >= 0 ? "+" : ""}{yoyCommPct.toFixed(1)}%
+                      </div>
+                      <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>GCI vs last year</div>
+                    </div>
+                  )}
+                  {yoyDealsPct !== null && (
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ color: yoyDealsPct >= 0 ? DS.green : DS.red, fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>
+                        {yoyDealsPct >= 0 ? "+" : ""}{yoyDealsPct.toFixed(0)}%
+                      </div>
+                      <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>deal count</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* Summary row */}
+              <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
+                {[
+                  { label: `${thisYear} GCI`, value: fmt(closedYTD), color: DS.green },
+                  { label: `${thisYear - 1} GCI`, value: fmt(lastYearClosed), color: DS.textMute },
+                  { label: `${thisYear} Deals`, value: thisYearDeals, color: DS.blue },
+                  { label: `${thisYear - 1} Deals`, value: lastYearDeals, color: DS.textMute },
+                ].map(s => (
+                  <div key={s.label} style={{ background: DS.bg, border:`1px solid ${DS.border}`, borderRadius: DS.r.sm, padding:"9px 14px", flex:1, minWidth:100 }}>
+                    <div style={{ color: s.color, fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>{s.value}</div>
+                    <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={monthlyData} barGap={2}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={DS.border} vertical={false} />
+                  <XAxis dataKey="month" tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={v => "$"+(v>=1000?(v/1000).toFixed(0)+"k":v)} />
+                  <Tooltip contentStyle={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: 8, color: DS.text, fontSize: 12 }} formatter={v => [fmt(v)]} />
+                  <Legend wrapperStyle={{ color: DS.textSub, fontSize: 10 }} />
+                  <Bar dataKey="commission" name={String(thisYear)} fill={DS.green} radius={[3,3,0,0]} />
+                  <Bar dataKey="lastYear" name={String(thisYear - 1)} fill={DS.border} radius={[3,3,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+              {lastYearClosed === 0 && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, textAlign:"center", marginTop:6 }}>No {thisYear - 1} data yet — close deals with a {thisYear - 1} close date to populate last year's bars.</div>}
+            </div>
           </>}
 
-          {/* ── Stage Summary ── */}
+          {/* Stage Summary */}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {STAGES.map(stage => {
               const c = STAGE_COLORS[stage];
               const sd = enriched.filter(d => d.stage === stage);
               const sqft = sd.reduce((s,d) => s + (d.sqft||0), 0);
               return (
-                <div key={stage} style={{ flex: 1, minWidth: 100, background: "#162032", border: "1px solid #1e3048", borderRadius: 10, padding: "10px 13px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: c.text }} />
-                    <span style={{ color: "#94a3b8", fontSize: 10, fontWeight: 600 }}>{stage}</span>
+                <div key={stage} className="card-hover" style={{ flex: 1, minWidth: 100, background: c.bg, border: `1px solid ${c.border}`, borderRadius: DS.r.md, padding: "12px 14px", position: "relative", overflow: "hidden", boxShadow: `0 0 12px ${c.glow || "transparent"}` }}>
+                  <div style={{ position: "absolute", top: 0, right: 0, width: 40, height: 40, borderRadius: "0 0 0 40px", background: c.text + "10", pointerEvents: "none" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 6 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: c.text, boxShadow: `0 0 6px ${c.text}` }} />
+                    <span style={{ color: c.text, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, letterSpacing: "0.3px" }}>{stage}</span>
                   </div>
-                  <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 17 }}>{sd.length}</div>
-                  <div style={{ color: "#475569", fontSize: 10, marginTop: 1 }}>{fmt(sd.reduce((s,d)=>s+d.totalValue,0))}</div>
-                  {sqft > 0 && <div style={{ color: "#334155", fontSize: 10 }}>{sqft.toLocaleString()} SF</div>}
+                  <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2, letterSpacing: "-0.5px", fontFamily: "'DM Mono', monospace" }}>{sd.length}</div>
+                  <div style={{ color: DS.textSub, fontSize: DS.fs.xs, marginTop: 2 }}>{fmt(sd.reduce((s,d)=>s+d.totalValue,0))}</div>
+                  {sqft > 0 && <div style={{ color: DS.textFaint, fontSize: 10, marginTop: 1 }}>{sqft.toLocaleString()} SF</div>}
                 </div>
               );
             })}
           </div>
 
-          {/* ── Filters ── */}
+          {/* Filters */}
           {showFilters && activeTab === "pipeline" && (
-            <div style={{ background: "#162032", borderRadius: 12, padding: "14px 18px", border: "1px solid #1e3048" }}>
-              <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 13, marginBottom: 12 }}>Filters</div>
+            <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "14px 18px", border: `1px solid ${DS.border}` }}>
+              <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 12 }}>Filters</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 10 }}>
-                <div><label style={{ color: "#64748b", fontSize: 10, fontWeight: 600, display: "block", marginBottom: 3 }}>Search</label><input placeholder="Property, client, source..." value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} style={iStyle} /></div>
-                <div><label style={{ color: "#64748b", fontSize: 10, fontWeight: 600, display: "block", marginBottom: 3 }}>Close From</label><input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} style={iStyle} /></div>
-                <div><label style={{ color: "#64748b", fontSize: 10, fontWeight: 600, display: "block", marginBottom: 3 }}>Close To</label><input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} style={iStyle} /></div>
+                <div><label style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 3 }}>Search</label><input placeholder="Property, client, source..." value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} style={globalIStyle()} /></div>
+                <div><label style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 3 }}>Close From</label><input type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({ ...f, dateFrom: e.target.value }))} style={globalIStyle()} /></div>
+                <div><label style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 3 }}>Close To</label><input type="date" value={filters.dateTo} onChange={e => setFilters(f => ({ ...f, dateTo: e.target.value }))} style={globalIStyle()} /></div>
               </div>
-              <div style={{ marginBottom: 7 }}><label style={{ color: "#64748b", fontSize: 10, fontWeight: 600, display: "block", marginBottom: 4 }}>Stages</label><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{STAGES.map(s => <button key={s} onClick={() => toggleFilter("stages", s)} style={fbtn(filters.stages.includes(s))}>{s}</button>)}</div></div>
-              <div style={{ marginBottom: 7 }}><label style={{ color: "#64748b", fontSize: 10, fontWeight: 600, display: "block", marginBottom: 4 }}>Subtypes</label><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{INDUSTRIAL_SUBTYPES.map(s => <button key={s} onClick={() => toggleFilter("subtypes", s)} style={fbtn(filters.subtypes.includes(s))}>{s}</button>)}</div></div>
-              <div style={{ marginBottom: 7 }}><label style={{ color: "#64748b", fontSize: 10, fontWeight: 600, display: "block", marginBottom: 4 }}>Deal Type</label><div style={{ display: "flex", gap: 5 }}>{DEAL_TYPES.map(t => <button key={t} onClick={() => toggleFilter("dealTypes", t)} style={fbtn(filters.dealTypes.includes(t))}>{t}</button>)}</div></div>
-              <div><label style={{ color: "#64748b", fontSize: 10, fontWeight: 600, display: "block", marginBottom: 4 }}>Lead Sources</label><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{LEAD_SOURCES.map(s => <button key={s} onClick={() => toggleFilter("leadSources", s)} style={fbtn(filters.leadSources.includes(s))}>{s}</button>)}</div></div>
+              <div style={{ marginBottom: 7 }}><label style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 4 }}>Stages</label><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{STAGES.map(s => <button key={s} onClick={() => toggleFilter("stages", s)} style={fbtn(filters.stages.includes(s))}>{s}</button>)}</div></div>
+              <div style={{ marginBottom: 7 }}><label style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 4 }}>Subtypes</label><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{INDUSTRIAL_SUBTYPES.map(s => <button key={s} onClick={() => toggleFilter("subtypes", s)} style={fbtn(filters.subtypes.includes(s))}>{s}</button>)}</div></div>
+              <div style={{ marginBottom: 7 }}><label style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 4 }}>Deal Type</label><div style={{ display: "flex", gap: 5 }}>{DEAL_TYPES.map(t => <button key={t} onClick={() => toggleFilter("dealTypes", t)} style={fbtn(filters.dealTypes.includes(t))}>{t}</button>)}</div></div>
+              <div><label style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, display: "block", marginBottom: 4 }}>Lead Sources</label><div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{LEAD_SOURCES.map(s => <button key={s} onClick={() => toggleFilter("leadSources", s)} style={fbtn(filters.leadSources.includes(s))}>{s}</button>)}</div></div>
             </div>
           )}
 
-          {/* ── Deal Table (pipeline only) ── */}
+          {/* Deal Table */}
           {activeTab === "pipeline" && (
-            <div style={{ background: "#162032", borderRadius: 12, border: "1px solid #1e3048", overflowX: "auto" }}>
+            <div style={{ background: DS.panel, borderRadius: DS.r.lg, border: `1px solid ${DS.border}`, overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1200 }}>
                 <thead>
-                  <tr style={{ borderBottom: "2px solid #1e3048" }}>
+                  <tr style={{ borderBottom: `2px solid ${DS.border}` }}>
                     {[["stage","Stage"],["name","Property"],["client","Client"],["counterparty","Counterparty"],["dealType","Type"],["repType","Rep"],["subtype","Subtype"],["submarket","Submarket"],["sqft","Sq Ft"],["totalValue","Value"],["pricePerSqft","$/SF"],["netCommission","Net Comm"],["probability","Prob"],["weighted","Weighted"],["leadSource","Source"],["followUpDate","Follow-up"],["expectedClose","Close"],["daysInStage","Days"]].map(([key, label]) => (
                       <th key={key} style={th(key)} onClick={() => sortBy(key)}>{label}{sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</th>
                     ))}
@@ -3116,86 +5539,165 @@ export default function PipelineDashboard() {
                 <tbody>
                   {filtered.map(d => (
                     <tr key={d.id}
-                      style={{ borderBottom: "1px solid #1e3048", background: d.stage === "Lost" ? "rgba(127,29,29,0.08)" : d.isAging ? "rgba(127,29,29,0.12)" : d.isDueToday ? "rgba(22,163,74,0.06)" : "transparent" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#1a2d42"}
-                      onMouseLeave={e => e.currentTarget.style.background = d.stage === "Lost" ? "rgba(127,29,29,0.08)" : d.isAging ? "rgba(127,29,29,0.12)" : d.isDueToday ? "rgba(22,163,74,0.06)" : "transparent"}>
-                      <td style={td}><StageBadge stage={d.stage} /></td>
-                      <td style={{ ...td, color: "#f1f5f9", fontWeight: 600, maxWidth: 180 }}>
+                      style={{ borderBottom: `1px solid ${DS.border}`, background: d.stage === "Lost" ? DS.red + "08" : d.isAging ? DS.red + "0c" : d.isDueToday ? DS.green + "06" : "transparent" }}
+                      onMouseEnter={e => e.currentTarget.style.background = DS.borderHi + "33"}
+                      onMouseLeave={e => e.currentTarget.style.background = d.stage === "Lost" ? DS.red + "08" : d.isAging ? DS.red + "0c" : d.isDueToday ? DS.green + "06" : "transparent"}>
+                      <td style={td}>
+                        {inlineEdit?.id === d.id && inlineEdit?.field === "stage" ? (
+                          <select autoFocus defaultValue={d.stage}
+                            onChange={e => saveInlineField(d.id, "stage", e.target.value)}
+                            onBlur={() => setInlineEdit(null)}
+                            style={{ background: DS.bg, border: `1px solid ${DS.accent}`, borderRadius: DS.r.sm, color: DS.text, padding: "3px 6px", fontSize: DS.fs.xs, outline: "none", cursor: "pointer" }}>
+                            {STAGES.map(s => <option key={s}>{s}</option>)}
+                          </select>
+                        ) : (
+                          <div onClick={() => setInlineEdit({ id: d.id, field: "stage" })} style={{ cursor: "pointer" }} title="Click to change stage">
+                            <StageBadge stage={d.stage} />
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ ...td, color: DS.text, fontWeight: DS.fw.semi, maxWidth: 180 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 12 }}>{d.name || "—"}</span>
-                          {d.activities?.length > 0 && <span style={{ background: "#1e3048", color: "#64748b", fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: 600 }}>{d.activities.length}</span>}
-                          {(d.richNotes||[]).length > 0 && <span style={{ background: "#1e2a40", color: "#60a5fa", fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: 600 }}>📎{d.richNotes.length}</span>}
-                          {(d.documents||[]).length > 0 && <span style={{ background: "#1a2a1a", color: "#4ade80", fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: 600 }}>📁{d.documents.length}</span>}
-                          {d.health && <span style={{ background: d.health.color + "22", color: d.health.color, border: `1px solid ${d.health.color}44`, fontSize: 9, padding: "1px 6px", borderRadius: 8, fontWeight: 700 }}>{d.health.score}</span>}
-                          {d.isSplit && <span style={{ background: "#312e81", color: "#a5b4fc", fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: 600 }}>split</span>}
+                          <span style={{ fontSize: DS.fs.md }}>{d.name || "—"}</span>
+                          {d.activities?.length > 0 && <span style={{ background: DS.border, color: DS.textMute, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>{d.activities.length}</span>}
+                          {(d.richNotes||[]).length > 0 && <span style={{ background: DS.blue + "22", color: DS.blue, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>{d.richNotes.length} note{d.richNotes.length > 1 ? "s" : ""}</span>}
+                          {(d.documents||[]).length > 0 && <span style={{ background: DS.green + "22", color: DS.green, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>{d.documents.length} doc{d.documents.length > 1 ? "s" : ""}</span>}
+                          {d.health && <span style={{ background: d.health.color + "22", color: d.health.color, border: `1px solid ${d.health.color}44`, fontSize: 9, padding: "1px 6px", borderRadius: 8, fontWeight: DS.fw.bold }}>{d.health.score}</span>}
+                          {d.isSplit && <span style={{ background: DS.purple + "22", color: DS.purple, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>split</span>}
                         </div>
                         {(d.tags||[]).length > 0 && (
                           <div style={{ display:"flex", gap:3, flexWrap:"wrap", marginTop:3 }}>
-                            {(d.tags||[]).slice(0,3).map(tag=><span key={tag} style={{ background:"#1e3a5f", color:"#93c5fd", fontSize:8, padding:"1px 5px", borderRadius:20, fontWeight:600 }}>{tag}</span>)}
-                            {(d.tags||[]).length > 3 && <span style={{ color:"#334155", fontSize:8 }}>+{d.tags.length-3}</span>}
+                            {(d.tags||[]).slice(0,3).map(tag=><span key={tag} style={{ background: DS.blue + "22", color: DS.blue, fontSize: 8, padding:"1px 5px", borderRadius:20, fontWeight: DS.fw.semi }}>{tag}</span>)}
+                            {(d.tags||[]).length > 3 && <span style={{ color: DS.textFaint, fontSize:8 }}>+{d.tags.length-3}</span>}
                           </div>
                         )}
                       </td>
                       <td style={td}>{d.client || "—"}</td>
-                      <td style={{ ...td, color: "#94a3b8" }}>{d.counterparty || "—"}</td>
-                      <td style={td}><span style={{ background: d.dealType === "Sale" ? "#1e3a5f" : "#1a2a1a", color: d.dealType === "Sale" ? "#60a5fa" : "#4ade80", padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: 700 }}>{d.dealType}</span></td>
-                      <td style={{ ...td, color: "#64748b", fontSize: 10 }}>{d.repType?.replace(" Rep","") || "—"}</td>
-                      <td style={{ ...td, color: "#94a3b8", fontSize: 11 }}>{d.subtype || "—"}</td>
-                      <td style={{ ...td, color: "#64748b", fontSize: 11 }}>{d.submarket || "—"}</td>
+                      <td style={{ ...td, color: DS.textSub }}>{d.counterparty || "—"}</td>
+                      <td style={td}><span style={{ background: d.dealType === "Sale" ? DS.blue + "22" : DS.green + "22", color: d.dealType === "Sale" ? DS.blue : DS.green, padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: DS.fw.bold }}>{d.dealType}</span></td>
+                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.xs }}>{d.repType?.replace(" Rep","") || "—"}</td>
+                      <td style={{ ...td, color: DS.textSub, fontSize: DS.fs.sm }}>{d.subtype || "—"}</td>
+                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.sm }}>{d.submarket || "—"}</td>
                       <td style={td}>{d.sqft > 0 ? d.sqft.toLocaleString() : "—"}</td>
                       <td style={td}>{d.totalValue > 0 ? fmt(d.totalValue) : "—"}</td>
-                      <td style={{ ...td, color: "#64748b", fontSize: 11 }}>{d.pricePerSqft > 0 ? "$" + d.pricePerSqft.toFixed(2) : "—"}</td>
-                      <td style={{ ...td, color: "#f59e0b", fontWeight: 700 }}>
+                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.xs }}>{d.pricePerSqft > 0 ? "$" + d.pricePerSqft.toFixed(2) : "—"}</td>
+                      <td style={{ ...td, color: DS.accent, fontWeight: DS.fw.bold }}>
                         {fmt(d.netCommission)}
-                        {d.isSplit && <div style={{ color: "#475569", fontSize: 9 }}>{d.splitPct}% split</div>}
+                        {d.isSplit && <div style={{ color: DS.textMute, fontSize: 9 }}>{d.splitPct}% split</div>}
                       </td>
-                      <td style={td}>{pct(d.probability)}</td>
-                      <td style={{ ...td, color: "#34d399", fontWeight: 600 }}>{fmt(d.weighted)}</td>
-                      <td style={{ ...td, color: "#64748b", fontSize: 10 }}>{d.leadSource || "—"}</td>
                       <td style={td}>
-                        {d.followUpDate ? <span style={{ color: d.isOverdue ? "#fca5a5" : d.isDueToday ? "#4ade80" : "#64748b", fontSize: 11, fontWeight: d.isDueToday || d.isOverdue ? 700 : 400 }}>{d.isOverdue ? "⚠️ " : d.isDueToday ? "📅 " : ""}{new Date(d.followUpDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span> : <span style={{ color: "#334155" }}>—</span>}
+                        {inlineEdit?.id === d.id && inlineEdit?.field === "probability" ? (
+                          <input autoFocus type="number" min="0" max="100" defaultValue={d.probability}
+                            onBlur={e => saveInlineField(d.id, "probability", parseInt(e.target.value)||0)}
+                            onKeyDown={e => { if (e.key === "Enter") saveInlineField(d.id, "probability", parseInt(e.target.value)||0); if (e.key === "Escape") setInlineEdit(null); }}
+                            style={{ width: 46, background: DS.bg, border: `1px solid ${DS.accent}`, borderRadius: DS.r.sm, color: DS.text, padding: "3px 6px", fontSize: DS.fs.xs, outline: "none", textAlign: "center" }} />
+                        ) : (
+                          <span onClick={() => setInlineEdit({ id: d.id, field: "probability" })} style={{ cursor: "pointer", color: d.probability >= 75 ? DS.green : d.probability >= 50 ? DS.accent : DS.textSub, fontWeight: DS.fw.semi }} title="Click to edit probability">
+                            {pct(d.probability)}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...td, color: DS.green, fontWeight: DS.fw.semi }}>{fmt(d.weighted)}</td>
+                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.xs }}>{d.leadSource || "—"}</td>
+                      <td style={td}>
+                        {inlineEdit?.id === d.id && inlineEdit?.field === "followUpDate" ? (
+                          <input autoFocus type="date" defaultValue={d.followUpDate}
+                            onBlur={e => saveInlineField(d.id, "followUpDate", e.target.value)}
+                            onKeyDown={e => { if (e.key === "Enter") saveInlineField(d.id, "followUpDate", e.target.value); if (e.key === "Escape") setInlineEdit(null); }}
+                            style={{ background: DS.bg, border: `1px solid ${DS.accent}`, borderRadius: DS.r.sm, color: DS.text, padding: "3px 6px", fontSize: DS.fs.xs, outline: "none" }} />
+                        ) : (
+                          <span onClick={() => setInlineEdit({ id: d.id, field: "followUpDate" })} style={{ cursor: "pointer", color: d.isOverdue ? DS.red : d.isDueToday ? DS.green : d.followUpDate ? DS.textMute : DS.textFaint, fontWeight: d.isDueToday || d.isOverdue ? DS.fw.bold : DS.fw.normal }} title="Click to set follow-up date">
+                            {d.followUpDate ? `${d.isOverdue ? "⚠ " : d.isDueToday ? "● " : ""}${new Date(d.followUpDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "set date"}
+                          </span>
+                        )}
                       </td>
                       <td style={td}>{d.expectedClose ? new Date(d.expectedClose + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</td>
-                      <td style={td}><span style={{ background: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? "#7f1d1d" : "#0f2010", color: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? "#fca5a5" : "#4ade80", padding: "1px 6px", borderRadius: 9, fontSize: 10, fontWeight: 700 }}>{d.daysInStage}d</span></td>
+                      <td style={td}><span style={{ background: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? DS.red + "22" : DS.green + "11", color: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? DS.red : DS.green, padding: "1px 6px", borderRadius: 9, fontSize: 10, fontWeight: DS.fw.bold }}>{d.daysInStage}d</span></td>
                       <td style={td}>
-                        <div style={{ display: "flex", gap: 2 }}>
-                          {d.stage !== "Closed" && d.stage !== "Lost" && <button onClick={() => setWinLossDeal(d)} title="Close Out" style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 13 }}>🏆</button>}
-                          <button onClick={() => setRichNotesDeal(d)} title="Rich Notes" style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 13 }}>📎</button>
-                          <button onClick={() => setDocumentsDeal(d)} title="Documents" style={{ background: "none", border: "none", color: (d.documents||[]).length > 0 ? "#4ade80" : "#64748b", cursor: "pointer", fontSize: 13 }}>📁</button>
-                          <button onClick={() => setActivityDeal(d)} title="Activity Log" style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 13 }}>📋</button>
-                          <button onClick={() => setTimelineDeal(d)} title="Deal Timeline" style={{ background: "none", border: "none", color: "#8b5cf6", cursor: "pointer", fontSize: 13 }}>🕐</button>
-                          <button onClick={() => setModal(d)} title="Edit" style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 13 }}>✏️</button>
-                          <button onClick={() => deleteDeal(d.id)} title="Delete" style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 13 }}>🗑️</button>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          {d.stage !== "Closed" && d.stage !== "Lost" && <button onClick={() => setWinLossDeal(d)} title="Close Out" style={{ background: DS.green + "22", border: `1px solid ${DS.green}33`, color: DS.green, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold, padding: "2px 7px", borderRadius: 4 }}>Close</button>}
+                          {(d.stage === "Under Contract" || d.stage === "LOI") && (
+                            <button onClick={() => setChecklistDeal(d)} title="Closing Checklist" style={{ background: DS.accent+"22", border: `1px solid ${DS.accent}44`, color: DS.accent, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold, padding: "2px 7px", borderRadius: 4 }}>
+                              {(() => { const items = d.dealType === "Lease" ? CLOSING_CHECKLIST_LEASE : CLOSING_CHECKLIST_SALE; const done = items.filter(i => (d.closingChecklist||{})[i.id]).length; return done > 0 ? `✓ ${done}/${items.length}` : "Checklist"; })()}
+                            </button>
+                          )}
+                          <button onClick={() => setRichNotesDeal(d)} title="Rich Notes" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Notes</button>
+                          <button onClick={() => setDocumentsDeal(d)} title="Documents" style={{ background: (d.documents||[]).length > 0 ? DS.green + "22" : DS.border, border: "none", color: (d.documents||[]).length > 0 ? DS.green : DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Docs</button>
+                          <button onClick={() => setActivityDeal(d)} title="Activity Log" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Log</button>
+                          <button onClick={() => setTimelineDeal(d)} title="Deal Timeline" style={{ background: DS.purple + "22", border: "none", color: DS.purple, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Timeline</button>
+                          <button onClick={() => { const clone = { ...d, id: Date.now(), name: d.name + " (copy)", stageHistory: [], won: null, lossReason: "" }; setDeals(prev => [...prev, clone]); toast("Deal duplicated"); }} title="Duplicate" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Dupe</button>
+                          <button onClick={() => setModal(d)} title="Edit" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Edit</button>
+                          <button onClick={() => { if(window.confirm("Delete this deal?")) { setDeals(prev => prev.filter(x => x.id !== d.id)); toast("Deal deleted", "error"); }}} title="Delete" style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Del</button>
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr style={{ borderTop: "2px solid #1e3048", background: "#0f1e2e" }}>
-                    <td colSpan={8} style={{ padding: "10px", color: "#475569", fontSize: 11 }}>Showing {filtered.length} deal{filtered.length !== 1 ? "s" : ""} · {filtered.reduce((s,d)=>s+(d.sqft||0),0).toLocaleString()} SF</td>
-                    <td style={{ padding: "10px", color: "#f1f5f9", fontWeight: 800 }}>{filtered.reduce((s,d)=>s+(d.sqft||0),0).toLocaleString()}</td>
-                    <td style={{ padding: "10px", color: "#f1f5f9", fontWeight: 800 }}>{fmt(filtered.reduce((s,d)=>s+d.totalValue,0))}</td>
+                  <tr style={{ borderTop: `2px solid ${DS.border}`, background: DS.surface }}>
+                    <td colSpan={8} style={{ padding: "10px", color: DS.textMute, fontSize: DS.fs.sm }}>Showing {filtered.length} deal{filtered.length !== 1 ? "s" : ""} · {filtered.reduce((s,d)=>s+(d.sqft||0),0).toLocaleString()} SF</td>
+                    <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black }}>{filtered.reduce((s,d)=>s+(d.sqft||0),0).toLocaleString()}</td>
+                    <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black }}>{fmt(filtered.reduce((s,d)=>s+d.totalValue,0))}</td>
                     <td />
-                    <td style={{ padding: "10px", color: "#f59e0b", fontWeight: 800 }}>{fmt(filtered.reduce((s,d)=>s+d.netCommission,0))}</td>
+                    <td style={{ padding: "10px", color: DS.accent, fontWeight: DS.fw.black }}>{fmt(filtered.reduce((s,d)=>s+d.netCommission,0))}</td>
                     <td />
-                    <td style={{ padding: "10px", color: "#34d399", fontWeight: 800 }}>{fmt(filtered.reduce((s,d)=>s+d.weighted,0))}</td>
-                    <td colSpan={5} style={{ padding: "10px", color: "#f1f5f9", fontWeight: 800, textAlign: "right", fontSize: 12 }}>Total Pipeline: {fmt(filtered.reduce((s,d)=>s+d.totalValue,0))}</td>
+                    <td style={{ padding: "10px", color: DS.green, fontWeight: DS.fw.black }}>{fmt(filtered.reduce((s,d)=>s+d.weighted,0))}</td>
+                    <td colSpan={5} style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black, textAlign: "right", fontSize: DS.fs.md }}>Total Pipeline: {fmt(filtered.reduce((s,d)=>s+d.totalValue,0))}</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
           )}
         </>}
+
+        </div>
       </div>
 
+      {/* Global modals */}
+      {showSearch && <GlobalSearch deals={deals} contacts={contacts} properties={properties} comps={comps} tasks={tasks} onNavigate={setActiveTab} onClose={() => setShowSearch(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} gciGoal={gciGoal} setGciGoal={setGciGoal} />}
       {quickAdd && <QuickAdd onSave={saveQuickAdd} onClose={() => setQuickAdd(false)} />}
-      {modal && <DealModal deal={modal === "new" ? null : modal} onSave={saveModal} onClose={() => setModal(null)} submarketList={submarketList} />}
+      {modal && <DealModal deal={modal === "new" ? null : modal} onSave={saveModal} onClose={() => setModal(null)} submarketList={submarketList} comps={comps} />}
       {activityDeal && <ActivityLog deal={activityDeal} onClose={() => setActivityDeal(null)} onSave={saveActivity} />}
       {richNotesDeal && <RichNotesModal deal={richNotesDeal} onClose={() => setRichNotesDeal(null)} onSave={saveRichNotes} />}
       {documentsDeal && <DocumentsModal deal={documentsDeal} onClose={() => setDocumentsDeal(null)} onSave={saveDocuments} />}
       {timelineDeal && <DealTimelineModal deal={timelineDeal} onClose={() => setTimelineDeal(null)} />}
       {winLossDeal && <WinLossModal deal={winLossDeal} onSave={saveWinLoss} onClose={() => setWinLossDeal(null)} />}
+      {closedFollowUp && (
+        <ClosedFollowUpModal
+          deal={closedFollowUp.deal}
+          contacts={contacts}
+          onAddTask={task => setTasks(prev => [...prev, task])}
+          onUpdateContact={updated => setContacts(prev => prev.map(c => c.id === updated.id ? updated : c))}
+          onClose={() => setClosedFollowUp(null)}
+        />
+      )}
+      {showDailySync && (
+        <DailySyncModal
+          deals={deals}
+          tasks={tasks}
+          contacts={contacts}
+          onUpdateDeal={updated => setDeals(prev => prev.map(d => d.id === updated.id ? updated : d))}
+          onUpdateTask={updated => setTasks(prev => prev.map(t => t.id === updated.id ? updated : t))}
+          onUpdateContact={updated => setContacts(prev => prev.map(c => c.id === updated.id ? updated : c))}
+          onClose={() => setShowDailySync(false)}
+        />
+      )}
+      {checklistDeal && (
+        <ClosingChecklistModal
+          deal={checklistDeal}
+          onSave={saveChecklist}
+          onClose={() => setChecklistDeal(null)}
+        />
+      )}
+      {showCSVImport && (
+        <CSVImportModal
+          onImport={handleCSVImport}
+          onClose={() => setShowCSVImport(false)}
+          submarketList={submarketList}
+        />
+      )}
+      <ToastProvider />
     </div>
   );
 }
