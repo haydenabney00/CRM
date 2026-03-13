@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 
 const STAGES = ["Prospect", "Proposal", "LOI", "Under Contract", "Closed", "Lost"];
@@ -193,6 +193,7 @@ function SettingsModal({ onClose, gciGoal, setGciGoal }) {
     phone: localStorage.getItem("cre-phone") || "",
     email: localStorage.getItem("cre-email") || "",
     mgBrokerSplit: localStorage.getItem("cre-mg-split") || "80",
+    defaultState: localStorage.getItem("cre-default-state") || "Indiana",
     gciGoal: String(gciGoal),
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -203,6 +204,7 @@ function SettingsModal({ onClose, gciGoal, setGciGoal }) {
     localStorage.setItem("cre-phone", form.phone);
     localStorage.setItem("cre-email", form.email);
     localStorage.setItem("cre-mg-split", form.mgBrokerSplit);
+    localStorage.setItem("cre-default-state", form.defaultState);
     setGciGoal(parseFloat(form.gciGoal) || 500000);
     toast("Settings saved");
     onClose();
@@ -226,8 +228,9 @@ function SettingsModal({ onClose, gciGoal, setGciGoal }) {
             <div>{lbl("Your Name")}<input value={form.brokerName} onChange={e => set("brokerName", e.target.value)} placeholder="Hayden Abney" style={inp} /></div>
             <div>{lbl("Brokerage")}<input value={form.brokerage} onChange={e => set("brokerage", e.target.value)} placeholder="SVN Northern Commercial" style={inp} /></div>
             <div>{lbl("License Number")}<input value={form.licenseNum} onChange={e => set("licenseNum", e.target.value)} placeholder="RB25001852" style={inp} /></div>
-            <div>{lbl("Phone")}<input value={form.phone} onChange={e => set("phone", e.target.value)} placeholder="765.432.8166" style={inp} /></div>
             <div style={{ gridColumn: "span 2" }}>{lbl("Email")}<input value={form.email} onChange={e => set("email", e.target.value)} placeholder="hayden.abney@svnnc.com" style={inp} /></div>
+            <div>{lbl("Default State (for map geocoding)")}<input value={form.defaultState} onChange={e => set("defaultState", e.target.value)} placeholder="Indiana" style={inp} /></div>
+            <div>{lbl("Phone")}<input value={form.phone} onChange={e => set("phone", e.target.value)} placeholder="765.432.8166" style={inp} /></div>
           </div>
           {section("Commission & Goals")}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -1940,6 +1943,7 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
   }).filter(r=>r.count>0).sort((a,b)=>b.count-a.count);
 
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showMap, setShowMap] = useState(false);
 
   function CompModal({ comp }) {
     const [form, setForm] = useState(comp || {
@@ -1988,6 +1992,13 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
             <div>{label("Tenant/Buyer Broker")}<input value={form.tenantBroker} onChange={e=>set("tenantBroker",e.target.value)} style={iStyle}/></div>
           </div>
           <div style={{ marginBottom:14 }}>{label("Notes")}<textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={2} style={{...iStyle,resize:"vertical"}} placeholder="Conditions, concessions, unusual terms..."/></div>
+          <div style={{ marginBottom:14 }}>
+            <div style={{ color:"#64748b", fontSize:11, fontWeight:700, marginBottom:6 }}>MAP COORDINATES <span style={{ color:"#334155", fontWeight:400 }}>— optional, for map view</span></div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <div>{label("Latitude")}<input type="number" step="any" value={form.lat||""} onChange={e=>set("lat",e.target.value)} placeholder="e.g. 39.9526" style={iStyle}/></div>
+              <div>{label("Longitude")}<input type="number" step="any" value={form.lng||""} onChange={e=>set("lng",e.target.value)} placeholder="e.g. -75.1652" style={iStyle}/></div>
+            </div>
+          </div>
           <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18 }}>
             <input type="checkbox" checked={form.verified} onChange={e=>set("verified",e.target.checked)} id="verified" style={{ accentColor:"#10b981" }}/>
             <label htmlFor="verified" style={{ color:"#94a3b8", fontSize:12 }}>Verified / Confirmed comp</label>
@@ -2011,6 +2022,9 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
         <div style={{ display:"flex", gap:8 }}>
           <button onClick={()=>setShowAnalytics(a=>!a)} style={{ background: showAnalytics ? DS.blueSoft : DS.panel, border:`1px solid ${showAnalytics ? DS.blue+"55" : DS.border}`, color: showAnalytics ? DS.blue : DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>
             {showAnalytics ? "Hide Analytics" : "Analytics"}
+          </button>
+          <button onClick={()=>setShowMap(m=>!m)} style={{ background: showMap ? DS.greenSoft : DS.panel, border:`1px solid ${showMap ? DS.green+"55" : DS.border}`, color: showMap ? DS.green : DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>
+            {showMap ? "Hide Map" : "🗺 Map View"}
           </button>
           <button onClick={()=>setModal("new")} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.black }}>+ Add Comp</button>
         </div>
@@ -2146,6 +2160,16 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
         </div>
       )}
 
+      {/* Map View */}
+      {showMap && (
+        <div style={{ background: "#0d1826", border:`1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+          <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.md, marginBottom: 8 }}>
+            Comp Locations Map <span style={{ color: DS.textFaint, fontSize: DS.fs.xs, fontWeight: DS.fw.normal }}>— addresses auto-located via OpenStreetMap</span>
+          </div>
+          <CompsLeafletMap comps={filtered} />
+        </div>
+      )}
+
       {/* Filters */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property, buyer, seller, broker..." style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"7px 11px", fontSize:12, outline:"none", flex:1, minWidth:200 }}/>
@@ -2217,7 +2241,7 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
                     <td style={{ padding:"11px 12px" }}>
                       <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                         <button onClick={e=>{e.stopPropagation();setModal(c);}} style={{ background:DS.panelHi, border:`1px solid ${DS.border}`, color:DS.textSub, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm, fontWeight:DS.fw.semi }}>Edit</button>
-                        <button onClick={e=>{e.stopPropagation();if(window.confirm("Delete comp?")) setComps(prev=>prev.filter(x=>x.id!==c.id));}} style={{ background:"none", border:`1px solid ${DS.red}33`, color:DS.red, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm }}>Del</button>
+                        <button onClick={e=>{e.stopPropagation(); setComps(prev=>prev.filter(x=>x.id!==c.id));}} style={{ background:"none", border:`1px solid ${DS.red}33`, color:DS.red, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm }}>Del</button>
                       </div>
                     </td>
                   </tr>
@@ -2274,10 +2298,16 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
 function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList }) {
   const enriched = useMemo(() => deals.map(calcDeal), [deals]);
   const [newSm, setNewSm] = useState("");
+  const [newSmLat, setNewSmLat] = useState("");
+  const [newSmLng, setNewSmLng] = useState("");
   const [editMode, setEditMode] = useState(false);
+  const [showSmMap, setShowSmMap] = useState(false);
 
   const rows = submarketList.map(sm => {
-    const smDeals = enriched.filter(d => d.submarket === sm);
+    const smNameVal = typeof sm === "string" ? sm : sm.name;
+    const smLatVal = typeof sm === "string" ? null : sm.lat;
+    const smLngVal = typeof sm === "string" ? null : sm.lng;
+    const smDeals = enriched.filter(d => d.submarket === smNameVal);
     const smListings = listings.filter(l => l.submarket === sm);
     const smComps = comps.filter(c => c.submarket === sm);
     const closed = smDeals.filter(d => d.stage === "Closed");
@@ -2294,15 +2324,20 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
     const compLeases = smComps.filter(c=>c.compType==="Lease"&&c.psfLease>0);
     const mktAvgSale = compSales.length > 0 ? compSales.reduce((s,c)=>s+c.psfSale,0)/compSales.length : null;
     const mktAvgLease = compLeases.length > 0 ? compLeases.reduce((s,c)=>s+c.psfLease,0)/compLeases.length : null;
-    return { sm, smDeals, closed, active, closedSales, avgPsfSale, closedLeases, avgPsfLease, totalSqft, commissions, activeSF, smListings, smComps, mktAvgSale, mktAvgLease };
+    return { sm: smNameVal, lat: smLatVal, lng: smLngVal, smDeals, closed, active, closedSales, avgPsfSale, closedLeases, avgPsfLease, totalSqft, commissions, activeSF, smListings, smComps, mktAvgSale, mktAvgLease };
   });
 
   const addSubmarket = () => {
     const name = newSm.trim();
-    if (!name || submarketList.includes(name)) return;
-    setSubmarketList(prev => [...prev, name]);
-    setNewSm("");
+    if (!name || submarketList.some(s => (typeof s === "string" ? s : s.name) === name)) return;
+    const entry = { name, lat: newSmLat ? parseFloat(newSmLat) : null, lng: newSmLng ? parseFloat(newSmLng) : null };
+    setSubmarketList(prev => [...prev, entry]);
+    setNewSm(""); setNewSmLat(""); setNewSmLng("");
   };
+  // Helper: normalize submarket entry (support old string format)
+  const smName = (s) => typeof s === "string" ? s : s.name;
+  const smLat = (s) => typeof s === "string" ? null : s.lat;
+  const smLng = (s) => typeof s === "string" ? null : s.lng;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -2311,25 +2346,48 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
           <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 16 }}>Submarket Intelligence</div>
           <div style={{ color: "#475569", fontSize: 11 }}>Your deal history, listings, and market comp data by geography</div>
         </div>
-        <button onClick={()=>setEditMode(e=>!e)} style={{ background: editMode?"#1e3048":DS.panel, border:`1px solid ${DS.border}`, color: editMode?"#f59e0b":"#64748b", padding:"6px 13px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight: editMode?700:400 }}>Edit Submarkets</button>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={()=>setShowSmMap(m=>!m)} style={{ background: showSmMap ? DS.greenSoft : DS.panel, border:`1px solid ${showSmMap ? DS.green+"55" : DS.border}`, color: showSmMap ? DS.green : "#64748b", padding:"6px 13px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight: showSmMap?700:400 }}>
+            {showSmMap ? "Hide Map" : "🗺 Map View"}
+          </button>
+          <button onClick={()=>setEditMode(e=>!e)} style={{ background: editMode?"#1e3048":DS.panel, border:`1px solid ${DS.border}`, color: editMode?"#f59e0b":"#64748b", padding:"6px 13px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight: editMode?700:400 }}>Edit Submarkets</button>
+        </div>
       </div>
 
       {/* Submarket editor */}
       {editMode && (
         <div style={{ background:DS.panel, border:"1px solid #f59e0b", borderRadius:12, padding:"14px 18px" }}>
           <div style={{ color:"#f59e0b", fontWeight:700, fontSize:12, marginBottom:10 }}>Manage Your Submarkets</div>
-          <div style={{ display:"flex", gap:8, marginBottom:12 }}>
-            <input value={newSm} onChange={e=>setNewSm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSubmarket()} placeholder="Add new submarket name..." style={{ flex:1, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none" }}/>
+          <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+            <input value={newSm} onChange={e=>setNewSm(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addSubmarket()} placeholder="Submarket name..." style={{ flex:2, minWidth:120, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none" }}/>
+            <input type="number" step="any" value={newSmLat} onChange={e=>setNewSmLat(e.target.value)} placeholder="Latitude (optional)" style={{ flex:1, minWidth:100, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"8px 11px", fontSize:12, outline:"none" }}/>
+            <input type="number" step="any" value={newSmLng} onChange={e=>setNewSmLng(e.target.value)} placeholder="Longitude (optional)" style={{ flex:1, minWidth:100, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"8px 11px", fontSize:12, outline:"none" }}/>
             <button onClick={addSubmarket} style={{ background:"#f59e0b", border:"none", color:"#0d1826", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>+ Add</button>
           </div>
+          <div style={{ color:"#475569", fontSize:10, marginBottom:8 }}>💡 Tip: Right-click a location in Google Maps → copy coordinates → paste lat/lng above to place submarket on the map.</div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            {submarketList.map(sm => (
-              <div key={sm} style={{ display:"flex", alignItems:"center", gap:4, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:20, padding:"4px 10px" }}>
-                <span style={{ color:"#f1f5f9", fontSize:12 }}>{sm}</span>
-                <button onClick={()=>{ if(window.confirm(`Remove "${sm}"? This won't delete deals or listings assigned to it.`)) setSubmarketList(prev=>prev.filter(s=>s!==sm)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:11, padding:0, lineHeight:1 }}></button>
-              </div>
-            ))}
+            {submarketList.map((sm, idx) => {
+              const nm = typeof sm === "string" ? sm : sm.name;
+              const hasCoords = typeof sm !== "string" && sm.lat && sm.lng;
+              return (
+                <div key={nm} style={{ display:"flex", alignItems:"center", gap:4, background:"#0f1e2e", border:`1px solid ${hasCoords ? DS.green+"44" : DS.border}`, borderRadius:20, padding:"4px 10px" }}>
+                  {hasCoords && <span style={{ fontSize:9, color:DS.green }}>📍</span>}
+                  <span style={{ color:"#f1f5f9", fontSize:12 }}>{nm}</span>
+                  <button onClick={(e)=>{ e.stopPropagation(); setSubmarketList(prev=>prev.filter((_,i)=>i!==idx)); }} style={{ background:"none", border:"none", color:"#f87171", cursor:"pointer", fontSize:13, padding:"0 2px", lineHeight:1, fontWeight:700 }} title="Remove submarket">×</button>
+                </div>
+              );
+            })}
           </div>
+        </div>
+      )}
+
+      {/* Submarket Map */}
+      {showSmMap && (
+        <div style={{ background:"#0d1826", border:`1px solid ${DS.border}`, borderRadius:12, padding:"16px 20px" }}>
+          <div style={{ color:DS.text, fontWeight:DS.fw.bold, fontSize:DS.fs.md, marginBottom:8 }}>
+            Submarket Map <span style={{ color:DS.textFaint, fontSize:DS.fs.xs, fontWeight:DS.fw.normal }}>— submarket names auto-located via OpenStreetMap</span>
+          </div>
+          <SubmarketLeafletMap rows={rows} submarketList={submarketList} />
         </div>
       )}
 
@@ -2339,7 +2397,7 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
           <div key={r.sm} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "16px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
-                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 15 }}>{r.sm}</div>
+                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 15, display:"flex", alignItems:"center", gap:6 }}>{r.sm}{r.lat&&r.lng&&<span style={{ fontSize:10, color:DS.green, fontWeight:400 }}>📍 mapped</span>}</div>
                 <div style={{ color: "#475569", fontSize: 11 }}>{r.smDeals.length} deal{r.smDeals.length!==1?"s":""} · {r.smListings.length} listing{r.smListings.length!==1?"s":""} · {r.smComps.length} comp{r.smComps.length!==1?"s":""}</div>
               </div>
               {r.commissions > 0 && <div style={{ textAlign: "right" }}>
@@ -3018,6 +3076,8 @@ function TasksTab({ tasks, setTasks, deals }) {
   const [modal, setModal] = useState(null);
   const [showDone, setShowDone] = useState(false);
   const [filterCat, setFilterCat] = useState("All");
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const deleteTask = (id) => { setTasks(prev => prev.filter(x => x.id !== id)); setConfirmDeleteId(null); };
   const priorityColors = { "Low":"#475569","Medium":"#f59e0b","High":"#f97316","Urgent":"#dc2626" };
   const categories = ["Admin","Prospecting","Follow-up","Marketing","Legal","Financial","Other"];
 
@@ -3185,7 +3245,15 @@ function TasksTab({ tasks, setTasks, deals }) {
               </div>
               <div style={{ display:"flex", gap:4 }}>
                 <button onClick={()=>setModal(t)} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}></button>
-                <button onClick={()=>{ if(window.confirm("Delete task?")) setTasks(prev=>prev.filter(x=>x.id!==t.id)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}></button>
+                {confirmDeleteId === t.id ? (
+                  <span style={{ display:"flex", gap:4, alignItems:"center" }}>
+                    <span style={{ color:"#94a3b8", fontSize:10 }}>Delete?</span>
+                    <button onClick={()=>deleteTask(t.id)} style={{ background:"#dc2626", border:"none", color:"#fff", cursor:"pointer", fontSize:10, padding:"2px 7px", borderRadius:4, fontWeight:700 }}>Yes</button>
+                    <button onClick={()=>setConfirmDeleteId(null)} style={{ background:"none", border:"1px solid #334155", color:"#64748b", cursor:"pointer", fontSize:10, padding:"2px 7px", borderRadius:4 }}>No</button>
+                  </span>
+                ) : (
+                  <button onClick={()=>setConfirmDeleteId(t.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}>🗑</button>
+                )}
               </div>
             </div>
           );
@@ -5291,6 +5359,955 @@ function ProposalGeneratorModal({ uwData, proj, waltYears, occupancy, projYears,
   );
 }
 
+
+// ── BOV Tab ─────────────────────────────────────────────────────
+function BOVTab({ comps, submarketList, brokerName, brokerage }) {
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
+  const brokerPhone   = localStorage.getItem("cre-phone")   || "";
+  const brokerEmail   = localStorage.getItem("cre-email")   || "";
+  const brokerLicense = localStorage.getItem("cre-license") || "";
+  const defaultState  = localStorage.getItem("cre-default-state") || "Indiana";
+
+  // ── Shared styles ─────────────────────────────────────────────
+  const iS   = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "7px 10px", fontSize: DS.fs.md, outline: "none", width: "100%", boxSizing: "border-box" };
+  const iSsm = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "5px 8px", fontSize: 11, outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl  = t => <label style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, display: "block", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px" }}>{t}</label>;
+
+  const SectionHeader = ({ title, color }) => (
+    <div style={{ background: color || "#1a3a5c", color: "#fff", fontWeight: DS.fw.black, fontSize: DS.fs.sm, padding: "9px 16px", letterSpacing: "0.5px", textTransform: "uppercase" }}>{title}</div>
+  );
+  const Card = ({ children }) => (
+    <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>{children}</div>
+  );
+  const Body = ({ children }) => <div style={{ padding: "14px 16px" }}>{children}</div>;
+  const Grid = ({ cols, children }) => <div style={{ display: "grid", gridTemplateColumns: cols || "1fr 1fr", gap: 10 }}>{children}</div>;
+  const Field = ({ label, span, children }) => (
+    <div style={{ gridColumn: span ? `span ${span}` : undefined }}>{lbl(label)}{children}</div>
+  );
+  const TextInput = ({ field, placeholder, type }) => (
+    <input type={type || "text"} value={form[field] || ""} onChange={e => set(field, e.target.value)} placeholder={placeholder || ""} style={iS} />
+  );
+  const SelectInput = ({ field, options }) => (
+    <select value={form[field] || ""} onChange={e => set(field, e.target.value)} style={iS}>
+      {options.map(o => <option key={o}>{o}</option>)}
+    </select>
+  );
+
+  // ── Saved BOV list ────────────────────────────────────────────
+  const [bovList, setBovList] = useState(() => {
+    try { const s = localStorage.getItem("cre-bov-v1"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  useEffect(() => { localStorage.setItem("cre-bov-v1", JSON.stringify(bovList)); }, [bovList]);
+  const [activeId,  setActiveId]  = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [activeSection, setActiveSection] = useState("Property ID");
+
+  // ── Empty form — mirrors SVN template exactly ─────────────────
+  const emptyComp  = () => ({ address: "", cityState: "", propType: "Industrial", sqft: "", landAC: "", yearBuilt: "", zoning: "", comparability: "Comparable", saleDate: "", salePrice: "", psfSale: "", capRate: "" });
+  const emptyLease = () => ({ address: "", city: "", state: defaultState, units: "", leaseRate: "", leaseStart: "", leaseType: "NNN" });
+
+  const emptyForm = () => ({
+    id: Date.now() + Math.random(),
+    // Header
+    clientName: "", effectiveDate: today, portfolioSort: "",
+    // Property ID (Page 1)
+    streetAddress: "", city: "", state: defaultState, zip: "",
+    propertyType: "Industrial", useType: "Owner-occupier", isForSale: "No",
+    lastSaleDate: "", lastSalePrice: "", assessedValue: "",
+    ownerName: "", buildingSF: "", propertyCondition: "Excellent",
+    parcelNum: "", annualTaxes: "",
+    // Market Characteristics (Page 1)
+    marketConditions: "Stable", sales12mo: "", newConstruction: "Limited",
+    marketVacancy: "", pricingTrend: "Stable", salesCompsRange: "",
+    marketType: "Suburban", submarketCapRates: "", marketComments: "",
+    // Site Characteristics (Page 1)
+    zoning: "", siteAcres: "", lotLocation: "Corner",
+    // Building Description (Page 1)
+    numBuildings: "1", numStories: "1", numUnits: "",
+    yearBuilt: "", overallCondition: "Excellent",
+    constructionType: "Steel Frame", exteriorFinish: "Steel",
+    airConditioned: "Yes", heated: "Yes", boiler: "N/A",
+    // Operating Status (Page 1)
+    occupancyPct: "100", majorTenant: "", secondaryTenant: "N/A", tenantType: "",
+    // SWOT (Page 1)
+    strengths: "", weaknesses: "", opportunities: "", threats: "", otherIssues: "", explainIssues: "",
+    // Property vs Market (Page 1)
+    assetQuality: "Above Average", neighborhoodLocation: "Above Average",
+    neighborhoodTrends: "Stable", streetAppeal: "Average", visibility: "Average",
+    // Scope (Page 1)
+    scopeOfInspection: "",
+    // Sales Comps (Page 2) — 3 comps
+    saleComps: [emptyComp(), emptyComp(), emptyComp()],
+    saleLowOverride: "", saleHighOverride: "", saleMedianOverride: "",
+    saleComments: "Comparable sales utilized consist of similar industrial buildings within the submarket and surrounding area. Adjustments considered include building size, construction quality, age, and site utility.",
+    // Lease Comps (Page 2)
+    leaseComps: [emptyLease(), emptyLease(), emptyLease()],
+    leaseComments: "Lease comparables reflect similar industrial properties within the submarket. Estimated market rent assumptions are based on current asking rates and recent executed leases.",
+    // Income Analysis (Page 2)
+    incomeBuildingSF: "", estMarketRent: "", estVacancyPct: "2",
+    estPropExp: "0.50", estMgmtFeePct: "5", estCreditLossPct: "0",
+    estReplReserve: "0.00", estLowCapRate: "7.25", estHighCapRate: "9.00",
+    incomeComments: "Income assumptions are derived from current market rent levels for comparable properties, estimated vacancy factors, and standard operating expense ratios.",
+    // Conclusion (Page 2)
+    asIsValue: "", asIsPSF: "", lowerEndValue: "", upperEndValue: "",
+    conclusionComments: "",
+    submarket: smList[0] || "",
+    createdDate: today,
+  });
+
+  const [form, setForm] = useState(emptyForm);
+  const set   = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setSC = (i, k, v) => setForm(f => { const a = [...f.saleComps];  a[i] = { ...a[i], [k]: v }; return { ...f, saleComps: a }; });
+  const setLC = (i, k, v) => setForm(f => { const a = [...f.leaseComps]; a[i] = { ...a[i], [k]: v }; return { ...f, leaseComps: a }; });
+
+  // ── DB auto-fill ──────────────────────────────────────────────
+  const dbSale  = comps.filter(c => c.submarket === form.submarket && c.compType === "Sale"  && parseFloat(c.psfSale)  > 0).sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||"")).slice(0,3);
+  const dbLease = comps.filter(c => c.submarket === form.submarket && c.compType === "Lease" && parseFloat(c.psfLease) > 0).sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||"")).slice(0,3);
+
+  const autoFillComps = () => {
+    const sc = [0,1,2].map(i => {
+      const c = dbSale[i];
+      if (!c) return form.saleComps[i];
+      return { address: c.address || c.name || "", cityState: `${c.city||""}${c.city&&c.state?", ":""}${c.state||defaultState}`, propType: c.subtype || "Industrial", sqft: c.sqft || "", landAC: "", yearBuilt: c.yearBuilt || "", zoning: "IBD", comparability: "Comparable", saleDate: c.closeDate || "", salePrice: c.salePrice || "", psfSale: c.psfSale || "", capRate: "" };
+    });
+    const lc = [0,1,2].map(i => {
+      const c = dbLease[i];
+      if (!c) return form.leaseComps[i];
+      const annualPsf = (parseFloat(c.psfLease) * 12).toFixed(2);
+      return { address: c.address || c.name || "", city: c.city || "", state: c.state || defaultState, units: c.sqft || "", leaseRate: annualPsf, leaseStart: c.closeDate || "", leaseType: "NNN" };
+    });
+    setForm(f => ({ ...f, saleComps: sc, leaseComps: lc, incomeBuildingSF: f.incomeBuildingSF || f.buildingSF }));
+    toast(`⚡ Auto-filled ${dbSale.length} sale + ${dbLease.length} lease comps from ${form.submarket}`);
+  };
+
+  // ── Income calculations ───────────────────────────────────────
+  const bSF      = parseFloat(form.incomeBuildingSF || form.buildingSF) || 0;
+  const mktRent  = parseFloat(form.estMarketRent)    || 0;
+  const vacPct   = parseFloat(form.estVacancyPct)    || 0;
+  const propExp  = parseFloat(form.estPropExp)        || 0;
+  const mgmtPct  = parseFloat(form.estMgmtFeePct)    || 0;
+  const creditPct= parseFloat(form.estCreditLossPct) || 0;
+  const replRes  = parseFloat(form.estReplReserve)   || 0;
+  const lowCap   = parseFloat(form.estLowCapRate)    || 0;
+  const highCap  = parseFloat(form.estHighCapRate)   || 0;
+
+  const pgi       = bSF * mktRent;
+  const lessVac   = pgi * (vacPct / 100);
+  const lessCred  = 0; // credit loss applied to EGI below
+  const egi       = pgi - lessVac;
+  const lessProp  = bSF * propExp;
+  const lessMgmt  = egi * (mgmtPct / 100);
+  const lessCL    = egi * (creditPct / 100);
+  const noi       = egi - lessProp - lessMgmt - lessCL;
+  const lessRes   = bSF * replRes;
+  const ncf       = noi - lessRes;
+  const incLow    = highCap > 0 ? noi / (highCap / 100) : 0;
+  const incHigh   = lowCap  > 0 ? noi / (lowCap  / 100) : 0;
+
+  // ── Sale comp auto-calculations ───────────────────────────────
+  const validSC   = form.saleComps.filter(c => parseFloat(c.psfSale) > 0);
+  const avgPsf    = validSC.length > 0 ? validSC.reduce((s,c) => s + parseFloat(c.psfSale), 0) / validSC.length : 0;
+  const subSF     = parseFloat(form.buildingSF) || 0;
+  const autoLow   = avgPsf > 0 && subSF > 0 ? subSF * avgPsf * 0.88 : 0;
+  const autoHigh  = avgPsf > 0 && subSF > 0 ? subSF * avgPsf * 1.08 : 0;
+  const autoMed   = avgPsf > 0 && subSF > 0 ? subSF * avgPsf        : 0;
+  const finalLow  = parseFloat(form.saleLowOverride)    || autoLow;
+  const finalHigh = parseFloat(form.saleHighOverride)   || autoHigh;
+  const finalMed  = parseFloat(form.saleMedianOverride) || autoMed;
+  const finalAsIs = parseFloat(form.asIsValue)          || finalMed;
+
+  const fD = v  => v > 0 ? "$" + Math.round(v).toLocaleString() : "—";
+  const fP = v  => v > 0 ? "$" + parseFloat(v).toFixed(2)       : "—";
+  const fPsf = v => subSF > 0 && v > 0 ? "$" + (v / subSF).toFixed(2) + "/SF" : "";
+
+  // ── Save / open / delete ──────────────────────────────────────
+  const saveBov = () => {
+    const saved = { ...form, _low: finalLow, _high: finalHigh, _med: finalMed, _asIs: finalAsIs };
+    setBovList(prev => prev.find(b => b.id === form.id) ? prev.map(b => b.id === form.id ? saved : b) : [...prev, saved]);
+    toast("BOV saved ✓");
+  };
+  const deleteBov    = id => { setBovList(p => p.filter(b => b.id !== id)); if (activeId === id) { setActiveId(null); setForm(emptyForm()); } setConfirmDel(null); };
+  const openNew      = () => { const f = emptyForm(); setForm(f); setActiveId(f.id); setActiveSection("Property ID"); };
+  const openExisting = b  => { setForm(b); setActiveId(b.id); setActiveSection("Property ID"); };
+
+  // ── Print / PDF — mirrors SVN format ─────────────────────────
+  const printBOV = () => {
+    const win = window.open("", "_blank");
+    const dateStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    const scRows = [
+      ["Street Address:",      form.streetAddress, ...form.saleComps.map(c => c.address)],
+      ["City/State:",          `${form.city}, ${form.state}`, ...form.saleComps.map(c => c.cityState)],
+      ["Property Type:",       "Industrial",       ...form.saleComps.map(c => c.propType || "Industrial")],
+      ["Building Size (SF):",  form.buildingSF || "—", ...form.saleComps.map(c => c.sqft ? parseInt(c.sqft).toLocaleString() : "—")],
+      ["Land Area (AC):",      form.siteAcres || "—", ...form.saleComps.map(c => c.landAC || "—")],
+      ["Year Built:",          form.yearBuilt || "—", ...form.saleComps.map(c => c.yearBuilt || "—")],
+      ["Zoning:",              form.zoning || "—",  ...form.saleComps.map(c => c.zoning || "—")],
+      ["Comparability to Subject:", "Subject",     ...form.saleComps.map(c => c.comparability || "—")],
+      ["Sale Date:",           "—",                ...form.saleComps.map(c => c.saleDate || "—")],
+      ["Sales Price:",         "—",                ...form.saleComps.map(c => c.salePrice > 0 ? "$" + Math.round(c.salePrice).toLocaleString() : "—")],
+      ["Sale Price/SF:",       "—",                ...form.saleComps.map(c => c.psfSale > 0 ? "$" + parseFloat(c.psfSale).toFixed(4) : "—")],
+      ["Cap Rate %",           "—",                ...form.saleComps.map(c => c.capRate || "—")],
+    ];
+    const lcRows = [
+      ["Street Address:", form.streetAddress,   ...form.leaseComps.map(c => c.address)],
+      ["City:",           form.city || "—",     ...form.leaseComps.map(c => c.city || "—")],
+      ["State:",          form.state || "—",    ...form.leaseComps.map(c => c.state || "—")],
+      ["Units (SF/AC/#):",form.buildingSF||"0", ...form.leaseComps.map(c => c.units || "—")],
+      ["Lease Rate ($/SF/Yr.):", "$0.00",       ...form.leaseComps.map(c => c.leaseRate ? "$" + parseFloat(c.leaseRate).toFixed(2) : "—")],
+      ["Lease Start Date:","N/A",               ...form.leaseComps.map(c => c.leaseStart || "N/A")],
+      ["Lease Term/Lease Type:", "N/A",         ...form.leaseComps.map(c => c.leaseType || "NNN")],
+    ];
+    const tRow = (cells, hl) => `<tr>${cells.map((v,i) => `<td class="${i===0?"lc":i===1?"subj":""}${hl?" hl":""}">${v||"—"}</td>`).join("")}</tr>`;
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>BPO — ${form.streetAddress}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:'Helvetica Neue',Arial,sans-serif;color:#1a1a1a;background:#fff;padding:28px 32px;font-size:11px;line-height:1.55}
+      .phdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:3px solid #f59e0b;margin-bottom:12px}
+      .ptitle{font-size:14px;font-weight:900;color:#0f172a}.psub{font-size:10px;color:#64748b;margin-top:2px}
+      .badge{background:#f59e0b;color:#0d1826;padding:6px 14px;border-radius:5px;font-weight:900;font-size:10px;text-align:center;line-height:1.6}
+      .sh{background:#1a3a5c;color:#fff;font-weight:800;font-size:10px;text-align:center;padding:6px;letter-spacing:.5px;text-transform:uppercase;margin-top:12px}
+      table{width:100%;border-collapse:collapse;font-size:10px;margin-top:0}
+      th{background:#e8f0f8;color:#334155;font-weight:700;padding:5px 8px;text-align:center;border:1px solid #cbd5e1;font-size:9px;text-transform:uppercase}
+      td{padding:4px 8px;border:1px solid #e2e8f0;color:#334155;vertical-align:top}
+      .lc{background:#f8fafc;font-weight:600;color:#475569;width:24%}
+      .subj{background:#fffde7;font-weight:600}
+      .hl{background:#fef9c3;font-weight:700;color:#92400e;text-align:right;font-family:monospace}
+      .num{text-align:right;font-family:monospace}
+      .two{display:grid;grid-template-columns:1fr 1fr;gap:0}
+      .swot td{padding:5px 8px;font-size:10px}
+      .conc{background:#fffbeb;border:2px solid #f59e0b;border-radius:6px;padding:12px 16px;margin:10px 0}
+      .crange{font-size:20px;font-weight:900;color:#1a3a5c;margin:4px 0}
+      .csub{font-size:11px;color:#f59e0b;font-weight:700}
+      .sig{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid #e2e8f0}
+      .sk{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#94a3b8}
+      .sv{font-size:10px;font-weight:600;color:#1e293b;margin-top:1px}
+      .disc{font-size:8px;color:#94a3b8;margin-top:10px;padding-top:8px;border-top:1px solid #e2e8f0;line-height:1.6}
+      @media print{button{display:none!important}.pb{page-break-before:always}}
+    </style></head><body>
+
+    <div class="phdr">
+      <div>
+        <div class="ptitle">BROKER PRICE OPINION (BPO) — COMMERCIAL/INCOME PROPERTY</div>
+        <div class="psub">Effective Date: ${form.effectiveDate} &nbsp;|&nbsp; Client: ${form.clientName||"—"} &nbsp;|&nbsp; Prepared by ${brokerName}, ${brokerage}</div>
+      </div>
+      <div class="badge">BROKER PRICE<br/>OPINION<br/><span style="font-size:9px;font-weight:400">${form.submarket||""}</span></div>
+    </div>
+
+    <div class="sh">PROPERTY IDENTIFICATION</div>
+    <table><tbody>
+      <tr><td class="lc">Street Address:</td><td>${form.streetAddress||"—"}</td><td class="lc">Property Type:</td><td>${form.propertyType}</td></tr>
+      <tr><td class="lc">City:</td><td>${form.city||"—"}</td><td class="lc">Use Type:</td><td>${form.useType}</td></tr>
+      <tr><td class="lc">State:</td><td>${form.state||"—"}</td><td class="lc">Is Property For Sale:</td><td>${form.isForSale}</td></tr>
+      <tr><td class="lc">Zip Code:</td><td>${form.zip||"—"}</td><td class="lc">Last Recorded Sale Date:</td><td>${form.lastSaleDate||"—"}</td></tr>
+      <tr><td class="lc">Borrower/Owner Name:</td><td>${form.ownerName||"—"}</td><td class="lc">Last Recorded Sale Price:</td><td>${form.lastSalePrice||"—"}</td></tr>
+      <tr><td class="lc">Building Size (SF):</td><td>${form.buildingSF||"—"}</td><td class="lc">Assessed Value:</td><td>${form.assessedValue||"—"}</td></tr>
+      <tr><td class="lc">Property Condition:</td><td>${form.propertyCondition}</td><td class="lc">Assessor Parcel #(s):</td><td>${form.parcelNum||"—"}</td></tr>
+      <tr><td class="lc">Annual Property Taxes:</td><td colspan="3">${form.annualTaxes||"—"}</td></tr>
+    </tbody></table>
+
+    <div class="sh">MARKET CHARACTERISTICS</div>
+    <table><tbody>
+      <tr><td class="lc">Overall Market Conditions:</td><td>${form.marketConditions}</td><td class="lc">12 Mo Sales Volume:</td><td>${form.sales12mo||"—"}</td></tr>
+      <tr><td class="lc">New Construction:</td><td>${form.newConstruction}</td><td class="lc">Market Vacancy Rate (%):</td><td>${form.marketVacancy||"—"}</td></tr>
+      <tr><td class="lc">Pricing Trend:</td><td>${form.pricingTrend}</td><td class="lc">Sales Comps ($/SF Range):</td><td>${form.salesCompsRange||"—"}</td></tr>
+      <tr><td class="lc">Market Type:</td><td>${form.marketType}</td><td class="lc">Submarket Cap Rates:</td><td>${form.submarketCapRates||"—"}</td></tr>
+      ${form.marketComments?`<tr><td class="lc">Comments:</td><td colspan="3" style="font-style:italic">${form.marketComments}</td></tr>`:""}
+    </tbody></table>
+
+    <div class="sh">PROPERTY / SITE OVERVIEW</div>
+    <table><tbody>
+      <tr><th colspan="2">SITE CHARACTERISTICS</th><th colspan="2">BUILDING DESCRIPTION</th></tr>
+      <tr><td class="lc">Property Type:</td><td>${form.propertyType}</td><td class="lc"># of Buildings:</td><td>${form.numBuildings}</td></tr>
+      <tr><td class="lc">Zoning:</td><td>${form.zoning||"—"}</td><td class="lc">Building Size (SF):</td><td>${form.buildingSF||"—"}</td></tr>
+      <tr><td class="lc">Site Size (Acres):</td><td>${form.siteAcres||"—"}</td><td class="lc"># of Stories:</td><td>${form.numStories}</td></tr>
+      <tr><td class="lc">Lot Location:</td><td>${form.lotLocation}</td><td class="lc"># of Units:</td><td>${form.numUnits||"0"}</td></tr>
+      <tr><td class="lc"></td><td></td><td class="lc">Year Built:</td><td>${form.yearBuilt||"—"}</td></tr>
+      <tr><td class="lc"></td><td></td><td class="lc">Overall Condition:</td><td>${form.overallCondition}</td></tr>
+      <tr><td class="lc"></td><td></td><td class="lc">Construction Type:</td><td>${form.constructionType}</td></tr>
+      <tr><td class="lc"></td><td></td><td class="lc">Exterior Finish:</td><td>${form.exteriorFinish}</td></tr>
+      <tr><td class="lc"></td><td></td><td class="lc">Air Conditioned:</td><td>${form.airConditioned}</td></tr>
+      <tr><td class="lc">PROPERTY OPERATING STATUS</td><td></td><td class="lc">Heated:</td><td>${form.heated}</td></tr>
+      <tr><td class="lc">Occupancy (%):</td><td>${form.occupancyPct}%</td><td class="lc">Boiler:</td><td>${form.boiler}</td></tr>
+      <tr><td class="lc">Major Tenant(s):</td><td>${form.majorTenant||"—"}</td><td class="lc">Secondary Tenant(s):</td><td>${form.secondaryTenant||"N/A"}</td></tr>
+    </tbody></table>
+
+    <table class="swot" style="margin-top:4px"><tbody>
+      <tr><th colspan="2">STRENGTHS / WEAKNESSES / OPPORTUNITIES / THREATS</th><th colspan="2">PROPERTY VS COMPETITIVE MARKET</th></tr>
+      <tr><td class="lc">Strengths:</td><td>${form.strengths||"—"}</td><td class="lc">Asset Quality vs Market:</td><td>${form.assetQuality}</td></tr>
+      <tr><td class="lc">Weaknesses:</td><td>${form.weaknesses||"—"}</td><td class="lc">Neighborhood Location:</td><td>${form.neighborhoodLocation}</td></tr>
+      <tr><td class="lc">Opportunities:</td><td>${form.opportunities||"—"}</td><td class="lc">Neighborhood Price Trends:</td><td>${form.neighborhoodTrends}</td></tr>
+      <tr><td class="lc">Threats:</td><td>${form.threats||"—"}</td><td class="lc">Street Appeal:</td><td>${form.streetAppeal}</td></tr>
+      <tr><td class="lc">Other/Issues:</td><td colspan="3">${form.otherIssues||"—"}</td></tr>
+    </tbody></table>
+
+    <div class="pb"></div>
+
+    <div class="phdr" style="margin-top:12px">
+      <div>
+        <div class="ptitle">BROKER PRICE OPINION (BPO) — COMMERCIAL/INCOME PROPERTY — PAGE 2</div>
+        <div class="psub">Client: ${form.clientName||"—"} &nbsp;|&nbsp; Effective Date: ${form.effectiveDate}</div>
+      </div>
+      <div class="badge">PAGE 2</div>
+    </div>
+
+    <div class="sh">SALES COMPARISON ANALYSIS</div>
+    <table>
+      <thead><tr><th></th><th class="subj">Subject Property</th><th>Sale Comp #1</th><th>Sale Comp #2</th><th>Sale Comp #3</th></tr></thead>
+      <tbody>
+        ${scRows.map((r,i) => tRow(r, i===10)).join("")}
+      </tbody>
+    </table>
+    <table style="margin-top:3px"><tbody>
+      <tr><td class="lc">Low Price Indication:</td><td class="hl">${fD(finalLow)}</td><td class="lc">High Price Indication:</td><td class="hl">${fD(finalHigh)}</td></tr>
+      <tr><td class="lc">Median Price:</td><td class="hl">${fD(finalMed)}</td><td colspan="2"></td></tr>
+    </tbody></table>
+    ${form.saleComments ? `<div style="margin:4px 0;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;font-style:italic;color:#475569">${form.saleComments}</div>` : ""}
+
+    <div class="sh">COMPARABLE PROPERTY LEASE RATES (Preferably in-place contract rates)</div>
+    <table>
+      <thead><tr><th></th><th class="subj">${form.streetAddress||"Subject"}</th><th>Lease Comp #1</th><th>Lease Comp #2</th><th>Lease Comp #3</th></tr></thead>
+      <tbody>${lcRows.map(r => tRow(r, false)).join("")}</tbody>
+    </table>
+    ${form.leaseComments ? `<div style="margin:4px 0;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;font-style:italic;color:#475569">${form.leaseComments}</div>` : ""}
+
+    <div class="sh">INCOME ANALYSIS — BASED ON PRO FORMA INCOME</div>
+    <table><tbody>
+      <tr><td class="lc">Building Size (Rentable SF):</td><td class="num">${bSF>0?bSF.toLocaleString():"—"}</td><td class="lc">Potential Gross Income:</td><td class="num">$&nbsp;${Math.round(pgi).toLocaleString()}</td></tr>
+      <tr><td class="lc">Est. Market Rent ($/SF/Yr.)</td><td class="num">${mktRent?"$"+mktRent.toFixed(2):"—"}</td><td class="lc">Less: Vacancy</td><td class="num">${lessVac>0?"("+Math.round(lessVac).toLocaleString()+")":"—"}</td></tr>
+      <tr><td class="lc">Est. Market Vacancy (%):</td><td class="num">${vacPct}%</td><td class="lc">Less: Credit Loss</td><td class="num">${lessCL>0?"("+Math.round(lessCL).toLocaleString()+")":"0"}</td></tr>
+      <tr><td class="lc">Est. Prop. Exp. ($/SF/Yr.):</td><td class="num">${fP(propExp)}</td><td class="lc" style="font-weight:800">Effective Gross Income:</td><td class="num hl">$&nbsp;${Math.round(egi).toLocaleString()}</td></tr>
+      <tr><td class="lc">Est. Mgmt. Fee (% of EGI):</td><td class="num">${mgmtPct}%</td><td class="lc">Less: Property Expense</td><td class="num">${lessProp>0?"("+Math.round(lessProp).toLocaleString()+")":"—"}</td></tr>
+      <tr><td class="lc">Est. Credit Loss (% of EGI):</td><td class="num">${creditPct}%</td><td class="lc">Less: Mgmt. Fee</td><td class="num">${lessMgmt>0?"("+Math.round(lessMgmt).toLocaleString()+")":"—"}</td></tr>
+      <tr><td class="lc">Est. Repl. Reserve ($/SF):</td><td class="num">$${parseFloat(form.estReplReserve||0).toFixed(2)}</td><td class="lc" style="font-weight:800">Pro Forma NOI after vacancy</td><td class="num hl">$&nbsp;${Math.round(noi).toLocaleString()}</td></tr>
+      <tr><td colspan="2"></td><td class="lc">Less: Reserves</td><td class="num">${lessRes>0?"("+Math.round(lessRes).toLocaleString()+")":"0"}</td></tr>
+      <tr><td colspan="2"></td><td class="lc" style="font-weight:900;color:#1a3a5c">Pro Forma NCF:</td><td class="num hl" style="font-weight:900;color:#1a3a5c">$&nbsp;${Math.round(ncf).toLocaleString()}</td></tr>
+    </tbody></table>
+    <table style="margin-top:3px"><tbody>
+      <tr><td class="lc">Low Price Indication:</td><td class="hl">${fD(incLow)}</td><td class="lc">Est. Low Cap Rate:</td><td>${lowCap}%</td></tr>
+      <tr><td class="lc">High Price Indication:</td><td class="hl">${fD(incHigh)}</td><td class="lc">Est. High Cap Rate:</td><td>${highCap}%</td></tr>
+    </tbody></table>
+    ${form.incomeComments ? `<div style="margin:4px 0;padding:6px 8px;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;font-style:italic;color:#475569">${form.incomeComments}</div>` : ""}
+
+    <div class="sh">ANALYSIS CONCLUSION — BROKER PRICE OPINION</div>
+    <div class="conc">
+      <div style="font-size:10px;color:#475569;margin-bottom:6px">Based on the above analysis, the estimated market value of the subject property is:</div>
+      <div class="crange">${fD(finalLow)} – ${fD(finalHigh)}</div>
+      <div class="csub">As-is Valuation Estimate: ${fD(finalAsIs)} ${fPsf(finalAsIs)}</div>
+      <table style="margin-top:8px;border:none"><tbody>
+        <tr style="border:none">
+          <td style="border:none;padding:4px 8px 4px 0"><span style="font-size:8px;font-weight:700;text-transform:uppercase;color:#94a3b8;letter-spacing:.3px">Lower End Value</span><br/><span style="font-size:14px;font-weight:900;color:#1a3a5c">${fD(parseFloat(form.lowerEndValue)||finalLow)} ${fPsf(parseFloat(form.lowerEndValue)||finalLow)}</span></td>
+          <td style="border:none;padding:4px 8px"><span style="font-size:8px;font-weight:700;text-transform:uppercase;color:#94a3b8;letter-spacing:.3px">Upper End Value</span><br/><span style="font-size:14px;font-weight:900;color:#1a3a5c">${fD(parseFloat(form.upperEndValue)||finalHigh)} ${fPsf(parseFloat(form.upperEndValue)||finalHigh)}</span></td>
+        </tr>
+      </tbody></table>
+      ${form.conclusionComments ? `<div style="margin-top:8px;font-size:10px;color:#475569;font-style:italic">${form.conclusionComments}</div>` : ""}
+    </div>
+
+    <div class="sig">
+      ${[["Broker(s) Name(s):", brokerName],["Broker Company:", brokerage],["License #:", brokerLicense||"—"],["Phone:", brokerPhone||"—"],["Email:", brokerEmail||"—"],["Date:", dateStr]].map(([k,v])=>`<div><div class="sk">${k}</div><div class="sv">${v}</div></div>`).join("")}
+    </div>
+    <div class="disc">This Broker Price Opinion is prepared by ${brokerName}, ${brokerage} for informational purposes only and does not constitute a certified appraisal or guarantee of value. All data is based on available market information as of ${dateStr}. Actual values may differ materially. This document is confidential and intended solely for the named recipient. All SVN® Offices Independently Owned and Operated.</div>
+    <br/><button onclick="window.print()" style="background:#f59e0b;color:#0d1826;border:none;padding:9px 22px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:900;margin-top:12px">🖨 Print / Save as PDF</button>
+    </body></html>`);
+    win.document.close();
+  };
+
+  // ── Comp grid row ─────────────────────────────────────────────
+  const CompRow = ({ label, subjectVal, arr, field, onChange, type, isKey }) => (
+    <tr style={{ borderBottom: `1px solid ${DS.border}`, background: isKey ? DS.accent + "08" : "transparent" }}>
+      <td style={{ padding: "5px 10px", background: "#0a1424", color: isKey ? DS.accent : DS.textSub, fontSize: 11, fontWeight: 600, width: "22%", whiteSpace: "nowrap" }}>{label}</td>
+      <td style={{ padding: "5px 8px", background: "#070e1a", color: DS.accent, fontSize: 11, width: "19%" }}>{subjectVal || "—"}</td>
+      {[0, 1, 2].map(i => (
+        <td key={i} style={{ padding: "3px 5px", width: "19%" }}>
+          <input type={type || "text"} value={arr[i][field] || ""} onChange={e => onChange(i, field, e.target.value)}
+            style={{ ...iSsm, ...(isKey ? { color: DS.accent, fontFamily: "'DM Mono', monospace" } : {}) }} />
+        </td>
+      ))}
+    </tr>
+  );
+
+  const SECTIONS = ["Property ID", "Market", "Site & Building", "Sale Comps", "Lease Comps", "Income", "Conclusion"];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Header bar */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Broker Price Opinion</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>Full SVN BPO template · all sections · comps auto-filled from your database</div>
+        </div>
+        <button onClick={openNew} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "8px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>+ New BOV</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+        {/* Saved list */}
+        <div style={{ width: 175, flexShrink: 0 }}>
+          <div style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.black, letterSpacing: "0.8px", textTransform: "uppercase", marginBottom: 8 }}>Saved ({bovList.length})</div>
+          {bovList.length === 0 && (
+            <div style={{ background: DS.panel, border: `1px dashed ${DS.border}`, borderRadius: DS.r.md, padding: "16px 10px", textAlign: "center", color: DS.textFaint, fontSize: DS.fs.xs }}>No BOVs yet.<br />Click + New BOV</div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {bovList.map(b => (
+              <div key={b.id} onClick={() => openExisting(b)}
+                style={{ background: activeId === b.id ? DS.accentSoft : DS.panel, border: `1px solid ${activeId === b.id ? DS.accent : DS.border}`, borderRadius: DS.r.md, padding: "9px 11px", cursor: "pointer" }}
+                onMouseEnter={e => { if (activeId !== b.id) e.currentTarget.style.background = DS.panelHi; }}
+                onMouseLeave={e => { if (activeId !== b.id) e.currentTarget.style.background = DS.panel; }}>
+                <div style={{ color: activeId === b.id ? DS.accent : DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.sm, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.streetAddress || "Untitled BOV"}</div>
+                <div style={{ color: DS.textFaint, fontSize: 10, marginTop: 2 }}>{b.clientName || b.city || b.submarket}</div>
+                {b._asIs > 0 && <div style={{ color: DS.accent, fontSize: DS.fs.sm, fontWeight: DS.fw.bold, marginTop: 2, fontFamily: "'DM Mono', monospace" }}>{fD(b._asIs)}</div>}
+                <div style={{ color: DS.textFaint, fontSize: 9, marginTop: 2 }}>{b.createdDate}</div>
+                {confirmDel === b.id ? (
+                  <div style={{ display: "flex", gap: 4, marginTop: 5 }}>
+                    <button onClick={e => { e.stopPropagation(); deleteBov(b.id); }} style={{ background: "#dc2626", border: "none", color: "#fff", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, cursor: "pointer" }}>Delete</button>
+                    <button onClick={e => { e.stopPropagation(); setConfirmDel(null); }} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textMute, padding: "2px 8px", borderRadius: 4, fontSize: 10, cursor: "pointer" }}>No</button>
+                  </div>
+                ) : (
+                  <button onClick={e => { e.stopPropagation(); setConfirmDel(b.id); }} style={{ background: "none", border: "none", color: DS.textFaint, fontSize: 10, cursor: "pointer", marginTop: 4, padding: 0 }}>Delete</button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Editor */}
+        {activeId ? (
+          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+            {/* Section nav */}
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+              {SECTIONS.map(s => (
+                <button key={s} onClick={() => setActiveSection(s)} style={{ background: activeSection === s ? DS.accent : DS.panel, border: `1px solid ${activeSection === s ? DS.accent : DS.border}`, color: activeSection === s ? "#0a0f1a" : DS.textSub, padding: "6px 13px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: activeSection === s ? DS.fw.black : DS.fw.normal, whiteSpace: "nowrap" }}>{s}</button>
+              ))}
+            </div>
+
+            {/* ── PAGE 1 — PROPERTY ID ── */}
+            {activeSection === "Property ID" && (
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                <SectionHeader title="BROKER PRICE OPINION — PROPERTY IDENTIFICATION" />
+                <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    <div style={{ gridColumn: "span 2" }}>{lbl("Client Name")}<input value={form.clientName} onChange={e => set("clientName", e.target.value)} placeholder="Marty Cooper" style={iS} /></div>
+                    <div>{lbl("Effective Date")}<input type="date" value={form.effectiveDate} onChange={e => set("effectiveDate", e.target.value)} style={iS} /></div>
+                    <div style={{ gridColumn: "span 2" }}>{lbl("Street Address")}<input value={form.streetAddress} onChange={e => set("streetAddress", e.target.value)} placeholder="1556 Amy Ln" style={iS} /></div>
+                    <div>{lbl("Borrower / Owner Name")}<input value={form.ownerName} onChange={e => set("ownerName", e.target.value)} placeholder="M & C Cooper Enterprises LLC" style={iS} /></div>
+                    <div>{lbl("City")}<input value={form.city} onChange={e => set("city", e.target.value)} placeholder="Franklin" style={iS} /></div>
+                    <div>{lbl("State")}<input value={form.state} onChange={e => set("state", e.target.value)} placeholder="Indiana" style={iS} /></div>
+                    <div>{lbl("Zip Code")}<input value={form.zip} onChange={e => set("zip", e.target.value)} placeholder="46131" style={iS} /></div>
+                    <div>{lbl("Property Type")}
+                      <select value={form.propertyType} onChange={e => set("propertyType", e.target.value)} style={iS}>
+                        {["Industrial","Office","Retail","Flex","Multifamily","Land","Other"].map(o => <option key={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div>{lbl("Use Type")}
+                      <select value={form.useType} onChange={e => set("useType", e.target.value)} style={iS}>
+                        {["Owner-occupier","Investment","Owner-user","Vacant"].map(o => <option key={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div>{lbl("Is Property For Sale")}
+                      <select value={form.isForSale} onChange={e => set("isForSale", e.target.value)} style={iS}>
+                        {["No","Yes","Under Contract"].map(o => <option key={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div>{lbl("Building Size (SF)")}<input type="number" value={form.buildingSF} onChange={e => set("buildingSF", e.target.value)} placeholder="5400" style={iS} /></div>
+                    <div>{lbl("Property Condition")}
+                      <select value={form.propertyCondition} onChange={e => set("propertyCondition", e.target.value)} style={iS}>
+                        {["Excellent","Good","Average","Fair","Poor"].map(o => <option key={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div>{lbl("Assessor Parcel #(s)")}<input value={form.parcelNum} onChange={e => set("parcelNum", e.target.value)} placeholder="41-08-12-033-006.007-018" style={iS} /></div>
+                    <div>{lbl("Annual Property Taxes")}<input value={form.annualTaxes} onChange={e => set("annualTaxes", e.target.value)} placeholder="$10,604.24" style={iS} /></div>
+                    <div>{lbl("Last Recorded Sale Date")}<input type="date" value={form.lastSaleDate} onChange={e => set("lastSaleDate", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Last Recorded Sale Price")}<input value={form.lastSalePrice} onChange={e => set("lastSalePrice", e.target.value)} placeholder="Not Disclosed" style={iS} /></div>
+                    <div>{lbl("Assessed Value")}<input value={form.assessedValue} onChange={e => set("assessedValue", e.target.value)} placeholder="388,600" style={iS} /></div>
+                    <div>{lbl("Submarket")}
+                      <select value={form.submarket} onChange={e => set("submarket", e.target.value)} style={iS}>
+                        {smList.map(s => <option key={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── PAGE 1 — MARKET ── */}
+            {activeSection === "Market" && (
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                <SectionHeader title="MARKET CHARACTERISTICS" />
+                <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>{lbl("Overall Market Conditions")}
+                    <select value={form.marketConditions} onChange={e => set("marketConditions", e.target.value)} style={iS}>
+                      {["Stable","Improving","Declining","Distressed"].map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </div>
+                  <div>{lbl("12 Mo Sales Volume")}<input value={form.sales12mo} onChange={e => set("sales12mo", e.target.value)} placeholder="$122M" style={iS} /></div>
+                  <div>{lbl("New Construction")}
+                    <select value={form.newConstruction} onChange={e => set("newConstruction", e.target.value)} style={iS}>
+                      {["None","Limited","Moderate","Active","Oversupply"].map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </div>
+                  <div>{lbl("Market Vacancy Rate (%)")}<input value={form.marketVacancy} onChange={e => set("marketVacancy", e.target.value)} placeholder="1.7%" style={iS} /></div>
+                  <div>{lbl("Pricing Trend")}
+                    <select value={form.pricingTrend} onChange={e => set("pricingTrend", e.target.value)} style={iS}>
+                      {["Stable","Increasing","Decreasing","Volatile"].map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </div>
+                  <div>{lbl("Sales Comps ($/SF Range)")}<input value={form.salesCompsRange} onChange={e => set("salesCompsRange", e.target.value)} placeholder="$47–$217" style={iS} /></div>
+                  <div>{lbl("Market Type")}
+                    <select value={form.marketType} onChange={e => set("marketType", e.target.value)} style={iS}>
+                      {["Urban","Suburban","Rural","Secondary Market"].map(o => <option key={o}>{o}</option>)}
+                    </select>
+                  </div>
+                  <div>{lbl("Submarket Cap Rates")}<input value={form.submarketCapRates} onChange={e => set("submarketCapRates", e.target.value)} placeholder="8.4%" style={iS} /></div>
+                  <div style={{ gridColumn: "span 2" }}>{lbl("Comments")}<textarea value={form.marketComments} onChange={e => set("marketComments", e.target.value)} rows={3} style={{ ...iS, resize: "vertical", fontSize: 11 }} /></div>
+                </div>
+              </div>
+            )}
+
+            {/* ── PAGE 1 — SITE & BUILDING ── */}
+            {activeSection === "Site & Building" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {/* Site + Building side by side */}
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  <SectionHeader title="PROPERTY / SITE OVERVIEW" />
+                  <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                    <div>
+                      <div style={{ color: DS.textFaint, fontSize: 10, fontWeight: DS.fw.black, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Site Characteristics</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div>{lbl("Zoning")}<input value={form.zoning} onChange={e => set("zoning", e.target.value)} placeholder="Industrial (Hurricane Industrial Park)" style={iS} /></div>
+                        <div>{lbl("Site Size (Acres)")}<input type="number" step="0.01" value={form.siteAcres} onChange={e => set("siteAcres", e.target.value)} placeholder="1.77" style={iS} /></div>
+                        <div>{lbl("Lot Location")}
+                          <select value={form.lotLocation} onChange={e => set("lotLocation", e.target.value)} style={iS}>
+                            {["Corner","Interior","Cul-de-sac","Flag"].map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ color: DS.textFaint, fontSize: 10, fontWeight: DS.fw.black, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>Building Description</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <div>{lbl("# of Buildings")}<input type="number" value={form.numBuildings} onChange={e => set("numBuildings", e.target.value)} style={iS} /></div>
+                        <div>{lbl("# of Stories")}<input type="number" value={form.numStories} onChange={e => set("numStories", e.target.value)} style={iS} /></div>
+                        <div>{lbl("# of Units")}<input type="number" value={form.numUnits} onChange={e => set("numUnits", e.target.value)} placeholder="0" style={iS} /></div>
+                        <div>{lbl("Year Built")}<input type="number" value={form.yearBuilt} onChange={e => set("yearBuilt", e.target.value)} placeholder="2017" style={iS} /></div>
+                        <div style={{ gridColumn: "span 2" }}>{lbl("Overall Condition")}
+                          <select value={form.overallCondition} onChange={e => set("overallCondition", e.target.value)} style={iS}>
+                            {["Excellent","Good","Average","Fair","Poor"].map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ gridColumn: "span 2" }}>{lbl("Construction Type")}
+                          <select value={form.constructionType} onChange={e => set("constructionType", e.target.value)} style={iS}>
+                            {["Steel Frame","Masonry","Concrete Tilt-Up","Wood Frame","Other"].map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        </div>
+                        <div style={{ gridColumn: "span 2" }}>{lbl("Exterior Finish")}
+                          <select value={form.exteriorFinish} onChange={e => set("exteriorFinish", e.target.value)} style={iS}>
+                            {["Steel","Brick","Concrete","Metal Panel","Stucco","Other"].map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        </div>
+                        <div>{lbl("Air Conditioned")}<select value={form.airConditioned} onChange={e => set("airConditioned", e.target.value)} style={iS}>{["Yes","Partial","No"].map(o=><option key={o}>{o}</option>)}</select></div>
+                        <div>{lbl("Heated")}<select value={form.heated} onChange={e => set("heated", e.target.value)} style={iS}>{["Yes","Partial","No"].map(o=><option key={o}>{o}</option>)}</select></div>
+                        <div style={{ gridColumn: "span 2" }}>{lbl("Boiler")}<input value={form.boiler} onChange={e => set("boiler", e.target.value)} placeholder="N/A" style={iS} /></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                {/* Operating Status */}
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  <SectionHeader title="PROPERTY OPERATING STATUS" color="#1a3050" />
+                  <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    <div>{lbl("Occupancy (%)")}<input type="number" value={form.occupancyPct} onChange={e => set("occupancyPct", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Major Tenant(s)")}<input value={form.majorTenant} onChange={e => set("majorTenant", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Secondary Tenant(s)")}<input value={form.secondaryTenant} onChange={e => set("secondaryTenant", e.target.value)} style={iS} /></div>
+                    <div style={{ gridColumn: "span 3" }}>{lbl("Tenant Type(s)")}<input value={form.tenantType} onChange={e => set("tenantType", e.target.value)} style={iS} /></div>
+                  </div>
+                </div>
+                {/* SWOT */}
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  <SectionHeader title="STRENGTHS / WEAKNESSES / OPPORTUNITIES / THREATS" color="#1c3a28" />
+                  <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    {[["strengths","Strengths","New construction; expansion potential..."],["weaknesses","Weaknesses","Small footprint; aging roof..."],["opportunities","Opportunities","Additional land; strong submarket demand..."],["threats","Threats","New competing supply; rising taxes..."]].map(([k,label,ph]) => (
+                      <div key={k}>{lbl(label)}<textarea value={form[k]} onChange={e => set(k, e.target.value)} rows={3} placeholder={ph} style={{ ...iS, resize: "vertical", fontSize: 11 }} /></div>
+                    ))}
+                    <div style={{ gridColumn: "span 2" }}>{lbl("Other / Issues")}<textarea value={form.otherIssues} onChange={e => set("otherIssues", e.target.value)} rows={2} style={{ ...iS, resize: "vertical", fontSize: 11 }} /></div>
+                    <div style={{ gridColumn: "span 2" }}>{lbl("Explain Issues (if applicable)")}<textarea value={form.explainIssues} onChange={e => set("explainIssues", e.target.value)} rows={2} style={{ ...iS, resize: "vertical", fontSize: 11 }} /></div>
+                  </div>
+                </div>
+                {/* Property vs Market */}
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  <SectionHeader title="PROPERTY VS COMPETITIVE MARKET" color="#2d1a3a" />
+                  <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                    {[["assetQuality","Asset Quality vs Market"],["neighborhoodLocation","Neighborhood Location"],["neighborhoodTrends","Neighborhood Price Trends"],["streetAppeal","Street Appeal"],["visibility","Visibility"]].map(([k,label]) => (
+                      <div key={k}>{lbl(label)}<select value={form[k]} onChange={e => set(k, e.target.value)} style={iS}>{["Above Average","Average","Below Average","Stable","Increasing","Decreasing"].map(o => <option key={o}>{o}</option>)}</select></div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── PAGE 2 — SALE COMPS ── */}
+            {activeSection === "Sale Comps" && (
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                <SectionHeader title="SALES COMPARISON ANALYSIS" />
+                <div style={{ padding: "14px 16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>
+                      {dbSale.length} sale comp{dbSale.length !== 1 ? "s" : ""} in DB for <strong style={{ color: DS.text }}>{form.submarket}</strong>
+                    </div>
+                    {dbSale.length > 0 && (
+                      <button onClick={autoFillComps} style={{ background: DS.blue + "22", border: `1px solid ${DS.blue}44`, color: DS.blue, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>⚡ Auto-fill from DB</button>
+                    )}
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${DS.border}` }}>
+                          {["", "Subject Property", "Sale Comp #1", "Sale Comp #2", "Sale Comp #3"].map((h, i) => (
+                            <th key={i} style={{ padding: "7px 10px", background: "#0a1424", color: i === 1 ? DS.accent : DS.textFaint, fontSize: 10, textAlign: "left", width: i === 0 ? "22%" : "19%" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <CompRow label="Street Address:"    subjectVal={form.streetAddress}  arr={form.saleComps} field="address"       onChange={setSC} />
+                        <CompRow label="City/State:"        subjectVal={`${form.city}, ${form.state}`} arr={form.saleComps} field="cityState"    onChange={setSC} />
+                        <CompRow label="Property Type:"     subjectVal="Industrial"          arr={form.saleComps} field="propType"      onChange={setSC} />
+                        <CompRow label="Building Size (SF):"subjectVal={form.buildingSF}     arr={form.saleComps} field="sqft"          onChange={setSC} type="number" />
+                        <CompRow label="Land Area (AC):"    subjectVal={form.siteAcres||"—"} arr={form.saleComps} field="landAC"        onChange={setSC} type="number" />
+                        <CompRow label="Year Built:"        subjectVal={form.yearBuilt||"—"} arr={form.saleComps} field="yearBuilt"     onChange={setSC} type="number" />
+                        <CompRow label="Zoning:"            subjectVal={form.zoning||"—"}   arr={form.saleComps} field="zoning"        onChange={setSC} />
+                        <CompRow label="Comparability:"     subjectVal="Subject"             arr={form.saleComps} field="comparability" onChange={setSC} />
+                        <CompRow label="Sale Date:"         subjectVal="—"                   arr={form.saleComps} field="saleDate"      onChange={setSC} type="date" />
+                        <CompRow label="Sales Price:"       subjectVal="—"                   arr={form.saleComps} field="salePrice"     onChange={setSC} type="number" />
+                        <CompRow label="Sale Price/SF:"     subjectVal={avgPsf > 0 ? "$" + avgPsf.toFixed(4) + " avg" : "—"} arr={form.saleComps} field="psfSale" onChange={setSC} type="number" isKey={true} />
+                        <CompRow label="Cap Rate %"         subjectVal="—"                   arr={form.saleComps} field="capRate"       onChange={setSC} />
+                      </tbody>
+                    </table>
+                  </div>
+                  {/* Price indications */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginTop: 12 }}>
+                    {[["Low Price Indication", "saleLowOverride", autoLow], ["High Price Indication", "saleHighOverride", autoHigh], ["Median Price", "saleMedianOverride", autoMed]].map(([label, k, auto]) => (
+                      <div key={k} style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "10px 12px" }}>
+                        {lbl(label)}
+                        <input type="number" value={form[k]} onChange={e => set(k, e.target.value)} placeholder={auto > 0 ? Math.round(auto).toString() : "—"} style={{ ...iS, color: DS.blue, fontFamily: "'DM Mono', monospace" }} />
+                        {auto > 0 && !form[k] && <div style={{ color: DS.textFaint, fontSize: 9, marginTop: 3 }}>Auto: {fD(auto)}</div>}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 10 }}>{lbl("Comments")}<textarea value={form.saleComments} onChange={e => set("saleComments", e.target.value)} rows={3} style={{ ...iS, resize: "vertical", fontSize: 11, fontStyle: "italic", color: DS.textSub }} /></div>
+                </div>
+              </div>
+            )}
+
+            {/* ── PAGE 2 — LEASE COMPS ── */}
+            {activeSection === "Lease Comps" && (
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                <SectionHeader title="COMPARABLE PROPERTY LEASE RATES (Preferably in-place contract rates)" />
+                <div style={{ padding: "14px 16px" }}>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
+                      <thead>
+                        <tr>
+                          {["", form.streetAddress || "Subject", "Lease Comp #1", "Lease Comp #2", "Lease Comp #3"].map((h, i) => (
+                            <th key={i} style={{ padding: "7px 10px", background: "#0a1424", color: i === 1 ? DS.accent : DS.textFaint, fontSize: 10, textAlign: "left", width: i === 0 ? "22%" : "19%" }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[
+                          ["Street Address:", "address",   form.streetAddress, null],
+                          ["City:",          "city",       form.city || "—",   null],
+                          ["State:",         "state",      form.state || "—",  null],
+                          ["Units (SF/AC/#):","units",     form.buildingSF || "0", "number"],
+                          ["Lease Rate ($/SF/Yr.):","leaseRate","$0.00","number"],
+                          ["Lease Start Date:", "leaseStart","N/A","date"],
+                          ["Lease Term/Lease Type:","leaseType","N/A", null],
+                        ].map(([label, field, subj, type]) => (
+                          <tr key={field} style={{ borderBottom: `1px solid ${DS.border}` }}>
+                            <td style={{ padding: "5px 10px", background: "#0a1424", color: DS.textSub, fontSize: 11, fontWeight: 600, width: "22%" }}>{label}</td>
+                            <td style={{ padding: "5px 8px", background: "#070e1a", color: DS.accent, fontSize: 11, width: "19%" }}>{subj || "—"}</td>
+                            {[0, 1, 2].map(i => (
+                              <td key={i} style={{ padding: "3px 5px", width: "19%" }}>
+                                <input type={type || "text"} value={form.leaseComps[i][field] || ""} onChange={e => setLC(i, field, e.target.value)} style={iSsm} />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ marginTop: 10 }}>{lbl("Comments")}<textarea value={form.leaseComments} onChange={e => set("leaseComments", e.target.value)} rows={3} style={{ ...iS, resize: "vertical", fontSize: 11, fontStyle: "italic", color: DS.textSub }} /></div>
+                </div>
+              </div>
+            )}
+
+            {/* ── PAGE 2 — INCOME ANALYSIS ── */}
+            {activeSection === "Income" && (
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                <SectionHeader title="INCOME ANALYSIS — BASED ON PRO FORMA INCOME" />
+                <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                  {/* Inputs */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignContent: "start" }}>
+                    <div style={{ gridColumn: "span 2" }}>{lbl("Building Size (Rentable SF)")}<input type="number" value={form.incomeBuildingSF || form.buildingSF} onChange={e => set("incomeBuildingSF", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Est. Market Rent ($/SF/Yr.)")}<input type="number" step="0.01" value={form.estMarketRent} onChange={e => set("estMarketRent", e.target.value)} placeholder="15.00" style={iS} /></div>
+                    <div>{lbl("Est. Market Vacancy (%)")}<input type="number" step="0.1" value={form.estVacancyPct} onChange={e => set("estVacancyPct", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Est. Prop. Exp. ($/SF/Yr.)")}<input type="number" step="0.01" value={form.estPropExp} onChange={e => set("estPropExp", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Est. Mgmt. Fee (% of EGI)")}<input type="number" step="0.1" value={form.estMgmtFeePct} onChange={e => set("estMgmtFeePct", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Est. Credit Loss (% of EGI)")}<input type="number" step="0.1" value={form.estCreditLossPct} onChange={e => set("estCreditLossPct", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Est. Repl. Reserve ($/SF)")}<input type="number" step="0.01" value={form.estReplReserve} onChange={e => set("estReplReserve", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Est. Low Cap Rate %")}<input type="number" step="0.25" value={form.estLowCapRate} onChange={e => set("estLowCapRate", e.target.value)} style={iS} /></div>
+                    <div>{lbl("Est. High Cap Rate %")}<input type="number" step="0.25" value={form.estHighCapRate} onChange={e => set("estHighCapRate", e.target.value)} style={iS} /></div>
+                  </div>
+                  {/* Live pro forma output */}
+                  <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, overflow: "hidden" }}>
+                    {[
+                      ["Potential Gross Income",   pgi,      false, true],
+                      ["Less: Vacancy",            -lessVac, false, false],
+                      ["Less: Credit Loss",        -lessCL,  false, false],
+                      ["Effective Gross Income",   egi,      true,  true],
+                      ["Less: Property Expense",   -lessProp,false, false],
+                      ["Less: Mgmt. Fee",          -lessMgmt,false, false],
+                      ["Pro Forma NOI after vacancy", noi,   true,  true],
+                      ["Less: Reserves",           -lessRes, false, false],
+                      ["Pro Forma NCF:",           ncf,      true,  true],
+                    ].map(([label, val, bold, pos]) => (
+                      <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "7px 12px", borderBottom: `1px solid ${DS.border}`, background: bold ? DS.accent + "0d" : "transparent" }}>
+                        <span style={{ color: bold ? DS.text : DS.textSub, fontSize: 11, fontWeight: bold ? DS.fw.bold : 400 }}>{label}</span>
+                        <span style={{ color: bold ? DS.accent : val < 0 ? "#f87171" : DS.textSub, fontSize: 11, fontFamily: "'DM Mono', monospace", fontWeight: bold ? DS.fw.bold : 400 }}>
+                          {val !== 0 ? (val < 0 ? "(" : "") + "$\u00a0" + Math.round(Math.abs(val)).toLocaleString() + (val < 0 ? ")" : "") : "$\u00a00"}
+                        </span>
+                      </div>
+                    ))}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderTop: `2px solid ${DS.border}` }}>
+                      {[["Low Price\n(High Cap)", incLow, lowCap], ["High Price\n(Low Cap)", incHigh, highCap]].map(([label, val, cap]) => (
+                        <div key={label} style={{ padding: "8px 12px", borderRight: `1px solid ${DS.border}` }}>
+                          <div style={{ color: DS.textFaint, fontSize: 9, textTransform: "uppercase", fontWeight: DS.fw.bold, marginBottom: 2 }}>{label.split("\n")[0]}<br />{label.split("\n")[1]}</div>
+                          <div style={{ color: DS.blue, fontSize: 14, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace" }}>{fD(val)}</div>
+                          <div style={{ color: DS.textFaint, fontSize: 10 }}>@ {cap}% cap</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ padding: "0 16px 14px" }}>{lbl("Comments")}<textarea value={form.incomeComments} onChange={e => set("incomeComments", e.target.value)} rows={2} style={{ ...iS, resize: "vertical", fontSize: 11, fontStyle: "italic", color: DS.textSub }} /></div>
+              </div>
+            )}
+
+            {/* ── PAGE 2 — CONCLUSION ── */}
+            {activeSection === "Conclusion" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  <SectionHeader title="ANALYSIS CONCLUSION — BROKER PRICE OPINION" color="#7c2d12" />
+                  <div style={{ padding: "14px 16px" }}>
+                    {/* Value summary banner */}
+                    <div style={{ background: "linear-gradient(135deg,#0a1424,#0f1e0f)", border: `2px solid ${DS.accent}44`, borderRadius: DS.r.md, padding: "16px 20px", textAlign: "center", marginBottom: 14 }}>
+                      <div style={{ color: DS.textMute, fontSize: DS.fs.xs, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Estimated Market Value Range</div>
+                      <div style={{ color: DS.accent, fontSize: 28, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace" }}>{fD(finalLow)} – {fD(finalHigh)}</div>
+                      <div style={{ color: DS.text, fontWeight: DS.fw.bold, marginTop: 6 }}>
+                        As-is Estimate: <span style={{ color: DS.accent }}>{fD(finalAsIs)}</span>
+                        {subSF > 0 && <span style={{ color: DS.textMute, fontSize: DS.fs.sm }}> · {fPsf(finalAsIs)}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 14 }}>
+                      {[["Low Price Indication", "saleLowOverride", finalLow, DS.blue], ["High Price Indication", "saleHighOverride", finalHigh, DS.blue], ["Median / As-is", "asIsValue", finalAsIs, DS.accent], ["Lower End", "lowerEndValue", finalLow, DS.green]].map(([label, k, auto, color]) => (
+                        <div key={k} style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "10px 12px" }}>
+                          {lbl(label)}
+                          <input type="number" value={form[k]} onChange={e => set(k, e.target.value)} placeholder={Math.round(auto).toString()}
+                            style={{ ...iS, color, fontFamily: "'DM Mono', monospace", fontSize: 14, fontWeight: DS.fw.black }} />
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginBottom: 10 }}>{lbl("Conclusion Comments")}<textarea value={form.conclusionComments} onChange={e => set("conclusionComments", e.target.value)} rows={4} style={{ ...iS, resize: "vertical", fontSize: 11, color: DS.textSub }} placeholder="Based on the above analysis, the estimated market value of the subject property is..." /></div>
+                  </div>
+                </div>
+                {/* Broker info */}
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  <SectionHeader title="BROKER INFORMATION" color="#1e293b" />
+                  <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+                    {[["Broker Name", brokerName], ["Company", brokerage], ["Phone", brokerPhone], ["Email", brokerEmail], ["License #", brokerLicense]].map(([label, val]) => (
+                      <div key={label}>
+                        <div style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.black, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 3 }}>{label}</div>
+                        <div style={{ color: val ? DS.text : DS.textFaint, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>
+                          {val || <span style={{ fontSize: 10 }}>Not set — update in ⚙ Settings</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveBov} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "10px 24px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>Save BOV</button>
+              <button onClick={printBOV} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.text, padding: "10px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>🖨 Print / Export PDF</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: DS.panel, border: `1px dashed ${DS.border}`, borderRadius: DS.r.lg, minHeight: 340 }}>
+            <div style={{ textAlign: "center", color: DS.textFaint }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+              <div style={{ fontSize: DS.fs.md, fontWeight: DS.fw.semi, color: DS.textSub }}>Select a saved BOV or create a new one</div>
+              <div style={{ fontSize: DS.fs.sm, marginTop: 4, color: DS.textFaint }}>Full SVN BPO format · Property ID → Market → Site → Comps → Income → Conclusion</div>
+              <button onClick={openNew} style={{ marginTop: 16, background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>+ New BOV</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Leaflet Map Hook ───────────────────────────────────────────
+function useLeaflet() {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (window.L) { setLoaded(true); return; }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.onload = () => setLoaded(true);
+    document.head.appendChild(s);
+  }, []);
+  return loaded;
+}
+
+// ── Auto-geocode hook using Nominatim ─────────────────────────
+function useGeocode(items, getAddress) {
+  const [coords, setCoords] = useState({});
+  const defaultState = localStorage.getItem("cre-default-state") || "Indiana";
+  useEffect(() => {
+    items.forEach(item => {
+      const rawAddr = getAddress(item);
+      if (!rawAddr) return;
+      const key = item.id || item.sm || rawAddr;
+      if (coords[key]) return;
+      // Append default state to bias results geographically
+      const addr = rawAddr.toLowerCase().includes(defaultState.toLowerCase())
+        ? rawAddr
+        : `${rawAddr}, ${defaultState}`;
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1&countrycodes=us`;
+      fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'CRE-CRM/1.0' } })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data[0]) {
+            setCoords(prev => ({ ...prev, [key]: { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) } }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, [items.map(i => getAddress(i)).join(',')]);
+  return coords;
+}
+
+// ── Leaflet Map Component (comps) ──────────────────────────────
+function CompsLeafletMap({ comps }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const leafletLoaded = useLeaflet();
+
+  // Use manually set coords OR auto-geocode from address
+  const compsNeedingGeocode = comps.filter(c => !c.lat && !c.lng && (c.address || c.name));
+  const geocoded = useGeocode(compsNeedingGeocode, c => c.address || c.name || '');
+
+  const resolvedComps = comps.map(c => {
+    const key = c.id || c.address || c.name;
+    const manualCoords = c.lat && c.lng ? { lat: parseFloat(c.lat), lng: parseFloat(c.lng) } : null;
+    const autoCoords = geocoded[key] || null;
+    return { ...c, _lat: (manualCoords || autoCoords)?.lat, _lng: (manualCoords || autoCoords)?.lng };
+  });
+
+  const mappable = resolvedComps.filter(c => c._lat && c._lng);
+
+  useEffect(() => {
+    if (!leafletLoaded || !mapRef.current || mappable.length === 0) return;
+    const L = window.L;
+    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
+    const center = [mappable.reduce((s,c)=>s+c._lat,0)/mappable.length, mappable.reduce((s,c)=>s+c._lng,0)/mappable.length];
+    const map = L.map(mapRef.current, { center, zoom: 11 });
+    mapInstanceRef.current = map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    const saleIcon = L.divIcon({ className:'', html:`<div style="width:13px;height:13px;background:#3b82f6;border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px #3b82f688"></div>`, iconSize:[13,13], iconAnchor:[6,6] });
+    const leaseIcon = L.divIcon({ className:'', html:`<div style="width:13px;height:13px;background:#10b981;border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px #10b98188"></div>`, iconSize:[13,13], iconAnchor:[6,6] });
+    mappable.forEach(c => {
+      const icon = c.compType === 'Sale' ? saleIcon : leaseIcon;
+      const psf = c.compType === 'Sale' ? (c.psfSale > 0 ? `$${parseFloat(c.psfSale).toFixed(2)}/SF` : '—') : (c.psfLease > 0 ? `$${parseFloat(c.psfLease).toFixed(3)}/SF/mo` : '—');
+      const popup = `<strong style="color:#f1f5f9">${c.name || c.address || '—'}</strong><br/><span style="color:#94a3b8">${c.submarket||''} · ${c.subtype||''}</span><br/><span style="color:${c.compType==='Sale'?'#60a5fa':'#34d399'};font-weight:700">${c.compType}</span> ${c.sqft?parseInt(c.sqft).toLocaleString()+' SF':''}<br/><strong style="color:#f59e0b">${psf}</strong>${c.closeDate?`<br/><span style="color:#64748b">${new Date(c.closeDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',year:'numeric'})}</span>`:''}`;
+      L.marker([c._lat, c._lng], { icon }).addTo(map).bindPopup(popup);
+    });
+    return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
+  }, [leafletLoaded, JSON.stringify(mappable.map(c=>[c._lat,c._lng,c.id]))]);
+
+  if (!leafletLoaded) return <div style={{ height:380, display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b', fontSize:13 }}>Loading map...</div>;
+
+  const geocodingCount = compsNeedingGeocode.length - Object.keys(geocoded).length;
+
+  return (
+    <div>
+      {geocodingCount > 0 && <div style={{ color: DS.accent, fontSize: DS.fs.xs, marginBottom: 6 }}>⏳ Auto-locating {geocodingCount} comp address{geocodingCount !== 1 ? 'es' : ''} on map...</div>}
+      {mappable.length === 0 && !geocodingCount
+        ? <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', color:DS.textFaint, fontSize:DS.fs.sm, background:DS.bg, borderRadius:DS.r.md, border:`1px dashed ${DS.border}` }}>No comps with addresses found. Add an address to each comp to place it on the map.</div>
+        : <div ref={mapRef} style={{ height: 400, borderRadius: 12, overflow:'hidden' }} />
+      }
+      <div style={{ display:'flex', gap:16, marginTop:8, alignItems:'center', flexWrap:'wrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:5 }}><div style={{ width:10, height:10, borderRadius:'50%', background:'#3b82f6' }}/><span style={{ color:'#94a3b8', fontSize:11 }}>Sale ({mappable.filter(c=>c.compType==='Sale').length})</span></div>
+        <div style={{ display:'flex', alignItems:'center', gap:5 }}><div style={{ width:10, height:10, borderRadius:'50%', background:'#10b981' }}/><span style={{ color:'#94a3b8', fontSize:11 }}>Lease ({mappable.filter(c=>c.compType==='Lease').length})</span></div>
+        <span style={{ color:'#475569', fontSize:10 }}>Addresses auto-located via OpenStreetMap · {mappable.length} of {comps.length} comps mapped</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Leaflet Map Component (submarkets) ─────────────────────────
+function SubmarketLeafletMap({ rows }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const leafletLoaded = useLeaflet();
+  const COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#f97316','#ec4899','#06b6d4','#84cc16','#f43f5e','#a78bfa'];
+
+  // Auto-geocode submarkets that have no coords using their name as search query
+  const rowsNeedingGeocode = rows.filter(r => !r.lat && !r.lng);
+  const geocoded = useGeocode(rowsNeedingGeocode.map(r=>({id:r.sm, sm:r.sm})), r => r.sm);
+
+  const resolvedRows = rows.map(r => {
+    const manual = r.lat && r.lng ? { lat: r.lat, lng: r.lng } : null;
+    const auto = geocoded[r.sm] || null;
+    return { ...r, _lat: (manual || auto)?.lat, _lng: (manual || auto)?.lng };
+  });
+  const mappable = resolvedRows.filter(r => r._lat && r._lng);
+
+  useEffect(() => {
+    if (!leafletLoaded || !mapRef.current || mappable.length === 0) return;
+    const L = window.L;
+    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
+    const center = [mappable.reduce((s,r)=>s+r._lat,0)/mappable.length, mappable.reduce((s,r)=>s+r._lng,0)/mappable.length];
+    const map = L.map(mapRef.current, { center, zoom: 10 });
+    mapInstanceRef.current = map;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+    mappable.forEach((r, i) => {
+      const color = COLORS[i % COLORS.length];
+      const pipeline = r.active.reduce((s,d)=>s+(d.totalValue||0),0);
+      const size = Math.max(20, Math.min(44, 14 + r.smDeals.length * 5));
+      const icon = L.divIcon({ className:'', html:`<div style="width:${size}px;height:${size}px;background:${color};border:3px solid #fff;border-radius:50%;box-shadow:0 0 12px ${color}88;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:${size>28?11:9}px">${r.smDeals.length||''}</div>`, iconSize:[size,size], iconAnchor:[size/2,size/2] });
+      const popup = `<strong style="color:#f1f5f9;font-size:13px">${r.sm}</strong><br/><span style="color:#94a3b8">${r.smDeals.length} deals · ${r.smListings?r.smListings.length:0} listings · ${r.smComps.length} comps</span>${pipeline>0?`<br/><strong style="color:#f59e0b">$${Math.round(pipeline/1000)}K pipeline</strong>`:''}${r.commissions>0?`<br/><span style="color:#34d399">$${Math.round(r.commissions/1000)}K earned</span>`:''}`;
+      L.marker([r._lat, r._lng], { icon }).addTo(map).bindPopup(popup);
+    });
+    return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
+  }, [leafletLoaded, JSON.stringify(mappable.map(r=>[r._lat,r._lng,r.sm]))]);
+
+  if (!leafletLoaded) return <div style={{ height:360, display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b' }}>Loading map...</div>;
+
+  const geocodingCount = rowsNeedingGeocode.length - Object.keys(geocoded).length;
+
+  return (
+    <div>
+      {geocodingCount > 0 && <div style={{ color: DS.accent, fontSize: DS.fs.xs, marginBottom: 6 }}>⏳ Auto-locating {geocodingCount} submarket{geocodingCount!==1?'s':''}...</div>}
+      {mappable.length === 0 && !geocodingCount
+        ? <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', color:DS.textFaint, fontSize:DS.fs.sm, background:DS.bg, borderRadius:DS.r.md, border:`1px dashed ${DS.border}` }}>Enter submarket names that match real places (e.g. "Franklin, Indiana") to auto-locate them.</div>
+        : <div ref={mapRef} style={{ height: 360, borderRadius: 12, overflow:'hidden' }} />
+      }
+      <div style={{ color:'#475569', fontSize:10, marginTop:6 }}>Bubble size = # of deals · Auto-located via OpenStreetMap · {mappable.length}/{rows.length} submarkets mapped</div>
+    </div>
+  );
+}
+
+
 export default function PipelineDashboard() {
   const [deals, setDeals] = useState(() => {
     try { const s = localStorage.getItem("cre-industrial-v5"); return s ? JSON.parse(s) : initialDeals; } catch { return initialDeals; }
@@ -5614,6 +6631,7 @@ export default function PipelineDashboard() {
     ]},
     { label: "Transactions", items: [
       { id: "listings", label: "Listings", badge: listings.filter(l=>l.status==="Active").length },
+      { id: "bov", label: "BOV" },
       { id: "forecast", label: "Forecast" },
       { id: "timeline", label: "Timeline" },
       { id: "comps", label: "Market Comps", badge: comps.length },
@@ -5650,6 +6668,13 @@ export default function PipelineDashboard() {
     <div className="noise-bg" style={{ background: DS.bg, minHeight: "100vh", fontFamily: "'DM Sans', system-ui, sans-serif", color: DS.text, display: "flex", flexDirection: "column", backgroundImage: "radial-gradient(ellipse 80% 50% at 20% -10%, #0f2040 0%, transparent 60%), radial-gradient(ellipse 60% 40% at 80% 110%, #0a1f30 0%, transparent 60%)" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+        @import url('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+        .leaflet-container { border-radius: 12px; }
+        .leaflet-popup-content-wrapper { background: #0d1826; border: 1px solid #1e3a5f; border-radius: 8px; color: #f1f5f9; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        .leaflet-popup-tip { background: #0d1826; }
+        .leaflet-popup-content { margin: 10px 14px; font-size: 12px; line-height: 1.5; }
+        .leaflet-control-zoom a { background: #0d1826 !important; color: #f1f5f9 !important; border-color: #1e3a5f !important; }
+        .leaflet-tile-pane { filter: brightness(0.85) saturate(0.7) hue-rotate(10deg); }
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html { font-size: 14px; }
         body { font-family: 'DM Sans', system-ui, sans-serif !important; background: #070e1a; }
@@ -5757,6 +6782,7 @@ export default function PipelineDashboard() {
         <div className="tab-content" style={{ flex: 1, overflowY: "auto", padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18 }}>
 
           {activeTab === "home" && <HomeBriefing deals={deals} tasks={tasks} contacts={contacts} listings={listings} gciGoal={gciGoal} closedYTD={closedYTD} totalWeighted={totalWeighted} onNavigate={setActiveTab} onStartSync={() => setShowDailySync(true)} />}
+          {activeTab === "bov" && <BOVTab comps={comps} submarketList={submarketList} brokerName={brokerName} brokerage={brokerage} />}
           {activeTab === "listings" && <ListingsTab listings={listings} setListings={setListings} submarketList={submarketList} />}
           {activeTab === "forecast" && <ForecastTab deals={deals} />}
           {activeTab === "prospecting" && <ProspectingTab campaigns={campaigns} setCampaigns={setCampaigns} deals={deals} submarketList={submarketList} />}
