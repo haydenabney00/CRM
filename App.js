@@ -19,6 +19,7 @@ const TASK_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 const RECURRENCE_OPTIONS = ["None", "Daily", "Weekly", "Bi-weekly", "Monthly", "Quarterly", "Annually"];
 const EXPENSE_CATEGORIES = ["CoStar / Data", "LoopNet", "Marketing / Mailers", "E&O Insurance", "Dues / Memberships", "Transportation / Mileage", "Meals / Entertainment", "Office / Supplies", "Legal / Professional", "Other"];
 const DEAL_TAG_SUGGESTIONS = ["Hot", "Off-Market", "Year-End Push", "Referral", "Repeat Client", "Portfolio", "Value-Add", "Distressed", "1031 Exchange", "New Construction", "Watch", "On Hold"];
+const MILESTONE_TYPES = ["LOI Executed", "Inspection Period End", "Financing Contingency", "Due Diligence Deadline", "Title Clearance", "Survey", "Final Walkthrough", "Closing Date"];
 
 const today = new Date().toISOString().split("T")[0];
 const thisYear = new Date().getFullYear();
@@ -427,6 +428,187 @@ function CommissionWaterfallModal({ deal, onClose }) {
 
         <div style={{ padding:"0 16px 20px", display:"flex", justifyContent:"flex-end" }}>
           <button onClick={onClose} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Commission Closing Statement ────────────────────────────────
+function CommissionClosingStatement({ deal, brokerName, brokerage, onClose }) {
+  const mgSplit = parseFloat(localStorage.getItem("cre-mg-split") || "80");
+  const brokerPhone = localStorage.getItem("cre-phone") || "";
+  const brokerEmail = localStorage.getItem("cre-email") || "";
+  const calc = calcDeal(deal);
+  const gross = calc.grossCommission || 0;
+  const coBrokeAmt = calc.isSplit ? gross * (1 - (parseFloat(deal.splitPct) || 100) / 100) : 0;
+  const afterCoBroke = gross - coBrokeAmt;
+  const [refPct, setRefPct] = React.useState(parseFloat(deal.referralPct || 0));
+  const refAmt = afterCoBroke * (refPct / 100);
+  const afterRef = afterCoBroke - refAmt;
+  const mgAmt = afterRef * ((100 - mgSplit) / 100);
+  const netToAgent = afterRef * (mgSplit / 100);
+  const iS = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "5px 8px", fontSize: DS.fs.sm, outline: "none", width: 70, textAlign: "right" };
+
+  const Row = ({ label, value, sub, color, bold, indent, borderTop }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderTop: borderTop ? `2px solid ${DS.borderHi}` : `1px solid ${DS.border}`, paddingLeft: indent ? 16 : 0 }}>
+      <div>
+        <span style={{ color: bold ? DS.text : DS.textSub, fontSize: DS.fs.md, fontWeight: bold ? DS.fw.bold : DS.fw.normal }}>{label}</span>
+        {sub && <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 1 }}>{sub}</div>}
+      </div>
+      <span style={{ color: color || (bold ? DS.text : DS.textMute), fontWeight: bold ? DS.fw.black : DS.fw.normal, fontSize: bold ? DS.fs.lg : DS.fs.md, fontFamily: "'DM Mono', monospace" }}>{value}</span>
+    </div>
+  );
+
+  const f = n => "$" + Math.round(n).toLocaleString();
+
+  const handlePrint = () => {
+    const win = window.open("", "_blank");
+    win.document.write(`<!DOCTYPE html><html><head><title>Commission Closing Statement — ${deal.name}</title>
+    <style>body{font-family:Georgia,serif;max-width:680px;margin:48px auto;color:#111;font-size:14px}h1{font-size:22px;margin:0 0 4px}h2{font-size:13px;font-weight:normal;color:#555;margin:0 0 24px}hr{border:none;border-top:1px solid #ddd;margin:20px 0}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px 32px;margin-bottom:24px;font-size:13px}.meta span{color:#555}.meta strong{display:block;color:#111}.row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #eee;font-size:14px}.row.indent{padding-left:20px;color:#555}.row.total{border-top:2px solid #111;border-bottom:none;font-weight:700;font-size:18px;padding-top:14px;margin-top:4px}.row.subtotal{background:#f9f9f9;padding:9px 8px;font-weight:600}.sig{margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:32px}.sig-line{border-top:1px solid #999;padding-top:6px;font-size:12px;color:#555}</style></head><body>
+    <h1>Commission Closing Statement</h1><h2>Prepared by ${brokerName || "Broker"} · ${brokerage || ""}</h2><hr/>
+    <div class="meta">
+      <div><span>Property</span><strong>${deal.name}</strong></div>
+      <div><span>Close Date</span><strong>${deal.expectedClose || "—"}</strong></div>
+      <div><span>Client</span><strong>${deal.client || "—"}</strong></div>
+      <div><span>Counterparty</span><strong>${deal.counterparty || "—"}</strong></div>
+      <div><span>Deal Type</span><strong>${deal.dealType} · ${deal.repType || ""}</strong></div>
+      <div><span>Stage</span><strong>${deal.stage}</strong></div>
+      ${deal.sqft ? `<div><span>Size</span><strong>${Number(deal.sqft).toLocaleString()} SF</strong></div>` : ""}
+      ${brokerPhone ? `<div><span>Broker Phone</span><strong>${brokerPhone}</strong></div>` : ""}
+      ${brokerEmail ? `<div><span>Broker Email</span><strong>${brokerEmail}</strong></div>` : ""}
+    </div><hr/>
+    <div class="row"><span>Deal Value</span><span>${f(calc.totalValue || 0)}</span></div>
+    <div class="row"><span>Commission Rate</span><span>${deal.commissionRate || 0}%</span></div>
+    <div class="row subtotal"><span>Gross Commission</span><span>${f(gross)}</span></div>
+    ${coBrokeAmt > 0 ? `<div class="row indent"><span>Co-Broke to ${deal.coBroker || "Co-Broker"} (${100 - (parseFloat(deal.splitPct) || 100)}%)</span><span>−${f(coBrokeAmt)}</span></div>` : ""}
+    ${refAmt > 0 ? `<div class="row indent"><span>Referral Fee (${refPct}%)</span><span>−${f(refAmt)}</span></div>` : ""}
+    ${(coBrokeAmt > 0 || refAmt > 0) ? `<div class="row subtotal"><span>Net Before Broker Split</span><span>${f(afterRef)}</span></div>` : ""}
+    <div class="row indent"><span>Managing Broker (${100 - mgSplit}%)</span><span>−${f(mgAmt)}</span></div>
+    <div class="row total"><span>Net to Agent</span><span>${f(netToAgent)}</span></div>
+    <div class="sig"><div class="sig-line">Broker Signature &amp; Date</div><div class="sig-line">Authorized By &amp; Date</div></div>
+    <script>window.print();</script></body></html>`);
+    win.document.close();
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, width: 500, maxHeight: "90vh", overflowY: "auto", boxShadow: DS.shadow.xl }}>
+        <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Closing Statement</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>{deal.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+
+        <div style={{ padding: "12px 24px", background: DS.bg, display: "flex", gap: 20, flexWrap: "wrap", borderBottom: `1px solid ${DS.border}` }}>
+          {[["Client", deal.client], ["Counterparty", deal.counterparty || "—"], ["Type", deal.dealType], ["Close", deal.expectedClose || "—"]].map(([l, v]) => (
+            <div key={l}><div style={{ color: DS.textMute, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.6px" }}>{l}</div><div style={{ color: DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.sm }}>{v}</div></div>
+          ))}
+        </div>
+
+        <div style={{ padding: "16px 24px" }}>
+          <Row label="Deal Value" value={f(calc.totalValue || 0)} />
+          <Row label="Commission Rate" value={`${deal.commissionRate || 0}%`} />
+          <Row label="Gross Commission" value={f(gross)} bold />
+          {coBrokeAmt > 0 && <Row label={`Co-Broke → ${deal.coBroker || "Co-Broker"}`} sub={`${100 - (parseFloat(deal.splitPct) || 100)}% to other side`} value={`−${f(coBrokeAmt)}`} color={DS.red} indent />}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0 9px 16px", borderBottom: `1px solid ${DS.border}` }}>
+            <div><span style={{ color: DS.textSub, fontSize: DS.fs.md }}>Referral Fee</span></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="number" min="0" max="100" value={refPct} onChange={e => setRefPct(parseFloat(e.target.value) || 0)} style={iS} />
+              <span style={{ color: DS.textMute, fontSize: DS.fs.sm }}>%</span>
+              {refAmt > 0 && <span style={{ color: DS.red, fontFamily: "'DM Mono', monospace", fontWeight: DS.fw.bold, fontSize: DS.fs.md, minWidth: 80, textAlign: "right" }}>−{f(refAmt)}</span>}
+            </div>
+          </div>
+          <Row label="Net Before Broker Split" value={f(afterRef)} bold />
+          <Row label={`Managing Broker (${100 - mgSplit}%)`} value={`−${f(mgAmt)}`} color={DS.red} indent />
+          <Row label="Net to Agent" value={f(netToAgent)} bold color={DS.green} borderTop />
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", padding: "0 24px 20px" }}>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Close</button>
+          <button onClick={handlePrint} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "8px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontWeight: DS.fw.black, fontSize: DS.fs.md }}>Print / PDF</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Email Draft Templates Modal ──────────────────────────────────
+function EmailDraftModal({ deal, brokerName, brokerage, onClose }) {
+  const brokerPhone = localStorage.getItem("cre-phone") || "";
+  const brokerEmail = localStorage.getItem("cre-email") || "";
+  const sig = `\n\n— ${brokerName || "Your Broker"}${brokerage ? `\n${brokerage}` : ""}${brokerPhone ? `\n${brokerPhone}` : ""}${brokerEmail ? `\n${brokerEmail}` : ""}`;
+  const sqftFmt = deal.sqft ? `${Number(deal.sqft).toLocaleString()} SF` : "";
+  const psfStr = deal.dealTotal && deal.sqft ? `$${(deal.dealTotal / deal.sqft).toFixed(2)}/SF` : "";
+
+  const TEMPLATES = [
+    {
+      id: "owner_outreach", label: "Owner Outreach",
+      subject: () => `Industrial Property Inquiry — ${deal.submarket || "Your Submarket"} Market`,
+      body: () => `Dear Property Owner,\n\nMy name is ${brokerName || "your name"} with ${brokerage || "our firm"}, and I specialize in industrial real estate in the ${deal.submarket || ""} submarket.\n\nI am actively working with buyers and tenants seeking${sqftFmt ? ` ${sqftFmt}` : ""} industrial space in your area and wanted to reach out directly to explore whether you have any interest in a potential ${deal.dealType === "Lease" ? "lease" : "sale"} of your property.\n\nThere is strong demand in the market right now, and I believe we could achieve excellent terms on your behalf. I would welcome the opportunity to provide you with a complimentary market analysis at no obligation.\n\nWould you be open to a brief 15-minute call this week?${sig}`,
+    },
+    {
+      id: "followup_meeting", label: "Follow-Up After Meeting",
+      subject: () => `Follow-Up — ${deal.name}`,
+      body: () => `Hi ${deal.client || ""},\n\nThank you for taking the time to meet with me regarding ${deal.name}. I enjoyed learning more about your requirements and I am confident we can find the right solution for you.\n\nAs discussed, the next steps are:\n  • Review of the spaces we identified\n  • Schedule property tours\n  • Outline LOI terms once we identify the preferred option\n\nI will follow up by ${deal.followUpDate || "end of week"} with additional options. Please don't hesitate to reach out with any questions in the meantime.${sig}`,
+    },
+    {
+      id: "loi_cover", label: "LOI Submission",
+      subject: () => `Letter of Intent — ${deal.name}`,
+      body: () => `Dear ${deal.counterparty || "Listing Broker/Owner"},\n\nPlease find attached a Letter of Intent on behalf of ${deal.client || "my client"} for the above-referenced property.\n\nKey proposed terms:\n  • Property: ${deal.name}\n  • Transaction Type: ${deal.dealType}\n  • Size: ${sqftFmt || "TBD"}${deal.dealType === "Lease" ? `\n  • Proposed Term: ${deal.leaseTerm || "TBD"} months\n  • Proposed Monthly Rent: $${Number(deal.monthlyRent || 0).toLocaleString()}` : `\n  • Proposed Purchase Price: $${Number(deal.dealTotal || 0).toLocaleString()}${psfStr ? ` (${psfStr})` : ""}`}\n  • Anticipated Close: ${deal.expectedClose || "TBD"}\n\nMy client is motivated and well-qualified. We look forward to your response and are hopeful we can reach mutually agreeable terms quickly.\n\nPlease contact me with any questions.${sig}`,
+    },
+    {
+      id: "listing_intro", label: "Listing Introduction",
+      subject: () => `Available — ${deal.name} | ${sqftFmt} Industrial | ${deal.submarket || ""}`,
+      body: () => `Hello,\n\nI wanted to bring to your attention an industrial property that has just become available in the ${deal.submarket || ""} submarket that may be of interest to you or your clients.\n\n${deal.name}\n  • Size: ${sqftFmt || "TBD"}\n  • Type: ${deal.subtype || "Industrial"}\n  • Transaction: ${deal.dealType}${deal.dealType === "Lease" ? `\n  • Asking Rent: $${Number(deal.monthlyRent || 0).toLocaleString()}/month` : `\n  • Asking Price: $${Number(deal.dealTotal || 0).toLocaleString()}`}\n\nThis is an excellent opportunity and I expect significant interest. I would be happy to schedule a tour or provide additional information at your convenience.${sig}`,
+    },
+    {
+      id: "status_update", label: "Client Status Update",
+      subject: () => `Deal Update — ${deal.name}`,
+      body: () => `Hi ${deal.client || ""},\n\nI wanted to provide you with a quick update on ${deal.name}.\n\nCurrent Status: ${deal.stage}\n${deal.expectedClose ? `Anticipated Close: ${deal.expectedClose}\n` : ""}${deal.notes ? `Notes: ${deal.notes}\n` : ""}\nWe are making solid progress. Here is a summary of where things stand and the next steps I am working on:\n  • Continuing negotiations and due diligence\n  • Targeting close by ${deal.expectedClose || "the agreed timeline"}\n  • Will keep you posted on any material developments\n\nPlease feel free to call or email me anytime with questions. I appreciate your trust in me to represent you on this transaction.${sig}`,
+    },
+  ];
+
+  const [selected, setSelected] = useState(TEMPLATES[0]);
+  const [copied, setCopied] = useState(false);
+  const body = selected.body();
+  const subject = selected.subject();
+
+  const copy = () => {
+    navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`).then(() => {
+      setCopied(true); toast("Copied to clipboard"); setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, width: 800, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: DS.shadow.xl }}>
+        <div style={{ padding: "18px 24px 14px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>Email Templates</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{deal.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <div style={{ width: 190, flexShrink: 0, borderRight: `1px solid ${DS.border}`, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+            {TEMPLATES.map(t => (
+              <button key={t.id} onClick={() => setSelected(t)} style={{ background: selected.id === t.id ? DS.accentSoft : "none", border: `1px solid ${selected.id === t.id ? DS.accent : "transparent"}`, borderRadius: DS.r.sm, color: selected.id === t.id ? DS.accent : DS.textSub, padding: "9px 12px", cursor: "pointer", fontSize: DS.fs.sm, fontWeight: selected.id === t.id ? DS.fw.semi : DS.fw.normal, textAlign: "left" }}>{t.label}</button>
+            ))}
+          </div>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
+            <div style={{ padding: "10px 16px", background: DS.bg, borderBottom: `1px solid ${DS.border}`, flexShrink: 0 }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 2 }}>SUBJECT</div>
+              <div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>{subject}</div>
+            </div>
+            <textarea readOnly value={body} style={{ flex: 1, background: DS.surface, border: "none", color: DS.text, fontSize: DS.fs.md, padding: "14px 16px", resize: "none", outline: "none", fontFamily: "inherit", lineHeight: 1.7, overflowY: "auto" }} />
+          </div>
+        </div>
+        <div style={{ padding: "12px 20px", borderTop: `1px solid ${DS.border}`, display: "flex", justifyContent: "flex-end", gap: 10, flexShrink: 0 }}>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Close</button>
+          <button onClick={copy} style={{ background: copied ? DS.green : DS.accent, border: "none", color: "#0a0f1a", padding: "8px 22px", borderRadius: DS.r.sm, cursor: "pointer", fontWeight: DS.fw.black, fontSize: DS.fs.md, transition: "background 0.2s" }}>{copied ? "✓ Copied!" : "Copy to Clipboard"}</button>
         </div>
       </div>
     </div>
@@ -959,6 +1141,97 @@ function ClosingChecklistModal({ deal, onSave, onClose }) {
         <div style={{ padding:"12px 24px", borderTop:`1px solid ${DS.border}`, display:"flex", gap:10, justifyContent:"flex-end", flexShrink:0 }}>
           <button onClick={onClose} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"9px 18px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md }}>Cancel</button>
           <button onClick={handleSave} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.md, fontWeight:DS.fw.black }}>Save Checklist</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Milestone Tracker Modal ──────────────────────────────────────
+function MilestoneTrackerModal({ deal, onSave, onClose }) {
+  const [milestones, setMilestones] = useState(deal.milestones || []);
+  const [addType, setAddType] = useState(MILESTONE_TYPES[0]);
+  const [addDate, setAddDate] = useState("");
+  const [addNotes, setAddNotes] = useState("");
+  const iS = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "6px 9px", fontSize: DS.fs.sm, outline: "none" };
+
+  const countdown = (d) => { if (!d) return null; return Math.round((new Date(d + "T00:00:00") - new Date()) / 86400000); };
+
+  const addMilestone = () => {
+    if (!addDate) return;
+    setMilestones(p => [...p, { id: Date.now(), type: addType, dueDate: addDate, completed: false, completedDate: null, notes: addNotes }]);
+    setAddDate(""); setAddNotes("");
+  };
+
+  const toggle = (id) => setMilestones(p => p.map(m => m.id === id ? { ...m, completed: !m.completed, completedDate: !m.completed ? today : null } : m));
+  const remove = (id) => setMilestones(p => p.filter(m => m.id !== id));
+
+  const done = milestones.filter(m => m.completed).length;
+  const pct = milestones.length ? Math.round(done / milestones.length * 100) : 0;
+  const barColor = pct === 100 ? DS.green : pct >= 60 ? DS.accent : DS.blue;
+
+  const sorted = [...milestones].sort((a, b) => (a.dueDate || "9999") < (b.dueDate || "9999") ? -1 : 1);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, padding: 26, width: 580, maxHeight: "88vh", overflowY: "auto", boxShadow: DS.shadow.xl }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>Milestone Tracker</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{deal.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>✕</button>
+        </div>
+
+        {milestones.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: DS.fs.xs, color: DS.textMute, marginBottom: 4 }}>
+              <span>{done}/{milestones.length} complete</span><span>{pct}%</span>
+            </div>
+            <div style={{ background: DS.bg, borderRadius: DS.r.full, height: 6, overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: DS.r.full, transition: "width 0.3s" }} />
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+          {sorted.map(m => {
+            const days = countdown(m.dueDate);
+            const dayColor = m.completed ? DS.green : days === null ? DS.textMute : days < 0 ? DS.red : days <= 7 ? DS.accent : DS.textMute;
+            const dayLabel = days === null ? "" : m.completed ? "Done" : days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today" : `${days}d left`;
+            return (
+              <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, background: DS.bg, border: `1px solid ${m.completed ? DS.green + "33" : DS.border}`, borderRadius: DS.r.md, padding: "9px 12px", opacity: m.completed ? 0.65 : 1 }}>
+                <input type="checkbox" checked={m.completed} onChange={() => toggle(m.id)} style={{ accentColor: DS.green, width: 15, height: 15, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: m.completed ? DS.textMute : DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.md, textDecoration: m.completed ? "line-through" : "none" }}>{m.type}</span>
+                    {dayLabel && <span style={{ background: dayColor + "22", color: dayColor, border: `1px solid ${dayColor}44`, fontSize: 9, padding: "1px 7px", borderRadius: DS.r.full, fontWeight: DS.fw.bold, flexShrink: 0 }}>{dayLabel}</span>}
+                  </div>
+                  {m.dueDate && <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 1 }}>{new Date(m.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>}
+                  {m.notes && <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2, fontStyle: "italic" }}>{m.notes}</div>}
+                </div>
+                <button onClick={() => remove(m.id)} style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: 14, padding: "0 4px", flexShrink: 0 }}>✕</button>
+              </div>
+            );
+          })}
+          {milestones.length === 0 && <div style={{ color: DS.textFaint, fontSize: DS.fs.sm, textAlign: "center", padding: "20px 0" }}>No milestones yet — add one below</div>}
+        </div>
+
+        <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px", marginBottom: 16 }}>
+          <div style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.black, letterSpacing: "0.8px", textTransform: "uppercase", marginBottom: 10 }}>Add Milestone</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <select value={addType} onChange={e => setAddType(e.target.value)} style={{ ...iS, width: "100%" }}>{MILESTONE_TYPES.map(t => <option key={t}>{t}</option>)}</select>
+            <input type="date" value={addDate} onChange={e => setAddDate(e.target.value)} style={{ ...iS, width: "100%", boxSizing: "border-box" }} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={addNotes} onChange={e => setAddNotes(e.target.value)} placeholder="Notes (optional)" style={{ ...iS, flex: 1 }} />
+            <button onClick={addMilestone} disabled={!addDate} style={{ background: addDate ? DS.accent : DS.border, border: "none", color: addDate ? "#0a0f1a" : DS.textMute, padding: "6px 16px", borderRadius: DS.r.sm, cursor: addDate ? "pointer" : "default", fontWeight: DS.fw.bold, fontSize: DS.fs.sm, flexShrink: 0 }}>+ Add</button>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Cancel</button>
+          <button onClick={() => { onSave({ ...deal, milestones }); onClose(); toast("Milestones saved"); }} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "8px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontWeight: DS.fw.black, fontSize: DS.fs.md }}>Save</button>
         </div>
       </div>
     </div>
@@ -1881,8 +2154,19 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
     const d = { ...form, sqft: parseFloat(form.sqft)||0, salePrice: parseFloat(form.salePrice)||0, monthlyRent: parseFloat(form.monthlyRent)||0, leaseTerm: parseFloat(form.leaseTerm)||0, psfSale: parseFloat(form.psfSale)||0, psfLease: parseFloat(form.psfLease)||0 };
     if (!d.psfSale && d.sqft && d.salePrice) d.psfSale = parseFloat((d.salePrice / d.sqft).toFixed(2));
     if (!d.psfLease && d.sqft && d.monthlyRent) d.psfLease = parseFloat((d.monthlyRent / d.sqft).toFixed(4));
-    if (form.id) setComps(prev => prev.map(c => c.id === form.id ? d : c));
-    else setComps(prev => [...prev, { ...d, id: Date.now() }]);
+    const fullAddr = [d.address || d.name, d.city].filter(Boolean).join(", ");
+    if (form.id) {
+      const existing = comps.find(c => c.id === form.id);
+      if (existing && (existing.address !== d.address || existing.city !== d.city)) {
+        try { const cache = JSON.parse(localStorage.getItem("cre-geocode-cache")||"{}"); delete cache[String(form.id)]; localStorage.setItem("cre-geocode-cache", JSON.stringify(cache)); } catch {}
+      }
+      setComps(prev => prev.map(c => c.id === form.id ? d : c));
+      geocodeAndCache(fullAddr, form.id);
+    } else {
+      const newId = Date.now();
+      setComps(prev => [...prev, { ...d, id: newId }]);
+      geocodeAndCache(fullAddr, newId);
+    }
     setModal(null);
   };
 
@@ -1947,7 +2231,7 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
 
   function CompModal({ comp }) {
     const [form, setForm] = useState(comp || {
-      name:"", address:"", submarket: submarketList[0]||"Northeast", subtype:"Distribution",
+      name:"", address:"", city:"", submarket: submarketList[0]||"Northeast", subtype:"Distribution",
       sqft:"", compType:"Sale", salePrice:"", monthlyRent:"", leaseTerm:"", psfSale:"", psfLease:"",
       closeDate:today, seller:"", buyer:"", listingBroker:"", tenantBroker:"", source:"CoStar", notes:"", verified:false
     });
@@ -1965,7 +2249,8 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
             <div style={{ gridColumn:"span 2" }}>{label("Property Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. Northgate Distribution Center" style={iStyle}/></div>
-            <div style={{ gridColumn:"span 2" }}>{label("Address")}<input value={form.address} onChange={e=>set("address",e.target.value)} style={iStyle}/></div>
+            <div>{label("Address")}<input value={form.address} onChange={e=>set("address",e.target.value)} placeholder="e.g. 800 Commerce Dr" style={iStyle}/></div>
+            <div>{label("City")}<input value={form.city||""} onChange={e=>set("city",e.target.value)} placeholder="e.g. Columbus" style={iStyle}/></div>
             <div>{label("Submarket")}<select value={form.submarket} onChange={e=>set("submarket",e.target.value)} style={iStyle}>{submarketList.map(s=><option key={s}>{s}</option>)}</select></div>
             <div>{label("Subtype")}<select value={form.subtype} onChange={e=>set("subtype",e.target.value)} style={iStyle}>{INDUSTRIAL_SUBTYPES.map(s=><option key={s}>{s}</option>)}</select></div>
             <div>{label("Comp Type")}<select value={form.compType} onChange={e=>set("compType",e.target.value)} style={iStyle}>{COMP_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
@@ -3488,6 +3773,94 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
         {filtered.length === 0 && <div style={{ color:"#475569", fontSize:13, textAlign:"center", padding:"40px 0" }}>No properties yet. Track buildings in your market — specs, owners, and opportunities.</div>}
       </div>
       {modal && <PropertyModal property={modal==="new"?null:modal}/>}
+    </div>
+  );
+}
+
+// ── Calendar Tab ──────────────────────────────────────────────
+function CalendarTab({ deals, tasks, listings, onNavigate }) {
+  const [month, setMonth] = useState(new Date().getMonth());
+  const [year, setYear] = useState(new Date().getFullYear());
+
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
+  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // Build events map keyed by "YYYY-MM-DD"
+  const events = useMemo(() => {
+    const map = {};
+    const add = (date, ev) => { if (!date) return; if (!map[date]) map[date] = []; map[date].push(ev); };
+    deals.forEach(d => {
+      if (d.expectedClose) add(d.expectedClose, { label: d.name, color: DS.accent, tab: "pipeline", kind: "Close" });
+      if (d.followUpDate) add(d.followUpDate, { label: d.name, color: DS.green, tab: "pipeline", kind: "Follow-up" });
+    });
+    tasks.forEach(t => { if (!t.done) add(t.dueDate, { label: t.title, color: "#f97316", tab: "tasks", kind: "Task" }); });
+    listings.forEach(l => (l.showings || []).forEach(s => { if (s.date) add(s.date, { label: `Showing: ${l.name}`, color: DS.blue, tab: "listings", kind: "Showing" }); }));
+    return map;
+  }, [deals, tasks, listings, month, year]);
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const rows = [];
+  for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
+
+  const monthEvents = Object.entries(events).filter(([d]) => d.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`));
+  const totalEvents = monthEvents.reduce((s, [, evs]) => s + evs.length, 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Calendar</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{totalEvents} event{totalEvents !== 1 ? "s" : ""} this month</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {[["Close Dates", DS.accent], ["Follow-ups", DS.green], ["Tasks", "#f97316"], ["Showings", DS.blue]].map(([l, c]) => (
+              <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: c }} /><span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{l}</span></div>
+            ))}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={prevMonth} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.text, borderRadius: DS.r.sm, padding: "6px 12px", cursor: "pointer", fontSize: DS.fs.md }}>‹</button>
+            <span style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.lg, minWidth: 150, textAlign: "center" }}>{MONTHS[month]} {year}</span>
+            <button onClick={nextMonth} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.text, borderRadius: DS.r.sm, padding: "6px 12px", cursor: "pointer", fontSize: DS.fs.md }}>›</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: `1px solid ${DS.border}` }}>
+          {DAYS.map(d => <div key={d} style={{ padding: "10px 0", textAlign: "center", color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, letterSpacing: "0.5px" }}>{d}</div>)}
+        </div>
+        {rows.map((row, ri) => (
+          <div key={ri} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: ri < rows.length - 1 ? `1px solid ${DS.border}` : "none" }}>
+            {[...row, ...Array(7 - row.length).fill(null)].map((day, ci) => {
+              const dateStr = day ? `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}` : null;
+              const dayEvents = dateStr ? (events[dateStr] || []) : [];
+              const isToday = dateStr === todayStr;
+              return (
+                <div key={ci} style={{ minHeight: 90, padding: "6px 5px", background: isToday ? DS.accentSoft : day ? DS.bg : DS.surface, borderRight: ci < 6 ? `1px solid ${DS.border}` : "none", borderTop: isToday ? `2px solid ${DS.accent}` : "none" }}>
+                  {day && <div style={{ fontSize: DS.fs.xs, fontWeight: isToday ? DS.fw.black : DS.fw.normal, color: isToday ? DS.accent : DS.textMute, marginBottom: 4, textAlign: "right", paddingRight: 2 }}>{day}</div>}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {dayEvents.slice(0, 3).map((ev, ei) => (
+                      <div key={ei} onClick={() => { onNavigate(ev.tab); toast(`${ev.kind}: ${ev.label}`, "info"); }} style={{ background: ev.color + "22", color: ev.color, border: `1px solid ${ev.color}33`, fontSize: 9, padding: "2px 5px", borderRadius: 3, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: DS.fw.semi }} title={ev.label}>{ev.label}</div>
+                    ))}
+                    {dayEvents.length > 3 && <div style={{ color: DS.textMute, fontSize: 9, paddingLeft: 4 }}>+{dayEvents.length - 3} more</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -5460,6 +5833,143 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
   const setSC = (i, k, v) => setForm(f => { const a = [...f.saleComps];  a[i] = { ...a[i], [k]: v }; return { ...f, saleComps: a }; });
   const setLC = (i, k, v) => setForm(f => { const a = [...f.leaseComps]; a[i] = { ...a[i], [k]: v }; return { ...f, leaseComps: a }; });
 
+  // ── Property card import ───────────────────────────────────────
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState("");
+
+  const parsePropertyCard = (text) => {
+    const get = (...patterns) => {
+      for (const p of patterns) {
+        const m = text.match(p);
+        if (m && m[1] && m[1].trim()) return m[1].trim();
+      }
+      return "";
+    };
+    const strip = s => s.replace(/[$,]/g, "");
+    const out = {};
+
+    // Street address — "Location Address (1)\n1556 AMY LN" (county assessor) or "Address: X" (CoStar)
+    const addr = get(
+      /Location\s+Address[^\n]*\n([0-9][^\n]+)/i,
+      /(?:Property\s+Address|Street\s+Address|Address)[:\s]+([0-9][^\n,]{4,60}?)(?:\n|,\s*[A-Z]{2})/i,
+      /^(\d+\s+\S[^\n,]{3,50}(?:Dr|St|Ave|Blvd|Rd|Way|Ln|Ct|Pkwy|Hwy|Pl|Blvd)\.?)\b/im
+    );
+    if (addr) out.streetAddress = addr.trim();
+
+    // City / State / Zip — handles "FRANKLIN, IN 46131" and "Franklin, IN 46131"
+    const csz = text.match(/([A-Za-z][A-Za-z\s]{1,24}),\s*([A-Z]{2})\s+(\d{5})/);
+    if (csz) { out.city = csz[1].trim(); out.state = csz[2]; out.zip = csz[3]; }
+
+    // Owner — county assessor: owner name is the line after "Year: 2025", before the address line
+    const owner = get(
+      /Year:\s*\d{4}\s*\n([^\n]{3,80})\n\d+\s+[A-Z]/,
+      /(?:Owner(?:\s+Name)?|Property\s+Owner|Titled\s+Owner|Owner\s+of\s+Record)[:\s]+([^\n]{3,80})/i
+    );
+    if (owner) out.ownerName = owner.trim();
+
+    // Parcel / APN — county assessor puts value on the NEXT LINE after "Parcel Number"
+    const parcel = get(
+      /Parcel\s+Number\s*\n([A-Z0-9\-\.]{6,40})/i,
+      /(?:Parcel(?:\s+(?:#|ID|No\.?))?|APN|Tax\s+(?:ID|Parcel)|PIN)[:\s]+([A-Z0-9\-\.]{4,40})/i
+    );
+    if (parcel) out.parcelNum = parcel;
+
+    // Building SF — "5,400 sqft" in improvement summary, or standard labels
+    const sf = get(
+      /(?:Building\s+(?:Size|SF|Area)|Rentable\s+(?:Building\s+)?Area|GBA|Gross\s+(?:Building\s+)?Area|Total\s+(?:Building\s+)?SF)[:\s]+([\d,]+)/i,
+      /([1-9][\d,]{2,})\s*sqft\b/i,
+      /([1-9][\d,]{2,})\s*(?:SF|sq\.?\s*ft\.?)\b/i
+    );
+    if (sf) out.buildingSF = strip(sf);
+
+    // Year built — improvement summary "Metal C 2017 2017", or standard labels
+    const yr = get(
+      /(?:Year\s+Built|Built\s+in|Year\s+of\s+Construction|Constructed)[:\s]+(\d{4})/i,
+      /\d+:\s+[^\n]+\s+C\s+(\d{4})\s+\d{4}/,
+      /Metal\s+C\s+(\d{4})/i
+    );
+    if (yr) out.yearBuilt = yr;
+
+    // Site acreage — "Parcel Acreage 1.77" (county assessor) or "Lot Size: 1.77 AC" (CoStar)
+    const acres = get(
+      /(?:Parcel|Calculated)\s+Acreage\s+([\d.]+)/i,
+      /(?:(?:Lot|Site|Land)\s+(?:Size|Area)|Acreage|Total\s+Acres)[:\s]+([\d.]+)\s*(?:AC|Acres?)/i,
+      /([\d.]+)\s*(?:AC|Acres?)\b/i
+    );
+    if (acres) out.siteAcres = acres;
+
+    // Assessed value — Indiana assessor table: dollar amount appears on line BEFORE the label
+    // "Total Non Res (3)", or standard "Assessed Value: $X" on CoStar/tax bills
+    const assessed = get(
+      /\$([\d,]+)\s*\nTotal\s+Non\s+Res\s*\(3\)/i,
+      /Total\s+Non\s+Res\s*\(3\)\s*\n\s*\$([\d,]+)/i,
+      /(?:Total\s+Assessed\s+Value|Assessed\s+Value|Tax\s+(?:Assessed\s+)?Value|Taxable\s+Value)[:\s]+\$?([\d,]+)/i
+    );
+    if (assessed) out.assessedValue = strip(assessed);
+
+    // Annual taxes — not on Indiana assessor cards; present on tax bills and some CoStar exports
+    const taxes = get(
+      /(?:Annual\s+Tax(?:es)?|Tax\s+(?:Bill|Amount)|Property\s+Tax(?:es)?|Net\s+(?:Annual\s+)?Tax(?:es)?|Total\s+Tax\s+Due)[:\s]+\$?([\d,]+)/i
+    );
+    if (taxes) out.annualTaxes = strip(taxes);
+
+    // Last sale date — county assessor transfer table: first date line = most recent transfer
+    const saleDate = get(
+      /(?:Last\s+Sale\s+Date|Sale\s+Date|Transfer\s+Date|Recorded\s+Date)[:\s]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+      /^(\d{2}\/\d{2}\/\d{4})\s+[A-Z]/m
+    );
+    if (saleDate) out.lastSaleDate = saleDate;
+
+    // Last sale price — county assessor transfer table: first "$XX,XXX V" or "$XX,XXX I" entry
+    const salePrice = get(
+      /(?:Last\s+Sale\s+Price|Sale\s+Price|Transfer\s+(?:Value|Price)|Purchase\s+Price)[:\s]+\$?([\d,]+)/i,
+      /\$([0-9,]{4,})\s+[VI]\b/m
+    );
+    if (salePrice) out.lastSalePrice = strip(salePrice);
+
+    // Zoning
+    const zoning = get(/(?:Zoning(?:\s+Code)?|Zone(?:\s+Code)?)[:\s]+([A-Z0-9\-\/]{1,20})/i);
+    if (zoning) out.zoning = zoning;
+
+    // Construction type — "Pre. Framing Rigid Steel Frame" (county assessor) or standard labels
+    const constr = get(
+      /Pre\.?\s+Framing\s+([^\n]+)/i,
+      /(?:Construction(?:\s+Type)?|Structure\s+Type|Frame\s+Type)[:\s]+([^\n,]{3,40})/i
+    );
+    if (constr) out.constructionType = constr.trim();
+
+    // Stories — "Story Height 1" (county assessor) or standard labels
+    const stories = get(
+      /Story\s+Height\s+(\d+)/i,
+      /(?:(?:Number\s+of\s+)?Stories|Floors?)[:\s]+(\d+)/i
+    );
+    if (stories) out.numStories = stories;
+
+    // Occupancy
+    const occ = get(/(?:Occupancy(?:\s+Rate)?|(?:Percent\s+)?(?:Leased|Occupied))[:\s]+([\d.]+)\s*%?/i);
+    if (occ) out.occupancyPct = occ;
+
+    // Clear height — "Wall Height\n19'" (county assessor, first entry = main bay) or standard labels
+    const ch = get(
+      /Wall\s+Height\s*\n(\d+)'/i,
+      /Wall\s+Height\s+(\d+)'/i,
+      /(?:Clear(?:ance)?\s+Height|Ceiling\s+Height)[:\s]+([\d.]+)\s*(?:ft|')?/i
+    );
+    if (ch) out.clearHeight = ch;
+
+    return out;
+  };
+
+  const applyImport = () => {
+    const extracted = parsePropertyCard(importText);
+    const count = Object.keys(extracted).length;
+    if (count === 0) { toast("No recognizable fields found — try copying more of the document", "warning"); return; }
+    setForm(f => ({ ...f, ...extracted }));
+    toast(`Imported ${count} field${count !== 1 ? "s" : ""} from property card`);
+    setShowImport(false);
+    setImportText("");
+  };
+
   // ── DB auto-fill ──────────────────────────────────────────────
   const dbSale  = comps.filter(c => c.submarket === form.submarket && c.compType === "Sale"  && parseFloat(c.psfSale)  > 0).sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||"")).slice(0,3);
   const dbLease = comps.filter(c => c.submarket === form.submarket && c.compType === "Lease" && parseFloat(c.psfLease) > 0).sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||"")).slice(0,3);
@@ -5773,10 +6283,13 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
         {activeId ? (
           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
             {/* Section nav */}
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
               {SECTIONS.map(s => (
                 <button key={s} onClick={() => setActiveSection(s)} style={{ background: activeSection === s ? DS.accent : DS.panel, border: `1px solid ${activeSection === s ? DS.accent : DS.border}`, color: activeSection === s ? "#0a0f1a" : DS.textSub, padding: "6px 13px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: activeSection === s ? DS.fw.black : DS.fw.normal, whiteSpace: "nowrap" }}>{s}</button>
               ))}
+              <div style={{ marginLeft: "auto" }}>
+                <button onClick={() => setShowImport(true)} style={{ background: DS.panel, border: `1px solid ${DS.blue}55`, color: DS.blue, padding: "6px 13px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.semi, whiteSpace: "nowrap" }}>Import Property Card</button>
+              </div>
             </div>
 
             {/* ── PAGE 1 — PROPERTY ID ── */}
@@ -6151,8 +6664,68 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
           </div>
         )}
       </div>
+
+      {/* ── Import Property Card Modal ── */}
+      {showImport && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }} onClick={() => setShowImport(false)}>
+          <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, padding: 28, width: 580, maxHeight: "85vh", overflowY: "auto", boxShadow: DS.shadow.xl }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>Import Property Card</div>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Open your property card PDF → Select All → Copy → Paste below</div>
+              </div>
+              <button onClick={() => setShowImport(false)} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "10px 12px", marginBottom: 10, fontSize: DS.fs.xs, color: DS.textMute, lineHeight: 1.6 }}>
+              Works with <strong style={{ color: DS.textSub }}>CoStar property reports</strong>, <strong style={{ color: DS.textSub }}>county assessor cards</strong>, and <strong style={{ color: DS.textSub }}>LoopNet listings</strong>. Fields already filled will be overwritten only where the import finds a match.
+            </div>
+            <textarea
+              value={importText}
+              onChange={e => setImportText(e.target.value)}
+              placeholder={"Paste property card text here...\n\nTip: In most PDF viewers, press Ctrl+A to select all text, then Ctrl+C to copy."}
+              style={{ width: "100%", minHeight: 240, background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, color: DS.text, fontSize: DS.fs.sm, padding: "10px 12px", outline: "none", resize: "vertical", boxSizing: "border-box", fontFamily: "monospace", lineHeight: 1.5 }}
+              autoFocus
+            />
+            {importText.length > 20 && (
+              <div style={{ marginTop: 10, padding: "8px 12px", background: DS.blueSoft, border: `1px solid ${DS.blue}33`, borderRadius: DS.r.sm, fontSize: DS.fs.xs, color: DS.blue }}>
+                {(() => { const f = parsePropertyCard(importText); const n = Object.keys(f).length; return n > 0 ? `Found ${n} field${n !== 1 ? "s" : ""}: ${Object.keys(f).join(", ")}` : "No fields recognized yet — try selecting more text from the document"; })()}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+              <button onClick={() => { setShowImport(false); setImportText(""); }} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Cancel</button>
+              <button onClick={applyImport} disabled={importText.length < 20} style={{ background: importText.length >= 20 ? DS.blue : DS.border, border: "none", color: importText.length >= 20 ? "#fff" : DS.textMute, padding: "8px 20px", borderRadius: DS.r.sm, cursor: importText.length >= 20 ? "pointer" : "default", fontSize: DS.fs.md, fontWeight: DS.fw.bold }}>Import Fields</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Background geocode-and-cache (fire-and-forget) ─────────────
+function geocodeAndCache(rawAddr, key) {
+  if (!rawAddr || !key) return;
+  const k = String(key);
+  try {
+    const cache = JSON.parse(localStorage.getItem("cre-geocode-cache") || "{}");
+    if (cache[k]) return;
+  } catch {}
+  const defaultState = localStorage.getItem("cre-default-state") || "Indiana";
+  const addr = rawAddr.toLowerCase().includes(defaultState.toLowerCase())
+    ? rawAddr : `${rawAddr}, ${defaultState}`;
+  fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1&countrycodes=us`,
+    { headers: { 'Accept-Language': 'en', 'User-Agent': 'CRE-CRM/1.0' } })
+    .then(r => r.json())
+    .then(data => {
+      if (data && data[0]) {
+        try {
+          const cache = JSON.parse(localStorage.getItem("cre-geocode-cache") || "{}");
+          cache[k] = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+          localStorage.setItem("cre-geocode-cache", JSON.stringify(cache));
+        } catch {}
+      }
+    })
+    .catch(() => {});
 }
 
 // ── Leaflet Map Hook ───────────────────────────────────────────
@@ -6162,7 +6735,9 @@ function useLeaflet() {
     if (window.L) { setLoaded(true); return; }
     const s = document.createElement('script');
     s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    s.crossOrigin = 'anonymous';
     s.onload = () => setLoaded(true);
+    s.onerror = (e) => console.error('Leaflet failed to load:', e);
     document.head.appendChild(s);
   }, []);
   return loaded;
@@ -6170,14 +6745,30 @@ function useLeaflet() {
 
 // ── Auto-geocode hook using Nominatim ─────────────────────────
 function useGeocode(items, getAddress) {
-  const [coords, setCoords] = useState({});
+  const [coords, setCoords] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cre-geocode-cache") || "{}"); } catch { return {}; }
+  });
   const defaultState = localStorage.getItem("cre-default-state") || "Indiana";
+  const fetchingRef = useRef(new Set());
+
   useEffect(() => {
-    items.forEach(item => {
+    const toFetch = items.filter(item => {
       const rawAddr = getAddress(item);
-      if (!rawAddr) return;
-      const key = item.id || item.sm || rawAddr;
-      if (coords[key]) return;
+      if (!rawAddr) return false;
+      const key = String(item.id || item.sm || rawAddr);
+      return !coords[key] && !fetchingRef.current.has(key);
+    });
+    if (toFetch.length === 0) return;
+
+    let cancelled = false;
+    let i = 0;
+
+    const fetchNext = () => {
+      if (cancelled || i >= toFetch.length) return;
+      const item = toFetch[i++];
+      const rawAddr = getAddress(item);
+      const key = String(item.id || item.sm || rawAddr);
+      fetchingRef.current.add(key);
       // Append default state to bias results geographically
       const addr = rawAddr.toLowerCase().includes(defaultState.toLowerCase())
         ? rawAddr
@@ -6186,13 +6777,23 @@ function useGeocode(items, getAddress) {
       fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'CRE-CRM/1.0' } })
         .then(r => r.json())
         .then(data => {
-          if (data && data[0]) {
-            setCoords(prev => ({ ...prev, [key]: { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) } }));
+          fetchingRef.current.delete(key);
+          if (!cancelled && data && data[0]) {
+            setCoords(prev => {
+              const next = { ...prev, [key]: { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) } };
+              try { localStorage.setItem("cre-geocode-cache", JSON.stringify(next)); } catch {}
+              return next;
+            });
           }
         })
-        .catch(() => {});
-    });
+        .catch(() => { fetchingRef.current.delete(key); })
+        .finally(() => { if (!cancelled) setTimeout(fetchNext, 1100); });
+    };
+
+    fetchNext();
+    return () => { cancelled = true; };
   }, [items.map(i => getAddress(i)).join(',')]);
+
   return coords;
 }
 
@@ -6204,7 +6805,7 @@ function CompsLeafletMap({ comps }) {
 
   // Use manually set coords OR auto-geocode from address
   const compsNeedingGeocode = comps.filter(c => !c.lat && !c.lng && (c.address || c.name));
-  const geocoded = useGeocode(compsNeedingGeocode, c => c.address || c.name || '');
+  const geocoded = useGeocode(compsNeedingGeocode, c => [c.address || c.name, c.city].filter(Boolean).join(", ") || '');
 
   const resolvedComps = comps.map(c => {
     const key = c.id || c.address || c.name;
@@ -6371,11 +6972,15 @@ export default function PipelineDashboard() {
   const [inlineEdit, setInlineEdit] = useState(null);
   const [showDailySync, setShowDailySync] = useState(false);
   const [checklistDeal, setChecklistDeal] = useState(null);
+  const [milestoneDeal, setMilestoneDeal] = useState(null);
+  const [closingStatementDeal, setClosingStatementDeal] = useState(null);
+  const [emailDraftDeal, setEmailDraftDeal] = useState(null);
   const [showCSVImport, setShowCSVImport] = useState(false);
   const [filters, setFilters] = useState({ search: "", stages: [], subtypes: [], dealTypes: [], leadSources: [], dateFrom: "", dateTo: "" });
   const [sortKey, setSortKey] = useState("expectedClose");
   const [sortDir, setSortDir] = useState("asc");
   const [showFilters, setShowFilters] = useState(false);
+  const [openActionMenu, setOpenActionMenu] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -6449,6 +7054,7 @@ export default function PipelineDashboard() {
     const d = { ...form, dealTotal: parseFloat(form.dealTotal) || 0, monthlyRent: parseFloat(form.monthlyRent) || 0, leaseTerm: parseFloat(form.leaseTerm) || 0, sqft: parseFloat(form.sqft) || 0, commissionRate: parseFloat(form.commissionRate) || 0, probability: parseFloat(form.probability) || 0, daysInStage: parseInt(form.daysInStage) || 0, splitPct: parseFloat(form.splitPct) || 100, activities: form.activities || [], richNotes: form.richNotes || [], tags: form.tags || [], documents: form.documents || [], stageHistory };
     if (form.id) setDeals(prev => prev.map(x => x.id === form.id ? d : x));
     else setDeals(prev => [...prev, { ...d, id: Date.now() }]);
+    if (d.submarket) geocodeAndCache(d.submarket, d.submarket);
     setModal(null);
   };
   const saveQuickAdd = (form) => {
@@ -6493,6 +7099,13 @@ export default function PipelineDashboard() {
     setDeals(prev => prev.map(d => d.id === updated.id ? updated : d));
     toast("Checklist saved");
   };
+  const saveMilestones = (updated) => { setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); };
+  useEffect(() => {
+    if (!openActionMenu) return;
+    const handler = () => setOpenActionMenu(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [openActionMenu]);
 
   const handleCSVImport = (type, records) => {
     if (type === "deals") {
@@ -6634,6 +7247,7 @@ export default function PipelineDashboard() {
       { id: "bov", label: "BOV" },
       { id: "forecast", label: "Forecast" },
       { id: "timeline", label: "Timeline" },
+      { id: "calendar", label: "Calendar" },
       { id: "comps", label: "Market Comps", badge: comps.length },
       { id: "lease-radar", label: "Lease Radar" },
     ]},
@@ -6758,7 +7372,7 @@ export default function PipelineDashboard() {
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
         {/* ── Sidebar ── */}
-        <div style={{ width: sidebarCollapsed ? 48 : 210, flexShrink: 0, background: DS.surface, borderRight: `1px solid ${DS.border}`, display: "flex", flexDirection: "column", transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)", overflowY: "auto", overflowX: "hidden", boxShadow: "2px 0 20px rgba(0,0,0,0.3)" }}>
+        <div style={{ width: sidebarCollapsed ? 0 : 210, flexShrink: 0, background: DS.surface, borderRight: sidebarCollapsed ? "none" : `1px solid ${DS.border}`, display: "flex", flexDirection: "column", transition: "width 0.22s cubic-bezier(0.4,0,0.2,1)", overflowY: "auto", overflowX: "hidden", boxShadow: sidebarCollapsed ? "none" : "2px 0 20px rgba(0,0,0,0.3)" }}>
           {NAV_GROUPS.map((group, gi) => (
             <div key={group.label} style={{ padding: sidebarCollapsed ? "10px 0" : "14px 0 6px", borderBottom: gi < NAV_GROUPS.length - 1 ? `1px solid ${DS.border}` : "none" }}>
               {!sidebarCollapsed && <div style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.black, letterSpacing: "1.2px", textTransform: "uppercase", padding: "0 16px 8px", opacity: 0.7 }}>{group.label}</div>}
@@ -6793,6 +7407,7 @@ export default function PipelineDashboard() {
           {activeTab === "expenses" && <ExpenseTab expenses={expenses} setExpenses={setExpenses} closedYTD={closedYTD} gciGoal={gciGoal} />}
           {activeTab === "properties" && <PropertyDBTab properties={properties} setProperties={setProperties} submarketList={submarketList} contacts={contacts} />}
           {activeTab === "timeline" && <TimelineTab deals={deals} />}
+          {activeTab === "calendar" && <CalendarTab deals={deals} tasks={tasks} listings={listings} onNavigate={setActiveTab} />}
           {activeTab === "intel" && <IntelTab deals={deals} expenses={expenses} gciGoal={gciGoal} />}
           {activeTab === "lease-radar" && <LeaseRadarTab deals={deals} contacts={contacts} onNavigate={setActiveTab} />}
 
@@ -7143,20 +7758,45 @@ export default function PipelineDashboard() {
                       <td style={td}>{d.expectedClose ? new Date(d.expectedClose + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</td>
                       <td style={td}><span style={{ background: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? DS.red + "22" : DS.green + "11", color: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? DS.red : DS.green, padding: "1px 6px", borderRadius: 9, fontSize: 10, fontWeight: DS.fw.bold }}>{d.daysInStage}d</span></td>
                       <td style={td}>
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {d.stage !== "Closed" && d.stage !== "Lost" && <button onClick={() => setWinLossDeal(d)} title="Close Out" style={{ background: DS.green + "22", border: `1px solid ${DS.green}33`, color: DS.green, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold, padding: "2px 7px", borderRadius: 4 }}>Close</button>}
-                          {(d.stage === "Under Contract" || d.stage === "LOI") && (
-                            <button onClick={() => setChecklistDeal(d)} title="Closing Checklist" style={{ background: DS.accent+"22", border: `1px solid ${DS.accent}44`, color: DS.accent, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold, padding: "2px 7px", borderRadius: 4 }}>
-                              {(() => { const items = d.dealType === "Lease" ? CLOSING_CHECKLIST_LEASE : CLOSING_CHECKLIST_SALE; const done = items.filter(i => (d.closingChecklist||{})[i.id]).length; return done > 0 ? `✓ ${done}/${items.length}` : "Checklist"; })()}
-                            </button>
+                        <div style={{ position: "relative" }}>
+                          <button onClick={e => { e.stopPropagation(); setOpenActionMenu(openActionMenu === d.id ? null : d.id); }} style={{ background: openActionMenu === d.id ? DS.borderHi : DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, cursor: "pointer", fontSize: 16, padding: "2px 10px", borderRadius: DS.r.sm, fontWeight: DS.fw.bold, lineHeight: 1 }}>···</button>
+                          {openActionMenu === d.id && (
+                            <div onClick={e => e.stopPropagation()} style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.md, boxShadow: DS.shadow.lg, zIndex: 500, minWidth: 190, overflow: "hidden" }}>
+                              {(() => {
+                                const close = () => setOpenActionMenu(null);
+                                const item = (label, onClick, color, dimmed) => (
+                                  <div key={label} onClick={() => { onClick(); close(); }} style={{ padding: "9px 14px", cursor: "pointer", fontSize: DS.fs.sm, color: dimmed ? DS.textMute : color || DS.text, fontWeight: color ? DS.fw.semi : DS.fw.normal, borderBottom: `1px solid ${DS.border}` }}
+                                    onMouseEnter={e => e.currentTarget.style.background = DS.panelHi}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                    {label}
+                                  </div>
+                                );
+                                const checklistItems = d.dealType === "Lease" ? CLOSING_CHECKLIST_LEASE : CLOSING_CHECKLIST_SALE;
+                                const checklistDone = checklistItems.filter(i => (d.closingChecklist||{})[i.id]).length;
+                                const milestoneCount = (d.milestones||[]).length;
+                                const milestoneDone = (d.milestones||[]).filter(m => m.completed).length;
+                                const overdueMs = (d.milestones||[]).filter(m => !m.completed && m.dueDate && m.dueDate < today).length;
+                                return [
+                                  item("✏️  Edit Deal", () => setModal(d)),
+                                  item("📋  Log Activity", () => setActivityDeal(d)),
+                                  item("📝  Notes", () => setRichNotesDeal(d)),
+                                  item("📎  Documents" + ((d.documents||[]).length > 0 ? ` (${d.documents.length})` : ""), () => setDocumentsDeal(d)),
+                                  item("📅  Timeline", () => setTimelineDeal(d)),
+                                  item(`🏁  Milestones${milestoneCount > 0 ? ` — ${milestoneDone}/${milestoneCount}${overdueMs > 0 ? ` · ${overdueMs} overdue` : ""}` : ""}`, () => setMilestoneDeal(d), overdueMs > 0 ? DS.red : milestoneCount > 0 ? DS.purple : null),
+                                  (d.stage === "Under Contract" || d.stage === "LOI") && item(`✅  Checklist${checklistDone > 0 ? ` — ${checklistDone}/${checklistItems.length}` : ""}`, () => setChecklistDeal(d), DS.accent),
+                                  item("✉️  Email Templates", () => setEmailDraftDeal(d), DS.blue),
+                                  (d.stage === "Under Contract" || d.stage === "Closed") && item("💰  Closing Statement", () => setClosingStatementDeal(d), DS.green),
+                                  d.stage !== "Closed" && d.stage !== "Lost" && item("🏆  Close Out", () => setWinLossDeal(d), DS.green),
+                                  item("⧉  Duplicate", () => { const clone = { ...d, id: Date.now(), name: d.name + " (copy)", stageHistory: [], won: null, lossReason: "" }; setDeals(prev => [...prev, clone]); toast("Deal duplicated"); }, null, true),
+                                  <div key="del" onClick={() => { if (window.confirm("Delete this deal?")) { setDeals(prev => prev.filter(x => x.id !== d.id)); toast("Deal deleted", "error"); close(); } }} style={{ padding: "9px 14px", cursor: "pointer", fontSize: DS.fs.sm, color: DS.red }}
+                                    onMouseEnter={e => e.currentTarget.style.background = DS.redSoft}
+                                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                                    🗑  Delete
+                                  </div>
+                                ].filter(Boolean);
+                              })()}
+                            </div>
                           )}
-                          <button onClick={() => setRichNotesDeal(d)} title="Rich Notes" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Notes</button>
-                          <button onClick={() => setDocumentsDeal(d)} title="Documents" style={{ background: (d.documents||[]).length > 0 ? DS.green + "22" : DS.border, border: "none", color: (d.documents||[]).length > 0 ? DS.green : DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Docs</button>
-                          <button onClick={() => setActivityDeal(d)} title="Activity Log" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Log</button>
-                          <button onClick={() => setTimelineDeal(d)} title="Deal Timeline" style={{ background: DS.purple + "22", border: "none", color: DS.purple, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Timeline</button>
-                          <button onClick={() => { const clone = { ...d, id: Date.now(), name: d.name + " (copy)", stageHistory: [], won: null, lossReason: "" }; setDeals(prev => [...prev, clone]); toast("Deal duplicated"); }} title="Duplicate" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Dupe</button>
-                          <button onClick={() => setModal(d)} title="Edit" style={{ background: DS.border, border: "none", color: DS.textSub, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Edit</button>
-                          <button onClick={() => { if(window.confirm("Delete this deal?")) { setDeals(prev => prev.filter(x => x.id !== d.id)); toast("Deal deleted", "error"); }}} title="Delete" style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: DS.fs.xs, padding: "2px 7px", borderRadius: 4 }}>Del</button>
                         </div>
                       </td>
                     </tr>
@@ -7219,6 +7859,9 @@ export default function PipelineDashboard() {
           onClose={() => setChecklistDeal(null)}
         />
       )}
+      {milestoneDeal && <MilestoneTrackerModal deal={milestoneDeal} onSave={saveMilestones} onClose={() => setMilestoneDeal(null)} />}
+      {closingStatementDeal && <CommissionClosingStatement deal={closingStatementDeal} brokerName={brokerName} brokerage={brokerage} onClose={() => setClosingStatementDeal(null)} />}
+      {emailDraftDeal && <EmailDraftModal deal={emailDraftDeal} brokerName={brokerName} brokerage={brokerage} onClose={() => setEmailDraftDeal(null)} />}
       {showCSVImport && (
         <CSVImportModal
           onImport={handleCSVImport}
