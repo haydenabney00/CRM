@@ -1,5 +1,9 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
+import * as XLSX from "xlsx";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 const STAGES = ["Prospect", "Proposal", "LOI", "Under Contract", "Closed", "Lost"];
 const INDUSTRIAL_SUBTYPES = ["Distribution", "Manufacturing", "Flex", "Cold Storage", "Data Center", "Light Industrial", "Heavy Industrial", "Truck Terminal", "Other"];
@@ -19,6 +23,16 @@ const TASK_PRIORITIES = ["Low", "Medium", "High", "Urgent"];
 const RECURRENCE_OPTIONS = ["None", "Daily", "Weekly", "Bi-weekly", "Monthly", "Quarterly", "Annually"];
 const EXPENSE_CATEGORIES = ["CoStar / Data", "LoopNet", "Marketing / Mailers", "E&O Insurance", "Dues / Memberships", "Transportation / Mileage", "Meals / Entertainment", "Office / Supplies", "Legal / Professional", "Other"];
 const DEAL_TAG_SUGGESTIONS = ["Hot", "Off-Market", "Year-End Push", "Referral", "Repeat Client", "Portfolio", "Value-Add", "Distressed", "1031 Exchange", "New Construction", "Watch", "On Hold"];
+const PROP_TYPES = ["Industrial","Office","Retail","Land","Multifamily","Flex"];
+const PROP_SUBTYPES = {
+  Industrial:["Distribution","Manufacturing","Flex","Cold Storage","Data Center","Light Industrial","Heavy Industrial","Truck Terminal","R&D","Other"],
+  Office:["Class A","Class B","Class C","Medical","Creative/Loft","Other"],
+  Retail:["Strip Center","Neighborhood Center","Power Center","Single Tenant","Restaurant","Other"],
+  Land:["Industrial Land","Commercial Land","Agricultural","Residential Land","Mixed-Use Land","Other"],
+  Multifamily:["Garden","Mid-Rise","High-Rise","Mixed-Use","Other"],
+  Flex:["Flex/Office","Flex/Warehouse","R&D Flex","Other"],
+};
+const PROP_STATUSES = ["Active","Under Contract","Off Market","Leased/Sold"];
 const MILESTONE_TYPES = ["LOI Executed", "Inspection Period End", "Financing Contingency", "Due Diligence Deadline", "Title Clearance", "Survey", "Final Walkthrough", "Closing Date"];
 
 const today = new Date().toISOString().split("T")[0];
@@ -27,21 +41,10 @@ const thisMonth = new Date().getMonth();
 const hour = new Date().getHours();
 const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-const initialContacts = [
-  { id: 1, name: "Bob Harrington", company: "Harrington Industrial LLC", type: "Owner", phone: "555-0101", email: "bob@harringtonind.com", submarket: "Northeast", properties: "42 Commerce Park, 100 Industrial Way", relationshipLevel: "Warm", lastContact: "2026-02-15", notes: "Owns 3 buildings NE submarket. May sell in 2027.", linkedDeals: [] },
-  { id: 2, name: "Sarah Kim", company: "Metro Manufacturing", type: "Tenant", phone: "555-0188", email: "skim@metromfg.com", submarket: "Central", properties: "", relationshipLevel: "Active", lastContact: today, notes: "Current client on Gateway deal.", linkedDeals: [2] },
-];
-const initialTasks = [
-  { id: 1, title: "Renew CoStar subscription", category: "Admin", priority: "High", dueDate: "2026-03-31", done: false, notes: "", linkedDealId: null },
-  { id: 2, title: "Follow up with Bob Harrington re: NE portfolio", category: "Prospecting", priority: "Medium", dueDate: today, done: false, notes: "", linkedDealId: null },
-];
-const initialExpenses = [
-  { id: 1, category: "CoStar / Data", description: "CoStar monthly subscription", amount: 650, date: "2026-03-01", notes: "" },
-  { id: 2, category: "Marketing / Mailers", description: "Q1 NE owner mailer printing + postage", amount: 420, date: "2026-02-01", notes: "50 letters" },
-];
-const initialProperties = [
-  { id: 1, name: "42 Commerce Park", address: "42 Commerce Park Dr", submarket: "Northeast", subtype: "Distribution", sqft: 85000, owner: "Harrington Industrial LLC", ownerContact: "Bob Harrington", yearBuilt: 2004, clearHeight: 32, dockDoors: 12, lastSalePrice: 0, notes: "Owner mentioned interest in selling 2027+.", tags: "Owner Prospect" },
-];
+const initialContacts = [];
+const initialTasks = [];
+const initialExpenses = [];
+const initialProperties = [];
 
 const STAGE_COLORS = {
   Prospect:        { bg: "#0f1e35", text: "#60a5fa", border: "#1e3a5f", glow: "#3b82f620" },
@@ -52,24 +55,11 @@ const STAGE_COLORS = {
   Lost:            { bg: "#1a0808", text: "#f87171", border: "#2a0f0f", glow: "#ef444420" },
 };
 
-const initialDeals = [
-  { id: 1, name: "Lakeside Distribution Center", client: "Apex Logistics", counterparty: "NorthStar Capital", stage: "Under Contract", dealType: "Sale", repType: "Seller/Landlord Rep", subtype: "Distribution", sqft: 85000, dealTotal: 2500000, commissionRate: 6, probability: 90, expectedClose: "2026-12-30", notes: "", broker: "Me", daysInStage: 8, activities: [], followUpDate: "", leadSource: "Referral", coBroker: "", splitPct: 100, won: null, lossReason: "", leaseTerm: 0, monthlyRent: 0, richNotes: [], submarket: "Northeast" },
-  { id: 2, name: "Gateway Industrial Park Unit 4", client: "Metro Manufacturing", counterparty: "", stage: "Proposal", dealType: "Lease", repType: "Buyer/Tenant Rep", subtype: "Manufacturing", sqft: 32000, dealTotal: 0, commissionRate: 5, probability: 60, expectedClose: "2026-06-30", notes: "", broker: "Me", daysInStage: 14, activities: [], followUpDate: today, leadSource: "Cold Call", coBroker: "", splitPct: 100, won: null, lossReason: "", leaseTerm: 60, monthlyRent: 19200, richNotes: [], submarket: "Central" },
-  { id: 3, name: "Clearfield Flex Space", client: "Clearfield Logistics", counterparty: "Wilkins Properties", stage: "Prospect", dealType: "Lease", repType: "Buyer/Tenant Rep", subtype: "Flex", sqft: 15000, dealTotal: 0, commissionRate: 5, probability: 40, expectedClose: "2026-09-30", notes: "", broker: "Me", daysInStage: 36, activities: [], followUpDate: "", leadSource: "Referral", coBroker: "Mike Davis", splitPct: 50, won: null, lossReason: "", leaseTerm: 36, monthlyRent: 11250, richNotes: [], submarket: "Southeast" },
-];
+const initialDeals = [];
+const initialListings = [];
+const initialProspecting = [];
 
-const initialListings = [
-  { id: 1, name: "Northgate Logistics Hub", address: "1200 Industrial Blvd", submarket: "Northeast", subtype: "Distribution", sqft: 120000, askingPrice: 0, monthlyRent: 72000, dealType: "Lease", status: "Active", listedDate: "2026-01-15", showings: [], marketingNotes: "", daysOnMarket: 54, askingPsfSale: 0, askingPsfLease: 0.60 },
-  { id: 2, name: "Riverside Commerce Center", address: "450 River Rd", submarket: "Northwest", subtype: "Flex", sqft: 45000, askingPrice: 5400000, monthlyRent: 0, dealType: "Sale", status: "Active", listedDate: "2026-02-01", showings: [], marketingNotes: "", daysOnMarket: 37, askingPsfSale: 120, askingPsfLease: 0 },
-];
-
-const initialProspecting = [
-  { id: 1, name: "Northeast Owner Mailer — Q1", type: "Letter/Mailer", submarket: "Northeast", targetCount: 50, sendDate: "2026-02-01", responses: 4, conversations: 2, convertedDeals: 0, notes: "Focused on owners 5+ years with no recent transaction", status: "Sent" },
-];
-
-const initialComps = [
-  { id: 1, name: "Southpark Distribution Center", address: "800 Commerce Dr", submarket: "Southeast", subtype: "Distribution", sqft: 95000, compType: "Sale", salePrice: 11400000, monthlyRent: 0, leaseTerm: 0, psfSale: 120, psfLease: 0, closeDate: "2026-01-10", seller: "Patriot Properties", buyer: "Prologis", listingBroker: "CBRE", tenantBroker: "", source: "CoStar", notes: "", verified: true },
-];
+const initialComps = [];
 
 const fmt = (n) => "$" + Math.round(n || 0).toLocaleString();
 const fmtSqft = (n) => n ? Number(n).toLocaleString() + " SF" : "—";
@@ -113,6 +103,17 @@ const DS = {
   },
 };
 
+// ── Icon Components ──────────────────────────────────────────────
+const IcPhone  = ({s=11}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.15 13.5a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.06 2.84h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 10.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 18l.01-1.08z"/></svg>;
+const IcMail   = ({s=11}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>;
+const IcUser   = ({s=11}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+const IcTrash  = ({s=12}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>;
+const IcSearch = ({s=11}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
+const IcPrint  = ({s=11}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>;
+const IcPin    = ({s=10}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>;
+const IcMap    = ({s=11}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>;
+const IcDoc    = ({s=32}) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{opacity:0.25}}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>;
+
 const globalIStyle = (extra = {}) => ({
   background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm,
   color: DS.text, padding: "8px 11px", fontSize: DS.fs.lg, outline: "none",
@@ -138,51 +139,116 @@ function ToastProvider() {
 }
 
 // ── Global Search ──────────────────────────────────────────────────
-function GlobalSearch({ deals, contacts, properties, comps, tasks, onNavigate, onClose }) {
+function GlobalSearch({ deals, contacts, properties, comps, tasks, listings, onNavigate, onClose }) {
   const [q, setQ] = useState("");
-  const inputRef = useState(null);
+  const [sel, setSel] = useState(0);
+  const listRef = useRef(null);
 
   const results = useMemo(() => {
     if (!q.trim() || q.length < 2) return [];
     const lq = q.toLowerCase();
     const hits = [];
-    deals.forEach(d => { if ((d.name+d.client+d.counterparty+d.submarket).toLowerCase().includes(lq)) hits.push({ type: "Deal", label: d.name, sub: `${d.stage} · ${d.client}`, tab: "pipeline", color: DS.accent }); });
-    contacts.forEach(c => { if ((c.name+c.company+c.email).toLowerCase().includes(lq)) hits.push({ type: "Contact", label: c.name, sub: `${c.company} · ${c.type}`, tab: "contacts", color: DS.blue }); });
-    properties.forEach(p => { if ((p.name+p.address+p.submarket+p.owner).toLowerCase().includes(lq)) hits.push({ type: "Property", label: p.name, sub: `${p.submarket} · ${p.subtype}`, tab: "properties", color: DS.purple }); });
-    comps.forEach(c => { if ((c.name+c.address+c.submarket+c.buyer+c.seller).toLowerCase().includes(lq)) hits.push({ type: "Comp", label: c.name, sub: `${c.submarket} · ${c.compType}`, tab: "comps", color: DS.green }); });
-    tasks.forEach(t => { if ((t.title+t.notes).toLowerCase().includes(lq)) hits.push({ type: "Task", label: t.title, sub: `${t.category} · ${t.priority}`, tab: "tasks", color: "#f97316" }); });
-    return hits.slice(0, 12);
-  }, [q, deals, contacts, properties, comps, tasks]);
+    deals.forEach(d => { if ((d.name+d.client+d.counterparty+d.submarket).toLowerCase().includes(lq)) hits.push({ type: "Deal", label: d.name, sub: `${d.stage} · ${d.client} · ${d.submarket}`, tab: "pipeline", color: DS.accent }); });
+    contacts.forEach(c => { if ((c.name+c.company+c.email+(c.phone||"")).toLowerCase().includes(lq)) hits.push({ type: "Contact", label: c.name, sub: `${c.company} · ${c.type} · ${c.relationshipLevel}`, tab: "contacts", color: DS.blue }); });
+    (listings||[]).forEach(l => { if ((l.name+(l.address||"")+(l.submarket||"")).toLowerCase().includes(lq)) hits.push({ type: "Listing", label: l.name, sub: `${l.status} · ${l.submarket} · ${l.sqft?.toLocaleString()} SF`, tab: "listings", color: DS.green }); });
+    properties.forEach(p => { if ((p.name+(p.address||"")+(p.submarket||"")+(p.owner||"")).toLowerCase().includes(lq)) hits.push({ type: "Property", label: p.name, sub: `${p.submarket} · ${p.subtype}`, tab: "properties", color: DS.purple }); });
+    comps.forEach(c => { if ((c.name+(c.address||"")+(c.submarket||"")+(c.buyer||"")+(c.seller||"")).toLowerCase().includes(lq)) hits.push({ type: "Comp", label: c.name || c.address, sub: `${c.submarket} · ${c.compType}`, tab: "comps", color: "#22d3ee" }); });
+    tasks.forEach(t => { if (((t.title||"")+(t.notes||"")).toLowerCase().includes(lq)) hits.push({ type: "Task", label: t.title, sub: `${t.category} · ${t.priority} · ${t.done ? "Done" : "Pending"}`, tab: "tasks", color: "#f97316" }); });
+    return hits.slice(0, 14);
+  }, [q, deals, contacts, listings, properties, comps, tasks]);
+
+  useEffect(() => { setSel(0); }, [results]);
+
+  const go = (r) => { onNavigate(r.tab); onClose(); };
+
+  const handleKey = (e) => {
+    if (e.key === "Escape") { onClose(); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); setSel(s => Math.min(s + 1, results.length - 1)); }
+    if (e.key === "ArrowUp") { e.preventDefault(); setSel(s => Math.max(s - 1, 0)); }
+    if (e.key === "Enter" && results[sel]) go(results[sel]);
+  };
+
+  // Sections for empty state
+  const sections = [
+    { label: "Deals", hint: "Search by name, client, or submarket" },
+    { label: "Contacts", hint: "Search by name, company, or email" },
+    { label: "Listings", hint: "Search by name or address" },
+    { label: "Tasks", hint: "Search by title" },
+  ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 9000, paddingTop: 80 }} onClick={onClose}>
-      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, width: 580, overflow: "hidden", boxShadow: "0 24px 64px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: `1px solid ${DS.border}` }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={DS.textMute} strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search deals, contacts, properties, comps, tasks..." style={{ flex: 1, background: "none", border: "none", color: DS.text, fontSize: DS.fs.xl, outline: "none" }} onKeyDown={e => e.key === "Escape" && onClose()} />
-          <kbd style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: 4, padding: "2px 7px", fontSize: DS.fs.xs, color: DS.textMute }}>ESC</kbd>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 9000, paddingTop: 72 }} onClick={onClose}>
+      <div style={{ background: DS.surface, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, width: 620, overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,0.7)" }} onClick={e => e.stopPropagation()}>
+        {/* Input */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: `1px solid ${DS.border}` }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={DS.textMute} strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} onKeyDown={handleKey}
+            placeholder="Search deals, contacts, listings, tasks..." style={{ flex: 1, background: "none", border: "none", color: DS.text, fontSize: 16, outline: "none" }} />
+          {q ? <button onClick={() => setQ("")} style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
+             : <kbd style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: 5, padding: "2px 8px", fontSize: DS.fs.xs, color: DS.textMute }}>⌘K</kbd>}
         </div>
-        {q.length >= 2 && results.length === 0 && <div style={{ padding: "24px", textAlign: "center", color: DS.textMute, fontSize: DS.fs.md }}>No results for "{q}"</div>}
+
+        {/* Results */}
+        {q.length >= 2 && results.length === 0 && (
+          <div style={{ padding: "28px", textAlign: "center", color: DS.textMute, fontSize: DS.fs.md }}>
+            No results for <span style={{ color: DS.text, fontWeight: DS.fw.semi }}>"{q}"</span>
+          </div>
+        )}
         {results.length > 0 && (
-          <div style={{ maxHeight: 400, overflowY: "auto" }}>
+          <div ref={listRef} style={{ maxHeight: 420, overflowY: "auto" }}>
             {results.map((r, i) => (
-              <div key={i} onClick={() => { onNavigate(r.tab); onClose(); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 18px", cursor: "pointer", borderBottom: `1px solid ${DS.border}` }}
-                onMouseEnter={e => e.currentTarget.style.background = DS.surface}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <span style={{ background: r.color + "22", color: r.color, border: `1px solid ${r.color}33`, padding: "2px 8px", borderRadius: 20, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, flexShrink: 0, minWidth: 52, textAlign: "center" }}>{r.type}</span>
+              <div key={i} onClick={() => go(r)}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 20px", cursor: "pointer", borderBottom: `1px solid ${DS.border}`, background: i === sel ? DS.panelHi : "transparent" }}
+                onMouseEnter={() => setSel(i)}>
+                <span style={{ background: r.color + "22", color: r.color, border: `1px solid ${r.color}33`, padding: "2px 9px", borderRadius: 20, fontSize: DS.fs.xs, fontWeight: DS.fw.black, flexShrink: 0, minWidth: 58, textAlign: "center" }}>{r.type}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</div>
-                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{r.sub}</div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 1 }}>{r.sub}</div>
                 </div>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DS.textFaint} strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={i === sel ? DS.textSub : DS.textFaint} strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
               </div>
             ))}
           </div>
         )}
-        {!q && <div style={{ padding: "16px 18px", color: DS.textMute, fontSize: DS.fs.sm }}>Type to search across all deals, contacts, properties, comps, and tasks.</div>}
+
+        {/* Empty state hint */}
+        {!q && (
+          <div style={{ padding: "16px 20px" }}>
+            <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>Search across</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {sections.map(s => (
+                <div key={s.label} style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, padding: "6px 12px" }}>
+                  <div style={{ color: DS.textSub, fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>{s.label}</div>
+                  <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{s.hint}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 12 }}>↑↓ navigate · Enter to open · Esc to close</div>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+// ── Error Boundary ─────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error("Tab error:", error, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 320, gap: 16 }}>
+          <div style={{ fontSize: 36 }}>⚠</div>
+          <div style={{ color: "#f1f5f9", fontSize: 16, fontWeight: 700 }}>Something went wrong in this tab</div>
+          <div style={{ color: "#64748b", fontSize: 13, maxWidth: 420, textAlign: "center" }}>{this.state.error.message}</div>
+          <button onClick={() => this.setState({ error: null })} style={{ background: "#1e3048", border: "1px solid #2d4a6e", color: "#94a3b8", padding: "8px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, marginTop: 8 }}>Try again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ── Settings Modal ─────────────────────────────────────────────────
@@ -238,18 +304,299 @@ function SettingsModal({ onClose, gciGoal, setGciGoal }) {
             <div>{lbl("Annual GCI Goal ($)")}<input type="number" value={form.gciGoal} onChange={e => set("gciGoal", e.target.value)} style={inp} /></div>
             <div>{lbl("Your Split w/ Managing Broker (%)")}<input type="number" value={form.mgBrokerSplit} onChange={e => set("mgBrokerSplit", e.target.value)} min="0" max="100" style={inp} /></div>
           </div>
-          {section("Data")}
-          <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px" }}>
-            <div style={{ color: DS.textSub, fontSize: DS.fs.sm, marginBottom: 8 }}>All data is stored locally in your browser. Nothing is sent to any server.</div>
-            <button onClick={() => { if (window.confirm("Clear ALL data and reset to demo data? This cannot be undone.")) { ["cre-industrial-v5","cre-listings-v1","cre-campaigns-v1","cre-comps-v1","cre-submarkets-v1","cre-contacts-v1","cre-tasks-v1","cre-expenses-v1","cre-properties-v1","cre-pipeline-goal"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}}
-              style={{ background: "none", border: `1px solid ${DS.red}44`, color: DS.red, padding: "6px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>
-              Reset All Data
-            </button>
+          {section("Data & Backup")}
+          <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px", display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ color: DS.textSub, fontSize: DS.fs.sm }}>All data is stored locally in your browser. Export a backup regularly — especially before clearing cache or switching computers.</div>
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <button onClick={() => {
+                const keys = ["cre-industrial-v5","cre-listings-v1","cre-campaigns-v1","cre-comps-v1","cre-submarkets-v1","cre-contacts-v1","cre-tasks-v1","cre-expenses-v1","cre-properties-v1","cre-pipeline-goal","cre-market-listings-v1","cre-bov-v1","cre-lease-radar-v1","cre-broker-name","cre-brokerage","cre-license","cre-phone","cre-email","cre-mg-split","cre-default-state","cre-geocode-cache","cre-underwriting-v1"];
+                const data = {};
+                keys.forEach(k => { const v = localStorage.getItem(k); if (v) data[k] = v; });
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a"); a.href = url; a.download = `cre-pipeline-backup-${today}.json`; a.click(); URL.revokeObjectURL(url);
+              }} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>
+                ↓ Export Backup (.json)
+              </button>
+              <label style={{ background:DS.blue, color:"#fff", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>
+                ↑ Restore from Backup
+                <input type="file" accept=".json" style={{ display:"none" }} onChange={e => {
+                  const file = e.target.files[0]; if (!file) return;
+                  const reader = new FileReader();
+                  reader.onload = ev => {
+                    try {
+                      const data = JSON.parse(ev.target.result);
+                      if (window.confirm(`Restore ${Object.keys(data).length} data keys from backup? Your current data will be overwritten.`)) {
+                        Object.entries(data).forEach(([k,v]) => localStorage.setItem(k, v));
+                        window.location.reload();
+                      }
+                    } catch { alert("Invalid backup file — make sure it's a .json exported from this app."); }
+                  };
+                  reader.readAsText(file);
+                }}/>
+              </label>
+            </div>
+            <div style={{ borderTop:`1px solid ${DS.border}`, paddingTop:10 }}>
+              <button onClick={() => { if (window.confirm("Clear ALL data and reset to demo data? This cannot be undone.")) { ["cre-industrial-v5","cre-listings-v1","cre-campaigns-v1","cre-comps-v1","cre-submarkets-v1","cre-contacts-v1","cre-tasks-v1","cre-expenses-v1","cre-properties-v1","cre-pipeline-goal"].forEach(k => localStorage.removeItem(k)); window.location.reload(); }}}
+                style={{ background:"none", border:`1px solid ${DS.red}44`, color:DS.red, padding:"6px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>
+                Reset All Data
+              </button>
+            </div>
           </div>
         </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 22 }}>
           <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.lg }}>Cancel</button>
           <button onClick={save} style={{ background: DS.accent, border: "none", color: "#0f1e2e", padding: "8px 22px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.lg, fontWeight: DS.fw.black }}>Save Settings</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Client Profile Modal ──────────────────────────────────────
+function ClientProfileModal({ clientName, contacts, deals, properties, onClose, onNavigate }) {
+  const enriched = deals.map(calcDeal);
+  const clientDeals = enriched.filter(d => d.client === clientName);
+  const contact = contacts.find(c =>
+    c.name?.toLowerCase() === clientName?.toLowerCase() ||
+    c.company?.toLowerCase() === clientName?.toLowerCase()
+  );
+  const clientProperties = (properties || []).filter(p =>
+    p.ownerName?.toLowerCase() === clientName?.toLowerCase() ||
+    p.contact?.toLowerCase() === clientName?.toLowerCase()
+  );
+
+  const closedDeals  = clientDeals.filter(d => d.stage === "Closed");
+  const activeDeals  = clientDeals.filter(d => d.stage !== "Closed" && d.stage !== "Lost");
+  const lostDeals    = clientDeals.filter(d => d.stage === "Lost");
+  const totalVol     = closedDeals.reduce((s,d) => s + d.totalValue, 0);
+  const totalComm    = closedDeals.reduce((s,d) => s + d.netCommission, 0);
+  const weightedPipe = activeDeals.reduce((s,d) => s + d.weighted, 0);
+  const totalSqft    = clientDeals.reduce((s,d) => s + (d.sqft||0), 0);
+
+  // All activities across all deals, most recent first
+  const allActivities = clientDeals
+    .flatMap(d => (d.activities||[]).map(a => ({ ...a, dealName: d.name })))
+    .filter(a => a.type !== "System")
+    .sort((a,b) => new Date(b.date) - new Date(a.date))
+    .slice(0, 6);
+
+  const relColors = { "Cold":"#475569","Warm":"#f59e0b","Active":"#10b981","Key Relationship":"#ec4899" };
+  const ACTIVITY_COLORS = { Call:"#3b82f6", Email:"#8b5cf6", Meeting:"#10b981", Note:"#f59e0b", "Follow-up":"#ec4899", Showing:"#06b6d4" };
+
+  const daysSinceContact = contact?.lastContact
+    ? Math.floor((new Date() - new Date(contact.lastContact+"T00:00:00")) / 86400000)
+    : null;
+  const outreachThresh = { "Key Relationship":30, "Active":45, "Warm":60, "Cold":90 }[contact?.relationshipLevel] || 90;
+  const outreachDue = daysSinceContact !== null && daysSinceContact >= outreachThresh;
+
+  // Initials avatar color based on name
+  const avatarColor = ["#3b82f6","#10b981","#8b5cf6","#f59e0b","#ec4899","#06b6d4","#f97316"][
+    clientName.charCodeAt(0) % 7
+  ];
+  const initials = clientName.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
+
+  const [tab, setTab] = React.useState("deals");
+
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.87)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1100 }}>
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, width:700, maxHeight:"92vh", overflowY:"auto", display:"flex", flexDirection:"column" }}>
+
+        {/* ── Header ── */}
+        <div style={{ background:`linear-gradient(135deg, #0d1e30 0%, #0a1424 100%)`, borderBottom:`1px solid ${DS.border}`, padding:"22px 26px", borderRadius:"16px 16px 0 0" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+            <div style={{ display:"flex", gap:16, alignItems:"center" }}>
+              <div style={{ width:54, height:54, borderRadius:"50%", background:avatarColor+"33", border:`2px solid ${avatarColor}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                <span style={{ color:avatarColor, fontWeight:900, fontSize:20 }}>{initials}</span>
+              </div>
+              <div>
+                <div style={{ color:DS.text, fontWeight:900, fontSize:20, letterSpacing:"-0.3px" }}>{clientName}</div>
+                {contact && (
+                  <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:4, flexWrap:"wrap" }}>
+                    {contact.company && contact.company !== clientName && (
+                      <span style={{ color:DS.textSub, fontSize:12 }}>{contact.company}</span>
+                    )}
+                    {contact.type && <span style={{ color:DS.textFaint, fontSize:11 }}>· {contact.type}</span>}
+                    {contact.submarket && <span style={{ color:DS.textFaint, fontSize:11 }}>· {contact.submarket}</span>}
+                    {contact.relationshipLevel && (
+                      <span style={{ background:(relColors[contact.relationshipLevel]||DS.textMute)+"22", color:relColors[contact.relationshipLevel]||DS.textMute, border:`1px solid ${(relColors[contact.relationshipLevel]||DS.textMute)}44`, padding:"1px 8px", borderRadius:20, fontSize:10, fontWeight:700 }}>
+                        {contact.relationshipLevel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {!contact && <div style={{ color:DS.textFaint, fontSize:11, marginTop:4 }}>No contact record — name matched from deal data</div>}
+              </div>
+            </div>
+            <button onClick={onClose} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer", flexShrink:0 }}>×</button>
+          </div>
+
+          {/* Contact action strip */}
+          {contact && (
+            <div style={{ display:"flex", gap:14, marginTop:14, flexWrap:"wrap", alignItems:"center" }}>
+              {contact.phone && (
+                <a href={`tel:${contact.phone}`} style={{ display:"flex", alignItems:"center", gap:5, color:DS.blue, fontSize:12, textDecoration:"none", background:DS.blueSoft, padding:"4px 10px", borderRadius:20, border:`1px solid ${DS.blue}33` }}>
+                  <IcPhone /> {contact.phone}
+                </a>
+              )}
+              {contact.email && (
+                <a href={`mailto:${contact.email}`} style={{ display:"flex", alignItems:"center", gap:5, color:DS.purple, fontSize:12, textDecoration:"none", background:DS.purple+"11", padding:"4px 10px", borderRadius:20, border:`1px solid ${DS.purple}33` }}>
+                  <IcMail /> {contact.email}
+                </a>
+              )}
+              {daysSinceContact !== null && (
+                <span style={{ fontSize:11, color: outreachDue ? DS.red : DS.textMute, background: outreachDue ? DS.red+"11" : "transparent", padding:"3px 8px", borderRadius:20, border: outreachDue ? `1px solid ${DS.red}33` : "none" }}>
+                  {outreachDue ? "⚠ " : ""}Last contact {daysSinceContact}d ago
+                </span>
+              )}
+              {onNavigate && contact && (
+                <button onClick={() => { onClose(); onNavigate("contacts"); }} style={{ marginLeft:"auto", background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"4px 10px", borderRadius:20, cursor:"pointer", fontSize:11 }}>
+                  View in Contacts →
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Stats bar ── */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", background:DS.bg, borderBottom:`1px solid ${DS.border}` }}>
+          {[
+            { label:"Total Deals", value:clientDeals.length, color:DS.blue },
+            { label:"Active", value:activeDeals.length, color:DS.accent },
+            { label:"Weighted Pipe", value:weightedPipe > 0 ? fmt(weightedPipe) : "—", color:DS.accent },
+            { label:"Closed Volume", value:totalVol > 0 ? fmt(totalVol) : "—", color:DS.green },
+            { label:"Commissions", value:totalComm > 0 ? fmt(totalComm) : "—", color:DS.green },
+          ].map((s,i) => (
+            <div key={s.label} style={{ padding:"12px 14px", borderRight: i < 4 ? `1px solid ${DS.border}` : "none" }}>
+              <div style={{ color:s.color, fontWeight:900, fontSize:14, fontFamily:"'DM Mono', monospace" }}>{s.value}</div>
+              <div style={{ color:DS.textFaint, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", marginTop:2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Tab bar ── */}
+        <div style={{ display:"flex", borderBottom:`1px solid ${DS.border}`, background:DS.bg }}>
+          {[["deals","Deals"], ["activity","Activity"], ["notes","Notes & Properties"]].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)} style={{ background:"none", border:"none", borderBottom: tab===id ? `2px solid ${DS.accent}` : "2px solid transparent", color: tab===id ? DS.accent : DS.textMute, padding:"10px 18px", cursor:"pointer", fontSize:12, fontWeight: tab===id ? 700 : 400, transition:"all 0.12s" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Tab body ── */}
+        <div style={{ padding:"18px 22px", flex:1 }}>
+
+          {/* Deals tab */}
+          {tab === "deals" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {clientDeals.length === 0 && <div style={{ color:DS.textMute, fontSize:13, textAlign:"center", padding:"24px 0" }}>No deals found for this client.</div>}
+              {[...activeDeals, ...closedDeals, ...lostDeals].map(d => {
+                const sc = STAGE_COLORS[d.stage] || {};
+                const maxDays = { Prospect:45, Proposal:30, LOI:21, "Under Contract":60 }[d.stage];
+                const stale = maxDays && d.daysInStage > maxDays;
+                return (
+                  <div key={d.id} style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:9, padding:"12px 14px" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                          <span style={{ color:DS.text, fontWeight:700, fontSize:13 }}>{d.name}</span>
+                          <span style={{ background:sc.bg, color:sc.text, border:`1px solid ${sc.border||DS.border}`, padding:"1px 8px", borderRadius:20, fontSize:10, fontWeight:700 }}>{d.stage}</span>
+                          {stale && <span style={{ background:DS.red+"22", color:DS.red, border:`1px solid ${DS.red}33`, padding:"1px 6px", borderRadius:6, fontSize:9, fontWeight:800 }}>⚠ {d.daysInStage}d</span>}
+                        </div>
+                        <div style={{ color:DS.textMute, fontSize:11, marginTop:4, display:"flex", gap:10, flexWrap:"wrap" }}>
+                          <span>{d.dealType} · {d.subtype}</span>
+                          {d.submarket && <span>· {d.submarket}</span>}
+                          {d.sqft > 0 && <span>· {d.sqft.toLocaleString()} SF</span>}
+                          {d.repType && <span style={{ color:DS.textFaint }}>· {d.repType.replace(" Rep","")}</span>}
+                        </div>
+                      </div>
+                      <div style={{ textAlign:"right", flexShrink:0, marginLeft:12 }}>
+                        {d.netCommission > 0 && <div style={{ color: d.stage==="Closed" ? DS.green : DS.accent, fontWeight:800, fontSize:13, fontFamily:"'DM Mono', monospace" }}>{fmt(d.netCommission)}</div>}
+                        {d.totalValue > 0 && <div style={{ color:DS.textMute, fontSize:10, fontFamily:"'DM Mono', monospace" }}>{fmt(d.totalValue)} total</div>}
+                        {d.expectedClose && <div style={{ color:DS.textFaint, fontSize:10, marginTop:2 }}>Close {new Date(d.expectedClose+"T00:00:00").toLocaleDateString("en-US",{month:"short",year:"numeric"})}</div>}
+                      </div>
+                    </div>
+                    {/* Most recent activity for this deal */}
+                    {(d.activities||[]).filter(a=>a.type!=="System").length > 0 && (() => {
+                      const last = [...(d.activities||[])].filter(a=>a.type!=="System").sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+                      return (
+                        <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${DS.border}`, display:"flex", alignItems:"center", gap:7 }}>
+                          <div style={{ width:6, height:6, borderRadius:"50%", background:ACTIVITY_COLORS[last.type]||DS.textMute, flexShrink:0 }}/>
+                          <span style={{ color:DS.textFaint, fontSize:10 }}>{last.type} · {last.text}</span>
+                          <span style={{ color:DS.textFaint, fontSize:9, marginLeft:"auto", flexShrink:0 }}>{new Date(last.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Activity tab */}
+          {tab === "activity" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {allActivities.length === 0 && <div style={{ color:DS.textMute, fontSize:13, textAlign:"center", padding:"24px 0" }}>No activity logged yet across this client's deals.</div>}
+              {allActivities.map((a,i) => (
+                <div key={i} style={{ display:"flex", gap:12, alignItems:"flex-start", background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:8, padding:"10px 14px" }}>
+                  <div style={{ width:8, height:8, borderRadius:"50%", background:ACTIVITY_COLORS[a.type]||DS.textMute, marginTop:4, flexShrink:0 }}/>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:2 }}>
+                      <span style={{ color:ACTIVITY_COLORS[a.type]||DS.textMute, fontSize:10, fontWeight:700 }}>{a.type}</span>
+                      <span style={{ color:DS.textFaint, fontSize:10 }}>on {a.dealName}</span>
+                      {a.author && a.author !== "You" && <span style={{ color:DS.textFaint, fontSize:9 }}>by {a.author}</span>}
+                    </div>
+                    <div style={{ color:DS.textSub, fontSize:12 }}>{a.text}</div>
+                  </div>
+                  <div style={{ color:DS.textFaint, fontSize:10, flexShrink:0 }}>
+                    {new Date(a.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Notes & Properties tab */}
+          {tab === "notes" && (
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              {contact?.notes ? (
+                <div>
+                  <div style={{ color:DS.textMute, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>Contact Notes</div>
+                  <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:8, padding:"12px 14px", color:DS.textSub, fontSize:13, lineHeight:1.6 }}>{contact.notes}</div>
+                </div>
+              ) : (
+                <div style={{ color:DS.textFaint, fontSize:12 }}>No notes on this contact record.</div>
+              )}
+              {contact?.properties && (
+                <div>
+                  <div style={{ color:DS.textMute, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>Properties of Interest</div>
+                  <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:8, padding:"12px 14px", color:DS.textSub, fontSize:12, lineHeight:1.6 }}>{contact.properties}</div>
+                </div>
+              )}
+              {clientProperties.length > 0 && (
+                <div>
+                  <div style={{ color:DS.textMute, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", marginBottom:8 }}>Property Database ({clientProperties.length})</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                    {clientProperties.map(p => (
+                      <div key={p.id} style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:8, padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <div>
+                          <div style={{ color:DS.text, fontWeight:600, fontSize:13 }}>{p.name||p.address||"—"}</div>
+                          <div style={{ color:DS.textMute, fontSize:11, marginTop:2 }}>{p.subtype||""}{p.sqft ? " · "+parseInt(p.sqft).toLocaleString()+" SF" : ""}{p.submarket ? " · "+p.submarket : ""}</div>
+                        </div>
+                        {p.askingPrice > 0 && <div style={{ color:DS.accent, fontWeight:700, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{fmt(p.askingPrice)}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {totalSqft > 0 && (
+                <div style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:8, padding:"12px 14px", display:"flex", gap:20 }}>
+                  <div><div style={{ color:DS.blue, fontWeight:800, fontSize:15, fontFamily:"'DM Mono', monospace" }}>{totalSqft.toLocaleString()} SF</div><div style={{ color:DS.textFaint, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", marginTop:2 }}>Total SF Transacted</div></div>
+                  <div><div style={{ color:DS.textSub, fontWeight:800, fontSize:15 }}>{clientDeals.filter(d=>d.dealType==="Sale").length} / {clientDeals.filter(d=>d.dealType==="Lease").length}</div><div style={{ color:DS.textFaint, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", marginTop:2 }}>Sales / Leases</div></div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -535,6 +882,42 @@ function CommissionClosingStatement({ deal, brokerName, brokerage, onClose }) {
   );
 }
 
+// ── Quick Task Modal (from pipeline) ─────────────────────────────
+function QuickTaskModal({ deal, onSave, onClose }) {
+  const [form, setForm] = useState({ title: "", category: "Follow-up", priority: "High", dueDate: today, notes: "", linkedDealId: deal.id, recurrence: "None" });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const iStyle = { background: "#0f1e2e", border: `1px solid ${DS.border}`, borderRadius: 8, color: DS.text, padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl = (t) => <label style={{ color: DS.textSub, fontSize: 11, fontWeight: 600, display: "block", marginBottom: 4 }}>{t}</label>;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1300 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: 16, padding: 26, width: 460, boxShadow: DS.shadow.xl }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: 16 }}>Add Task</div>
+            <div style={{ color: DS.textMute, fontSize: 11, marginTop: 2 }}>{deal.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>×</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {lbl("Task")}
+          <input value={form.title} onChange={e => set("title", e.target.value)} placeholder="What needs to happen?" style={iStyle} autoFocus />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>{lbl("Category")}<select value={form.category} onChange={e => set("category", e.target.value)} style={iStyle}>{["Admin","Prospecting","Follow-up","Marketing","Legal","Financial","Other"].map(c => <option key={c}>{c}</option>)}</select></div>
+            <div>{lbl("Priority")}<select value={form.priority} onChange={e => set("priority", e.target.value)} style={iStyle}>{TASK_PRIORITIES.map(p => <option key={p}>{p}</option>)}</select></div>
+            <div style={{ gridColumn: "span 2" }}>{lbl("Due Date")}<input type="date" value={form.dueDate} onChange={e => set("dueDate", e.target.value)} style={iStyle} /></div>
+          </div>
+          {lbl("Notes")}
+          <textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} style={{ ...iStyle, resize: "vertical" }} placeholder="Details, context..." />
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
+          <button onClick={() => { if (form.title.trim()) onSave(form); }} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "8px 22px", borderRadius: 8, cursor: "pointer", fontWeight: DS.fw.black, fontSize: 13 }}>Save Task</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Email Draft Templates Modal ──────────────────────────────────
 function EmailDraftModal({ deal, brokerName, brokerage, onClose }) {
   const brokerPhone = localStorage.getItem("cre-phone") || "";
@@ -572,19 +955,27 @@ function EmailDraftModal({ deal, brokerName, brokerage, onClose }) {
   ];
 
   const [selected, setSelected] = useState(TEMPLATES[0]);
+  const [editBody, setEditBody] = useState(() => TEMPLATES[0].body());
+  const [editSubject, setEditSubject] = useState(() => TEMPLATES[0].subject());
   const [copied, setCopied] = useState(false);
-  const body = selected.body();
-  const subject = selected.subject();
+
+  const selectTemplate = (t) => { setSelected(t); setEditBody(t.body()); setEditSubject(t.subject()); };
 
   const copy = () => {
-    navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`).then(() => {
-      setCopied(true); toast("Copied to clipboard"); setTimeout(() => setCopied(false), 2000);
+    navigator.clipboard.writeText(`Subject: ${editSubject}\n\n${editBody}`).then(() => {
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
     });
+  };
+
+  const openInMail = () => {
+    const to = deal.counterpartyEmail || "";
+    const mailto = `mailto:${to}?subject=${encodeURIComponent(editSubject)}&body=${encodeURIComponent(editBody)}`;
+    window.open(mailto, "_self");
   };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200 }}>
-      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, width: 800, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: DS.shadow.xl }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, width: 820, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: DS.shadow.xl }}>
         <div style={{ padding: "18px 24px 14px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
           <div>
             <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>Email Templates</div>
@@ -595,24 +986,784 @@ function EmailDraftModal({ deal, brokerName, brokerage, onClose }) {
         <div style={{ display: "flex", flex: 1, minHeight: 0, overflow: "hidden" }}>
           <div style={{ width: 190, flexShrink: 0, borderRight: `1px solid ${DS.border}`, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
             {TEMPLATES.map(t => (
-              <button key={t.id} onClick={() => setSelected(t)} style={{ background: selected.id === t.id ? DS.accentSoft : "none", border: `1px solid ${selected.id === t.id ? DS.accent : "transparent"}`, borderRadius: DS.r.sm, color: selected.id === t.id ? DS.accent : DS.textSub, padding: "9px 12px", cursor: "pointer", fontSize: DS.fs.sm, fontWeight: selected.id === t.id ? DS.fw.semi : DS.fw.normal, textAlign: "left" }}>{t.label}</button>
+              <button key={t.id} onClick={() => selectTemplate(t)} style={{ background: selected.id === t.id ? DS.accentSoft : "none", border: `1px solid ${selected.id === t.id ? DS.accent : "transparent"}`, borderRadius: DS.r.sm, color: selected.id === t.id ? DS.accent : DS.textSub, padding: "9px 12px", cursor: "pointer", fontSize: DS.fs.sm, fontWeight: selected.id === t.id ? DS.fw.semi : DS.fw.normal, textAlign: "left" }}>{t.label}</button>
             ))}
           </div>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}>
             <div style={{ padding: "10px 16px", background: DS.bg, borderBottom: `1px solid ${DS.border}`, flexShrink: 0 }}>
-              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 2 }}>SUBJECT</div>
-              <div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>{subject}</div>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 4 }}>SUBJECT</div>
+              <input value={editSubject} onChange={e => setEditSubject(e.target.value)} style={{ background: "transparent", border: "none", color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi, outline: "none", width: "100%", fontFamily: "inherit" }} />
             </div>
-            <textarea readOnly value={body} style={{ flex: 1, background: DS.surface, border: "none", color: DS.text, fontSize: DS.fs.md, padding: "14px 16px", resize: "none", outline: "none", fontFamily: "inherit", lineHeight: 1.7, overflowY: "auto" }} />
+            <textarea value={editBody} onChange={e => setEditBody(e.target.value)} style={{ flex: 1, background: DS.surface, border: "none", color: DS.text, fontSize: DS.fs.md, padding: "14px 16px", resize: "none", outline: "none", fontFamily: "inherit", lineHeight: 1.7, overflowY: "auto" }} />
           </div>
         </div>
-        <div style={{ padding: "12px 20px", borderTop: `1px solid ${DS.border}`, display: "flex", justifyContent: "flex-end", gap: 10, flexShrink: 0 }}>
-          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Close</button>
-          <button onClick={copy} style={{ background: copied ? DS.green : DS.accent, border: "none", color: "#0a0f1a", padding: "8px 22px", borderRadius: DS.r.sm, cursor: "pointer", fontWeight: DS.fw.black, fontSize: DS.fs.md, transition: "background 0.2s" }}>{copied ? "✓ Copied!" : "Copy to Clipboard"}</button>
+        <div style={{ padding: "12px 20px", borderTop: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Edit directly before sending</div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "8px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Close</button>
+            <button onClick={copy} style={{ background: copied ? DS.green : DS.surface, border: `1px solid ${DS.border}`, color: copied ? "#0a0f1a" : DS.textSub, padding: "8px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontWeight: DS.fw.semi, fontSize: DS.fs.md, transition: "all 0.2s" }}>{copied ? "✓ Copied!" : "Copy"}</button>
+            <button onClick={openInMail} style={{ background: DS.blue, border: "none", color: "#fff", padding: "8px 22px", borderRadius: DS.r.sm, cursor: "pointer", fontWeight: DS.fw.black, fontSize: DS.fs.md }}>Open in Mail ↗</button>
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+// ── Voice Note Parser ────────────────────────────────────────────
+function parseVoiceTranscript(text, deals, contacts) {
+  const lower = text.toLowerCase();
+  const now = new Date();
+
+  // Follow-up date
+  let followUpDate = null;
+  const DAYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  for (let i = 0; i < DAYS.length; i++) {
+    if (lower.includes(DAYS[i])) {
+      const diff = (i - now.getDay() + 7) % 7 || 7;
+      const d = new Date(now); d.setDate(d.getDate() + diff);
+      followUpDate = d.toISOString().split("T")[0]; break;
+    }
+  }
+  if (!followUpDate) {
+    const m = lower.match(/in (\d+) days?/); if (m) { const d = new Date(now); d.setDate(d.getDate() + parseInt(m[1])); followUpDate = d.toISOString().split("T")[0]; }
+  }
+  if (!followUpDate) {
+    const m = lower.match(/in (\d+) weeks?/); if (m) { const d = new Date(now); d.setDate(d.getDate() + parseInt(m[1]) * 7); followUpDate = d.toISOString().split("T")[0]; }
+  }
+  if (!followUpDate) {
+    if (lower.includes("next week")) { const d = new Date(now); d.setDate(d.getDate() + 7); followUpDate = d.toISOString().split("T")[0]; }
+    else if (lower.includes("tomorrow")) { const d = new Date(now); d.setDate(d.getDate() + 1); followUpDate = d.toISOString().split("T")[0]; }
+    else if (lower.includes("end of month")) { const d = new Date(now.getFullYear(), now.getMonth() + 1, 0); followUpDate = d.toISOString().split("T")[0]; }
+  }
+
+  // Contact match — scan by first name or last name
+  let matchedContact = null;
+  for (const c of contacts) {
+    const parts = c.name.toLowerCase().split(" ");
+    if (parts.some(p => p.length > 2 && lower.includes(p))) { matchedContact = c; break; }
+  }
+
+  // Deal match — by deal name words or client name
+  let matchedDeal = null;
+  for (const d of deals.filter(d => d.stage !== "Lost")) {
+    const words = d.name.toLowerCase().split(/\s+/);
+    const client = (d.client || "").toLowerCase();
+    if (words.some(w => w.length > 3 && lower.includes(w)) || (client.length > 3 && lower.includes(client))) {
+      matchedDeal = d; break;
+    }
+  }
+  // Fallback: link through matched contact's active deals
+  if (!matchedDeal && matchedContact?.linkedDeals?.length) {
+    matchedDeal = deals.find(d => matchedContact.linkedDeals.includes(d.id) && d.stage !== "Lost" && d.stage !== "Closed") || null;
+  }
+
+  // Stage signal
+  let stageSignal = null;
+  if (/\b(loi|letter of intent)\b/.test(lower)) stageSignal = "LOI";
+  else if (/\b(under contract|in contract|going under contract)\b/.test(lower)) stageSignal = "Under Contract";
+  else if (/\b(proposal|send proposal|sent proposal)\b/.test(lower)) stageSignal = "Proposal";
+  else if (/\b(prospect|early stage|just started)\b/.test(lower)) stageSignal = "Prospect";
+  else if (/\b(signed|closed|we closed|deal closed)\b/.test(lower)) stageSignal = "Closed";
+
+  // Lease expiry
+  let leaseExpiry = null;
+  const leasePatterns = [
+    /lease (?:expires?|expir\w*|up|ends?) (?:in )?([A-Z][a-z]+ \d{4})/i,
+    /lease (?:expires?|expir\w*|up|ends?) (?:in )?(\w+ \d{4})/i,
+    /lease (?:is )?(?:up|expir\w+) ([A-Z][a-z]+ \d{4})/i,
+    /(?:their|the) lease[^.]*?(\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w* \d{4})/i,
+  ];
+  for (const p of leasePatterns) { const m = text.match(p); if (m) { leaseExpiry = m[1]; break; } }
+
+  // ── New Contact Intent ──────────────────────────────────────────
+  let newContactDraft = null;
+  // "add contact John Smith at Acme phone 614-555-1234"
+  // "create a contact for Sarah Jones at TechCorp"
+  // "new contact Marcus Chen, Prologis, 614 555 1234"
+  const addContactTrigger = /(?:add|create|new|save)\s+(?:a\s+)?(?:new\s+)?contact(?:\s+for)?[:\s]+([A-Za-z][A-Za-z\s\-'\.]{1,40}?)(?=\s+at\s+|\s+from\s+|\s+phone\s+|\s+email\s+|[,\.]|$)/i;
+  const acm = text.match(addContactTrigger);
+  if (acm) {
+    newContactDraft = { name: acm[1].trim(), company: "", phone: "", email: "", contactType: "Owner" };
+    const compM = text.match(/\b(?:at|from|with)\s+([A-Za-z0-9][A-Za-z0-9\s&,\.']{1,50}?)(?:\s+phone|\s+email|[,\.]|$)/i);
+    if (compM) newContactDraft.company = compM[1].trim();
+    const phoneM = text.match(/(?:phone|number|cell|call)[:\s]+([\d\s\-\.\(\)\+]{7,18})/i) || text.match(/\b(\d{3}[\s\-\.]\d{3}[\s\-\.]\d{4})\b/);
+    if (phoneM) newContactDraft.phone = phoneM[1].trim();
+    const emailM = text.match(/\b([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})\b/);
+    if (emailM) newContactDraft.email = emailM[1];
+  }
+  // Fallback: "[name] to contacts"
+  if (!newContactDraft) {
+    const m2 = text.match(/(?:add|save|put)\s+([A-Za-z][A-Za-z\s\-']{2,35}?)\s+(?:to|into|in)\s+(?:my\s+)?contacts/i);
+    if (m2) {
+      newContactDraft = { name: m2[1].trim(), company: "", phone: "", email: "", contactType: "Owner" };
+      const phoneM = text.match(/(?:phone|number)[:\s]+([\d\s\-\.\(\)]{7,18})/i) || text.match(/\b(\d{3}[\s\-\.]\d{3}[\s\-\.]\d{4})\b/);
+      if (phoneM) newContactDraft.phone = phoneM[1].trim();
+      const compM = text.match(/\b(?:at|from)\s+([A-Za-z0-9][A-Za-z0-9\s&,\.]{1,40}?)(?:\s+phone|[,\.]|$)/i);
+      if (compM) newContactDraft.company = compM[1].trim();
+    }
+  }
+
+  // ── New Property Intent ─────────────────────────────────────────
+  let newPropertyDraft = null;
+  // "add property 800 Commerce Drive, 50000 square feet, asking $4 million"
+  // "new property at 123 Main Street, industrial, 30000 SF"
+  const addPropTrigger = /(?:add|create|new|save)\s+(?:a\s+)?(?:new\s+)?property(?:\s+at)?[:\s]+([0-9A-Za-z][A-Za-z0-9\s\-\.,#']{3,80}?)(?=\s*,|\s+\d|$)/i;
+  const apm = text.match(addPropTrigger);
+  if (apm) {
+    newPropertyDraft = { address: apm[1].trim(), sqft: "", type: "Industrial", subtype: "Distribution", status: "Active", askingPrice: "" };
+  }
+  // Fallback: "[address] to properties"
+  if (!newPropertyDraft) {
+    const m2 = text.match(/(?:add|save|put)\s+([0-9A-Za-z][A-Za-z0-9\s\-\.,#']{3,80}?)\s+(?:to|into|in)\s+(?:my\s+)?properties/i);
+    if (m2) newPropertyDraft = { address: m2[1].trim(), sqft: "", type: "Industrial", subtype: "Distribution", status: "Active", askingPrice: "" };
+  }
+  if (newPropertyDraft) {
+    const sfM = text.match(/(\d[\d,]*)\s*(?:sq(?:uare)?\s*f(?:eet|oot|t)?|sf\b)/i);
+    if (sfM) newPropertyDraft.sqft = sfM[1].replace(/,/g, "");
+    const priceM = text.match(/(?:asking|listed?|price)?\s*\$?\s*([\d,\.]+)\s*(million|m\b|k\b|thousand)?/i);
+    if (priceM && parseFloat(priceM[1].replace(/,/g,"")) > 0) {
+      let price = parseFloat(priceM[1].replace(/,/g, ""));
+      const unit = (priceM[2]||"").toLowerCase();
+      if (unit.includes("m") || unit === "million") price *= 1000000;
+      else if (unit === "k" || unit === "thousand") price *= 1000;
+      if (price > 10000) newPropertyDraft.askingPrice = String(Math.round(price));
+    }
+    if (/\b(?:office)\b/i.test(text)) { newPropertyDraft.type = "Office"; newPropertyDraft.subtype = "Class B"; }
+    else if (/\b(?:retail|strip\s*center|shopping)\b/i.test(text)) { newPropertyDraft.type = "Retail"; newPropertyDraft.subtype = "Strip Center"; }
+    else if (/\b(?:land|lot|acreage)\b/i.test(text)) { newPropertyDraft.type = "Land"; newPropertyDraft.subtype = "Industrial Land"; }
+    else if (/\b(?:flex)\b/i.test(text)) { newPropertyDraft.type = "Flex"; newPropertyDraft.subtype = "Flex/Warehouse"; }
+    else if (/\b(?:cold\s*storage|freezer|refrigerated)\b/i.test(text)) { newPropertyDraft.subtype = "Cold Storage"; }
+    else if (/\b(?:manufacturing|production)\b/i.test(text)) { newPropertyDraft.subtype = "Manufacturing"; }
+    const notesM = text.match(/(?:note|notes?)[:\s]+(.+?)(?:\.|$)/i);
+    if (notesM) newPropertyDraft.notes = notesM[1].trim();
+  }
+
+  return { followUpDate, matchedContact, matchedDeal, stageSignal, leaseExpiry, newContactDraft, newPropertyDraft };
+}
+
+// ── Voice Capture Modal ───────────────────────────────────────────
+function VoiceCaptureModal({ deals, contacts, setDeals, setContacts, tasks, setTasks, properties, setProperties, onClose }) {
+  const [phase, setPhase] = useState("idle"); // idle | recording | review | saved
+  const [transcript, setTranscript] = useState("");
+  const [liveText, setLiveText] = useState("");
+  const [extracted, setExtracted] = useState(null);
+  // editable review state
+  const [reviewFollowUp, setReviewFollowUp]   = useState("");
+  const [reviewContact,  setReviewContact]    = useState(null);
+  const [reviewDeal,     setReviewDeal]       = useState(null);
+  const [reviewStage,    setReviewStage]      = useState(null);
+  const [reviewLease,    setReviewLease]      = useState("");
+  const [reviewNote,     setReviewNote]       = useState("");
+  const [includeFollowUp, setIncludeFollowUp] = useState(true);
+  const [includeStage,    setIncludeStage]    = useState(true);
+  const [includeLease,    setIncludeLease]    = useState(true);
+  const [includeNote,     setIncludeNote]     = useState(true);
+  const [createTask,      setCreateTask]      = useState(true);
+  const [taskTitle,       setTaskTitle]       = useState("");
+  const [taskPriority,    setTaskPriority]    = useState("High");
+  // New record drafts
+  const [newContactDraft, setNewContactDraft] = useState(null);
+  const [newPropertyDraft,setNewPropertyDraft]= useState(null);
+  const [saveContact,     setSaveContact]     = useState(true);
+  const [saveProperty,    setSaveProperty]    = useState(true);
+  const recogRef = useRef(null);
+  const finalRef = useRef("");
+  const manualStopRef = useRef(false);
+  const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const broker = localStorage.getItem("cre-broker-name") || "Me";
+
+  const startRecording = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.continuous = true;
+    r.interimResults = true;
+    r.lang = "en-US";
+    finalRef.current = "";
+    manualStopRef.current = false;
+    r.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalRef.current += e.results[i][0].transcript + " ";
+        else interim = e.results[i][0].transcript;
+      }
+      setLiveText(finalRef.current + interim);
+      setTranscript(finalRef.current);
+    };
+    r.onerror = () => {
+      if (!manualStopRef.current) {
+        manualStopRef.current = true;
+        if (finalRef.current.trim()) processTranscript(finalRef.current);
+        else setPhase("idle");
+      }
+    };
+    r.onend = () => {
+      if (manualStopRef.current) return; // already handled by stopRecording
+      if (finalRef.current.trim()) processTranscript(finalRef.current);
+      else setPhase("idle");
+    };
+    recogRef.current = r;
+    r.start();
+    setPhase("recording");
+    setLiveText("");
+    setTranscript("");
+  };
+
+  const stopRecording = () => {
+    manualStopRef.current = true;
+    recogRef.current?.stop();
+    const text = finalRef.current || transcript;
+    if (text.trim()) processTranscript(text);
+    else setPhase("idle");
+  };
+
+  const processTranscript = (text) => {
+    const ext = parseVoiceTranscript(text, deals, contacts);
+    setExtracted(ext);
+    setReviewFollowUp(ext.followUpDate || "");
+    setReviewContact(ext.matchedContact || null);
+    setReviewDeal(ext.matchedDeal || null);
+    setReviewStage(ext.stageSignal || null);
+    setReviewLease(ext.leaseExpiry || "");
+    setReviewNote(text.trim());
+    setNewContactDraft(ext.newContactDraft || null);
+    setNewPropertyDraft(ext.newPropertyDraft || null);
+    setSaveContact(true);
+    setSaveProperty(true);
+    // Auto-generate task title
+    const clientName = ext.matchedContact?.name || ext.matchedDeal?.client || "";
+    const autoTitle = clientName
+      ? `Follow up with ${clientName}`
+      : ext.followUpDate
+        ? "Follow-up (voice note)"
+        : "Voice note follow-up";
+    setTaskTitle(autoTitle);
+    setCreateTask(!!(ext.followUpDate || ext.matchedContact || ext.matchedDeal));
+    setPhase("review");
+  };
+
+  const saveAll = () => {
+    const now = new Date().toISOString();
+    const saves = [];
+
+    // Update deal: follow-up, stage, note
+    if (reviewDeal) {
+      const updates = {};
+      if (includeFollowUp && reviewFollowUp) updates.followUpDate = reviewFollowUp;
+      if (includeStage && reviewStage && reviewStage !== reviewDeal.stage) updates.stage = reviewStage;
+      if (includeNote && reviewNote) {
+        updates.activities = [...(reviewDeal.activities || []), { id: Date.now(), type: "Voice Note", text: reviewNote, date: now, author: broker }];
+      }
+      if (Object.keys(updates).length > 0) {
+        setDeals(prev => prev.map(d => d.id === reviewDeal.id ? { ...d, ...updates } : d));
+        saves.push("Deal updated");
+      }
+    }
+
+    // Update contact: last contact date + note
+    if (reviewContact) {
+      const contactUpdates = { lastContact: today };
+      if (includeNote && reviewNote) {
+        contactUpdates.activityLog = [...(reviewContact.activityLog || []), { id: Date.now(), type: "Voice Note", text: reviewNote, date: now, author: broker }];
+      }
+      setContacts(prev => prev.map(c => c.id === reviewContact.id ? { ...c, ...contactUpdates } : c));
+      saves.push("Contact touched");
+    }
+
+    // Lease expiry update on deal
+    if (includeLease && reviewLease && reviewDeal) {
+      try {
+        const parsed = new Date(reviewLease + " 1");
+        if (!isNaN(parsed)) {
+          const leaseDate = `${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,"0")}-01`;
+          setDeals(prev => prev.map(d => d.id === reviewDeal.id ? { ...d, leaseExpires: leaseDate } : d));
+          saves.push("Lease expiry set");
+        }
+      } catch {}
+    }
+
+    // Create task if requested and we have a follow-up date
+    if (createTask && includeFollowUp && reviewFollowUp && setTasks) {
+      const newTask = {
+        id: Date.now() + 1,
+        title: taskTitle || `Follow up with ${reviewContact?.name || reviewDeal?.client || "client"}`,
+        category: "Follow-up",
+        priority: taskPriority,
+        dueDate: reviewFollowUp,
+        notes: includeNote && reviewNote ? reviewNote : "",
+        linkedDealId: reviewDeal?.id || null,
+        done: false,
+        recurrence: "None",
+      };
+      setTasks(prev => [...prev, newTask]);
+      saves.push("Task created");
+    }
+
+    // Save new contact
+    if (saveContact && newContactDraft && newContactDraft.name && setContacts) {
+      const nc = {
+        id: Date.now() + 2,
+        name: newContactDraft.name,
+        company: newContactDraft.company || "",
+        phone: newContactDraft.phone || "",
+        email: newContactDraft.email || "",
+        contactType: newContactDraft.contactType || "Owner",
+        relationshipLevel: "Warm",
+        lastContact: today,
+        notes: includeNote && reviewNote ? reviewNote : "",
+        linkedDeals: [],
+        activityLog: [],
+        requirements: [],
+      };
+      setContacts(prev => [...prev, nc]);
+      saves.push(`Contact added: ${nc.name}`);
+    }
+
+    // Save new property
+    if (saveProperty && newPropertyDraft && newPropertyDraft.address && setProperties) {
+      const now2 = new Date().toISOString();
+      const np = {
+        id: Date.now() + 3,
+        name: newPropertyDraft.address,
+        address: newPropertyDraft.address,
+        type: newPropertyDraft.type || "Industrial",
+        subtype: newPropertyDraft.subtype || "Distribution",
+        status: newPropertyDraft.status || "Active",
+        sqft: parseFloat(newPropertyDraft.sqft) || 0,
+        askingPrice: parseFloat(newPropertyDraft.askingPrice) || 0,
+        pricePerSF: newPropertyDraft.sqft && newPropertyDraft.askingPrice
+          ? parseFloat((parseFloat(newPropertyDraft.askingPrice) / parseFloat(newPropertyDraft.sqft)).toFixed(2))
+          : 0,
+        notes: newPropertyDraft.notes || (includeNote && reviewNote ? reviewNote : ""),
+        photos: [], documents: [], activities: [],
+        tags: "", createdAt: now2, updatedAt: now2,
+      };
+      setProperties(prev => [...prev, np]);
+      saves.push(`Property added: ${np.name}`);
+    }
+
+    toast(saves.length > 0 ? `Saved: ${saves.join(" · ")}` : "Note recorded", "success");
+    setPhase("saved");
+    setTimeout(onClose, 1400);
+  };
+
+  // Styles
+  const pill = (active, color) => ({
+    padding: "4px 12px", borderRadius: DS.r.full, border: `1px solid ${active ? color : DS.border}`,
+    background: active ? color + "22" : "transparent", color: active ? color : DS.textMute,
+    cursor: "pointer", fontSize: DS.fs.sm, fontWeight: active ? DS.fw.semi : DS.fw.normal,
+  });
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.xl, width: 560, maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 22px", borderBottom: `1px solid ${DS.border}` }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>Voice Note</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>
+              {phase === "idle" ? "Speak naturally — extract follow-ups, create contacts, add properties" :
+               phase === "recording" ? "Listening…" :
+               phase === "review" ? "Review what was captured" : "Saved"}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textFaint, fontSize: 22, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+
+        <div style={{ padding: "24px 22px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+          {/* ── IDLE ── */}
+          {phase === "idle" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "16px 0" }}>
+              {!supported && (
+                <div style={{ background: DS.redSoft, border: `1px solid ${DS.red}44`, borderRadius: DS.r.md, padding: "10px 16px", color: "#fca5a5", fontSize: DS.fs.sm, textAlign: "center", marginBottom: 8 }}>
+                  Voice not supported in this browser. Use Chrome or Safari, or type your note below.
+                </div>
+              )}
+              {supported && (
+                <button onClick={startRecording} style={{ width: 80, height: 80, borderRadius: "50%", background: `linear-gradient(135deg, #ef4444, #dc2626)`, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 30px #ef444444" }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round"/><line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round"/><line x1="8" y1="23" x2="16" y2="23" stroke="white" strokeWidth="2" strokeLinecap="round"/></svg>
+                </button>
+              )}
+              {supported && <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Tap to record · ⌘J to open anytime</div>}
+              {/* Fallback: type it */}
+              <div style={{ width: "100%", marginTop: 8 }}>
+                <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginBottom: 6, textAlign: "center" }}>— or type your note —</div>
+                <textarea rows={3} placeholder='e.g. "Follow up with Marcus Chen next Monday" · "Add contact Sarah Jones at Prologis, phone 614-555-1234" · "New property at 800 Commerce Drive, 50000 square feet"'
+                  onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && e.target.value.trim()) { e.preventDefault(); processTranscript(e.target.value.trim()); }}}
+                  style={{ width: "100%", background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, color: DS.text, padding: "10px 12px", fontSize: DS.fs.sm, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+                <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 4 }}>Press Enter to process</div>
+              </div>
+            </div>
+          )}
+
+          {/* ── RECORDING ── */}
+          {phase === "recording" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 18, padding: "8px 0" }}>
+              {/* Pulsing ring */}
+              <div style={{ position: "relative", width: 80, height: 80 }}>
+                <div style={{ position: "absolute", inset: -8, borderRadius: "50%", border: "2px solid #ef444466", animation: "pulse 1.5s ease-in-out infinite", pointerEvents: "none" }} />
+                <div style={{ position: "absolute", inset: -16, borderRadius: "50%", border: "1px solid #ef444433", animation: "pulse 1.5s ease-in-out infinite 0.3s", pointerEvents: "none" }} />
+                <button onClick={() => stopRecording()} style={{ width: 80, height: 80, borderRadius: "50%", background: "#ef4444", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ width: 24, height: 24, background: "white", borderRadius: 4 }} />
+                </button>
+              </div>
+              <style>{`@keyframes pulse { 0%,100%{transform:scale(1);opacity:0.8} 50%{transform:scale(1.12);opacity:0.3} }`}</style>
+              <div style={{ color: "#ef4444", fontWeight: DS.fw.bold, fontSize: DS.fs.sm }}>Recording — tap square to stop</div>
+              {liveText && (
+                <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px", width: "100%", color: DS.textSub, fontSize: DS.fs.sm, lineHeight: 1.6, minHeight: 60, boxSizing: "border-box" }}>
+                  {liveText}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── REVIEW ── */}
+          {phase === "review" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Raw transcript */}
+              <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "10px 14px" }}>
+                <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginBottom: 4 }}>TRANSCRIPT</div>
+                <div style={{ color: DS.textSub, fontSize: DS.fs.sm, lineHeight: 1.6 }}>{reviewNote}</div>
+              </div>
+
+              <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.sm }}>Extracted — confirm what to save:</div>
+
+              {/* Contact */}
+              <div style={{ background: DS.bg, border: `1px solid ${reviewContact ? DS.green + "44" : DS.border}`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 3 }}>CONTACT</div>
+                    {reviewContact
+                      ? <div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>{reviewContact.name} <span style={{ color: DS.textMute, fontWeight: DS.fw.normal }}>· {reviewContact.company || reviewContact.contactType}</span></div>
+                      : <div style={{ color: DS.textFaint, fontSize: DS.fs.sm }}>No contact matched</div>}
+                  </div>
+                  {reviewContact && <span style={{ color: DS.green, fontSize: 16 }}>✓</span>}
+                </div>
+                {reviewContact && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 4 }}>Last contact will be updated to today</div>}
+              </div>
+
+              {/* Deal */}
+              <div style={{ background: DS.bg, border: `1px solid ${reviewDeal ? DS.blue + "44" : DS.border}`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 3 }}>DEAL</div>
+                    {reviewDeal
+                      ? <div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>{reviewDeal.name} <span style={{ color: DS.textMute, fontWeight: DS.fw.normal }}>· {reviewDeal.stage}</span></div>
+                      : <div style={{ color: DS.textFaint, fontSize: DS.fs.sm }}>No deal matched — note will save as standalone</div>}
+                  </div>
+                  {reviewDeal && <span style={{ color: DS.blue, fontSize: 16 }}>✓</span>}
+                </div>
+              </div>
+
+              {/* Follow-up */}
+              {reviewFollowUp && (
+                <div style={{ background: DS.bg, border: `1px solid ${DS.accent}44`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>FOLLOW-UP DATE</div>
+                    <button onClick={() => setIncludeFollowUp(v => !v)} style={pill(includeFollowUp, DS.accent)}>{includeFollowUp ? "Include" : "Skip"}</button>
+                  </div>
+                  <input type="date" value={reviewFollowUp} onChange={e => setReviewFollowUp(e.target.value)}
+                    style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "6px 10px", fontSize: DS.fs.sm, outline: "none" }} />
+                </div>
+              )}
+
+              {/* Stage signal */}
+              {reviewStage && reviewDeal && (
+                <div style={{ background: DS.bg, border: `1px solid ${DS.purple}44`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 3 }}>STAGE CHANGE</div>
+                      <div style={{ color: DS.text, fontSize: DS.fs.sm }}>{reviewDeal.stage} → <span style={{ color: DS.purple, fontWeight: DS.fw.bold }}>{reviewStage}</span></div>
+                    </div>
+                    <button onClick={() => setIncludeStage(v => !v)} style={pill(includeStage, DS.purple)}>{includeStage ? "Apply" : "Skip"}</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Lease expiry */}
+              {reviewLease && (
+                <div style={{ background: DS.bg, border: `1px solid ${DS.accent}33`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 3 }}>LEASE EXPIRY DETECTED</div>
+                      <div style={{ color: DS.text, fontSize: DS.fs.sm }}>{reviewLease}</div>
+                    </div>
+                    <button onClick={() => setIncludeLease(v => !v)} style={pill(includeLease, DS.accent)}>{includeLease ? "Save" : "Skip"}</button>
+                  </div>
+                </div>
+              )}
+
+              {/* New Contact Draft */}
+              {newContactDraft && (
+                <div style={{ background: DS.bg, border: `1px solid ${DS.green}55`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ color: DS.green, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "0.5px" }}>NEW CONTACT</div>
+                    <button onClick={() => setSaveContact(v => !v)} style={pill(saveContact, DS.green)}>{saveContact ? "Save" : "Skip"}</button>
+                  </div>
+                  {saveContact && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      {[["Name", "name"], ["Company", "company"], ["Phone", "phone"], ["Email", "email"]].map(([lbl, key]) => (
+                        <div key={key}>
+                          <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginBottom: 3 }}>{lbl.toUpperCase()}</div>
+                          <input
+                            value={newContactDraft[key] || ""}
+                            onChange={e => setNewContactDraft(d => ({ ...d, [key]: e.target.value }))}
+                            placeholder={lbl}
+                            style={{ width: "100%", background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "6px 9px", fontSize: DS.fs.sm, outline: "none", boxSizing: "border-box" }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!saveContact && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>Will not be added to Contacts</div>}
+                </div>
+              )}
+
+              {/* New Property Draft */}
+              {newPropertyDraft && (
+                <div style={{ background: DS.bg, border: `1px solid ${DS.blue}55`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ color: DS.blue, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "0.5px" }}>NEW PROPERTY</div>
+                    <button onClick={() => setSaveProperty(v => !v)} style={pill(saveProperty, DS.blue)}>{saveProperty ? "Save" : "Skip"}</button>
+                  </div>
+                  {saveProperty && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div style={{ gridColumn: "span 2" }}>
+                        <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginBottom: 3 }}>ADDRESS</div>
+                        <input
+                          value={newPropertyDraft.address || ""}
+                          onChange={e => setNewPropertyDraft(d => ({ ...d, address: e.target.value }))}
+                          placeholder="Street address"
+                          style={{ width: "100%", background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "6px 9px", fontSize: DS.fs.sm, outline: "none", boxSizing: "border-box" }}
+                        />
+                      </div>
+                      {[["Type", "type"], ["Size (SF)", "sqft"], ["Asking Price ($)", "askingPrice"]].map(([lbl, key]) => (
+                        <div key={key}>
+                          <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginBottom: 3 }}>{lbl.toUpperCase()}</div>
+                          {key === "type" ? (
+                            <select value={newPropertyDraft.type || "Industrial"} onChange={e => setNewPropertyDraft(d => ({ ...d, type: e.target.value }))} style={{ width: "100%", background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "6px 9px", fontSize: DS.fs.sm, outline: "none" }}>
+                              {PROP_TYPES.map(t => <option key={t}>{t}</option>)}
+                            </select>
+                          ) : (
+                            <input
+                              type="number"
+                              value={newPropertyDraft[key] || ""}
+                              onChange={e => setNewPropertyDraft(d => ({ ...d, [key]: e.target.value }))}
+                              placeholder={lbl}
+                              style={{ width: "100%", background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "6px 9px", fontSize: DS.fs.sm, outline: "none", boxSizing: "border-box" }}
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!saveProperty && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>Will not be added to Properties</div>}
+                </div>
+              )}
+
+              {/* Note */}
+              <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>ACTIVITY NOTE</div>
+                  <button onClick={() => setIncludeNote(v => !v)} style={pill(includeNote, DS.textSub)}>{includeNote ? "Include" : "Skip"}</button>
+                </div>
+                <textarea rows={3} value={reviewNote} onChange={e => setReviewNote(e.target.value)}
+                  style={{ width: "100%", background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "8px 10px", fontSize: DS.fs.sm, outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+              </div>
+
+              {/* Task creation */}
+              <div style={{ background: DS.bg, border: `1px solid ${createTask ? DS.accent + "44" : DS.border}`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: createTask ? 10 : 0 }}>
+                  <div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>CREATE TASK + CALENDAR ENTRY</div>
+                    {!createTask && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 2 }}>Creates a task and marks it on your calendar</div>}
+                  </div>
+                  <button onClick={() => setCreateTask(v => !v)} style={pill(createTask, DS.accent)}>{createTask ? "On" : "Off"}</button>
+                </div>
+                {createTask && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Task title…"
+                        style={{ flex: 1, background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "7px 10px", fontSize: DS.fs.sm, outline: "none" }} />
+                      <select value={taskPriority} onChange={e => setTaskPriority(e.target.value)}
+                        style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "7px 10px", fontSize: DS.fs.sm, outline: "none" }}>
+                        {["Low","Medium","High","Urgent"].map(p => <option key={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                      {reviewFollowUp && includeFollowUp && (
+                        <span style={{ background: DS.greenSoft, border: `1px solid ${DS.green}44`, color: DS.green, borderRadius: DS.r.full, fontSize: DS.fs.xs, padding: "2px 10px", fontWeight: DS.fw.semi }}>
+                          Due: {reviewFollowUp}
+                        </span>
+                      )}
+                      {reviewDeal && (
+                        <span style={{ background: DS.blueSoft, border: `1px solid ${DS.blue}44`, color: DS.blue, borderRadius: DS.r.full, fontSize: DS.fs.xs, padding: "2px 10px", fontWeight: DS.fw.semi }}>
+                          Linked: {reviewDeal.name}
+                        </span>
+                      )}
+                      <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>Will appear in Tasks + Calendar</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                <button onClick={() => setPhase("idle")} style={{ flex: 1, background: "none", border: `1px solid ${DS.border}`, color: DS.textMute, padding: "10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>
+                  Re-record
+                </button>
+                <button onClick={saveAll} style={{ flex: 2, background: DS.accent, border: "none", color: "#0a0f1a", padding: "10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>
+                  Save Updates
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── SAVED ── */}
+          {phase === "saved" && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "24px 0" }}>
+              <div style={{ width: 60, height: 60, borderRadius: "50%", background: DS.greenSoft, border: `2px solid ${DS.green}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={DS.green} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div style={{ color: DS.green, fontWeight: DS.fw.black, fontSize: DS.fs.xl }}>Saved</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Deal Autopilot Engine ────────────────────────────────────────
+function calcAutopilotActions(deal, allDeals, contacts) {
+  if (!deal || ["Closed","Lost"].includes(deal.stage)) return [];
+  const actions = [];
+
+  // ── Historical pattern: avg days per stage from closed deals ──
+  const closed = allDeals.filter(d => d.stage === "Closed" && (d.stageHistory||[]).length > 1);
+  const stageAvg = {};
+  const stageOrder = ["Prospect","Proposal","LOI","Under Contract"];
+  stageOrder.forEach(stage => {
+    const times = [];
+    closed.forEach(d => {
+      const hist = d.stageHistory || [];
+      const entry = hist.find(h => h.stage === stage);
+      const next = entry ? hist[hist.indexOf(entry) + 1] : null;
+      if (entry && next) {
+        const days = Math.round((new Date(next.enteredDate) - new Date(entry.enteredDate)) / 86400000);
+        if (days > 0 && days < 365) times.push(days);
+      }
+    });
+    if (times.length > 0) stageAvg[stage] = Math.round(times.reduce((a,b) => a+b, 0) / times.length);
+  });
+
+  const d = deal;
+  const dis = d.daysInStage || 0;
+  const client = d.client || "the client";
+  const contact = contacts?.find(c => c.name === d.client || (c.linkedDeals||[]).includes(d.id));
+  const closedWithClient = contact ? allDeals.filter(x => x.stage === "Closed" && (x.client === contact.name || (contact.linkedDeals||[]).includes(x.id))).length : 0;
+  const activities = d.activities || [];
+  const lastAct = activities.length > 0 ? activities[0] : null;
+  const daysSinceAct = lastAct ? Math.round((new Date() - new Date(lastAct.date)) / 86400000) : null;
+  const tags = d.tags || [];
+  const notes = (d.notes || "").toLowerCase();
+
+  // 1. Activity gap detection
+  if (daysSinceAct === null) {
+    actions.push({ id: "no-activity", priority: "high", score: 90, title: `No activity logged yet`, detail: `You haven't logged a single activity on this deal. Deals with zero logged activity close at half the rate. Log a call or note now.`, actionType: "log-activity" });
+  } else if (daysSinceAct >= 14) {
+    actions.push({ id: "activity-gap-critical", priority: "high", score: 95, title: `No contact in ${daysSinceAct} days — act today`, detail: `Deals with no activity for 7+ days are 65% more likely to stall permanently. Call ${client} today.`, actionType: "log-activity" });
+  } else if (daysSinceAct >= 7) {
+    actions.push({ id: "activity-gap", priority: "medium", score: 75, title: `${daysSinceAct} days since last contact`, detail: `Last activity: ${lastAct?.type || "unknown"}. Consistent contact is the #1 predictor of deal velocity.`, actionType: "log-activity" });
+  }
+
+  // 2. Stage-specific timing rules
+  if (d.stage === "Prospect" && dis >= 14) {
+    actions.push({ id: "prospect-stalling", priority: dis >= 30 ? "high" : "medium", score: dis >= 30 ? 88 : 70, title: dis >= 30 ? `Prospect stalling at ${dis} days — send proposal or cut losses` : `${dis} days in Prospect — time to send a proposal`, detail: `Prospects beyond 14 days without advancing have a 40% drop in close probability. Send the proposal this week.`, actionType: "create-task" });
+  }
+  if (d.stage === "Proposal" && dis >= 5) {
+    actions.push({ id: "proposal-followup", priority: dis >= 10 ? "high" : "medium", score: dis >= 10 ? 85 : 68, title: `Follow up on proposal — sent ${dis} days ago`, detail: `Proposals not followed up within 5 days see 30% lower response rates. Check if ${client} has reviewed it.`, actionType: "log-activity" });
+  }
+  if (d.stage === "LOI" && dis >= 7) {
+    actions.push({ id: "loi-check", priority: dis >= 14 ? "high" : "medium", score: dis >= 14 ? 82 : 65, title: `Check attorney review — ${dis} days in LOI`, detail: `LOI stage typically completes in 7–14 days. Ask ${client} where they stand on the redline.`, actionType: "log-activity" });
+  }
+  if (d.stage === "Under Contract" && dis >= 30) {
+    actions.push({ id: "uc-confirm-close", priority: "medium", score: 72, title: `Confirm closing timeline — ${dis} days under contract`, detail: `Under Contract deals beyond 30 days often have hidden obstacles. Confirm the closing date with all parties.`, actionType: "log-activity" });
+  }
+
+  // 3. Velocity vs historical pattern
+  if (stageAvg[d.stage] && dis > stageAvg[d.stage] * 1.5) {
+    actions.push({ id: "velocity-slow", priority: "high", score: 86, title: `Running ${Math.round(dis - stageAvg[d.stage])} days behind your historical pace`, detail: `Your closed deals averaged ${stageAvg[d.stage]} days in ${d.stage}. This deal is at ${dis} days — momentum is slipping.`, actionType: "create-task" });
+  } else if (stageAvg[d.stage] && dis <= stageAvg[d.stage] * 0.6) {
+    actions.push({ id: "velocity-hot", priority: "low", score: 40, title: `Deal moving faster than your average — maintain momentum`, detail: `You're ahead of your historical pace for ${d.stage}. Keep activity high and push to the next stage.`, actionType: "log-activity" });
+  }
+
+  // 4. Health score triggers
+  if (d.health?.score > 80 && d.stage === "Proposal") {
+    actions.push({ id: "push-loi", priority: "medium", score: 74, title: `Health score ${d.health.score} — push ${client} for LOI`, detail: `Deal is healthy and proposal has been sent. Strike while the iron is hot — ask for the LOI.`, actionType: "create-task" });
+  }
+  if (d.health?.score > 80 && d.stage === "LOI") {
+    actions.push({ id: "push-uc", priority: "medium", score: 71, title: `Strong health — push to Under Contract`, detail: `LOI is in good shape. Follow up with attorneys and both parties to finalize and execute.`, actionType: "log-activity" });
+  }
+
+  // 5. No follow-up date set
+  if (!d.followUpDate) {
+    actions.push({ id: "no-followup", priority: "medium", score: 60, title: `No follow-up date scheduled`, detail: `Deals without follow-up dates are 2x more likely to go stale. Set a specific next touchpoint date.`, actionType: "set-followup" });
+  } else if (d.followUpDate < today) {
+    actions.push({ id: "overdue-followup", priority: "high", score: 92, title: `Follow-up overdue since ${d.followUpDate}`, detail: `You missed a scheduled follow-up with ${client}. Act now before the deal loses momentum.`, actionType: "log-activity" });
+  }
+
+  // 6. Contextual tag / notes signals
+  if (tags.includes("Off-Market") && d.stage === "Prospect") {
+    actions.push({ id: "offmarket-urgency", priority: "medium", score: 66, title: `Off-market deal — create urgency with ${client}`, detail: `Off-market opportunities are time-sensitive. Communicate exclusivity and limited window to motivate faster decision-making.`, actionType: "create-task" });
+  }
+  if (d.dealType === "Lease" && (notes.includes("expires") || notes.includes("expiration")) && d.stage !== "Under Contract") {
+    actions.push({ id: "lease-deadline", priority: "high", score: 89, title: `Lease expiration noted — timeline pressure is real`, detail: `Your notes reference a lease expiration. Use this deadline as urgency to accelerate the decision.`, actionType: "create-task" });
+  }
+  if (closedWithClient >= 2) {
+    actions.push({ id: "repeat-client", priority: "low", score: 38, title: `Repeat client — leverage the relationship`, detail: `${client} has closed ${closedWithClient} deals with you. Reference the prior relationship to lower friction in this negotiation.`, actionType: null });
+  }
+
+  // Deduplicate by id, sort, limit to 3
+  const seen = new Set();
+  return actions.filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
+function calcAllAutopilotActions(allDeals, contacts) {
+  return allDeals
+    .filter(d => !["Closed","Lost"].includes(d.stage))
+    .map(d => ({ deal: d, actions: calcAutopilotActions(d, allDeals, contacts) }))
+    .filter(x => x.actions.length > 0);
+}
+
+function calcContactScore(contact, deals) {
+  let score = 0;
+  // Relationship level base
+  score += { "Key Relationship": 35, "Active": 25, "Warm": 15, "Cold": 5 }[contact.relationshipLevel] || 5;
+  // Recency of last contact (max 30 pts)
+  if (contact.lastContact) {
+    const days = Math.floor((new Date() - new Date(contact.lastContact + "T00:00:00")) / 86400000);
+    if (days <= 7) score += 30;
+    else if (days <= 14) score += 22;
+    else if (days <= 30) score += 14;
+    else if (days <= 60) score += 6;
+  }
+  // Activity log richness (max 20 pts)
+  const actCount = (contact.activityLog || []).length;
+  score += Math.min(actCount * 3, 20);
+  // Linked deals (max 15 pts)
+  const linkedCount = (contact.linkedDeals || []).length;
+  const closedLinked = (contact.linkedDeals || []).filter(id => deals.find(d => d.id === id && d.stage === "Closed")).length;
+  score += Math.min(linkedCount * 3 + closedLinked * 4, 15);
+  score = Math.min(100, Math.max(0, score));
+  const label = score >= 75 ? "Strong" : score >= 50 ? "Active" : score >= 25 ? "Warm" : "Cold";
+  const color = score >= 75 ? "#10b981" : score >= 50 ? "#60a5fa" : score >= 25 ? "#f59e0b" : "#64748b";
+  return { score, label, color };
 }
 
 function calcDealHealth(d, daysInStage) {
@@ -733,41 +1884,96 @@ function StatCard({ label, sub, value, accent, alert }) {
 }
 
 // ── Activity Log ────────────────────────────────────────────
+const ACTIVITY_COLORS = { Call: "#3b82f6", Email: "#8b5cf6", Meeting: "#10b981", Note: "#f59e0b", "Follow-up": "#ec4899", Showing: "#06b6d4", System: "#334155" };
+const ACTIVITY_TYPES = ["Call", "Email", "Meeting", "Note", "Follow-up", "Showing"];
+
 function ActivityLog({ deal, onClose, onSave }) {
   const [text, setText] = useState("");
   const [type, setType] = useState("Call");
-  const activities = deal.activities || [];
-  const typeColors = { Call: "#3b82f6", Email: "#8b5cf6", Meeting: "#10b981", Note: "#f59e0b", "Follow-up": "#ec4899" };
+  const author = localStorage.getItem("cre-broker-name") || "You";
+  const activities = (deal.activities || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+
   const addActivity = () => {
     if (!text.trim()) return;
-    onSave({ ...deal, activities: [{ id: Date.now(), type, text: text.trim(), date: new Date().toISOString() }, ...activities] });
+    const entry = { id: Date.now(), type, text: text.trim(), date: new Date().toISOString(), author };
+    onSave({ ...deal, activities: [entry, ...(deal.activities || [])] });
     setText("");
   };
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(3,8,18,0.85)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 16, padding: 26, width: 540, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <div><h2 style={{ color: "#f1f5f9", fontSize: 17, fontWeight: 800, margin: 0 }}>Activity Log</h2><div style={{ color: "#475569", fontSize: 12, marginTop: 2 }}>{deal.name}</div></div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", fontSize: 20, cursor: "pointer" }}></button>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(3,8,18,0.88)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: 18, padding: 26, width: 580, maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: DS.shadow.xl }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+          <div>
+            <div style={{ color: DS.text, fontSize: 17, fontWeight: DS.fw.black }}>Activity Log</div>
+            <div style={{ color: DS.textMute, fontSize: 12, marginTop: 2 }}>{deal.name} · {activities.length} entr{activities.length === 1 ? "y" : "ies"}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>✕</button>
         </div>
-        <div style={{ background: "#070e1a", borderRadius: 10, padding: 12, border: `1px solid ${DS.border}` }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-            {Object.keys(typeColors).map(t => <button key={t} onClick={() => setType(t)} style={{ background: type === t ? typeColors[t] : DS.panel, color: type === t ? "#fff" : "#64748b", border: `1px solid ${type === t ? typeColors[t] : "#1e3048"}`, padding: "3px 11px", borderRadius: 20, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>{t}</button>)}
+
+        {/* Log entry input */}
+        <div style={{ background: DS.bg, borderRadius: DS.r.md, padding: 14, border: `1px solid ${DS.border}`, marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+            {ACTIVITY_TYPES.map(t => (
+              <button key={t} onClick={() => setType(t)}
+                style={{ background: type === t ? ACTIVITY_COLORS[t] : DS.panel, color: type === t ? "#fff" : DS.textMute, border: `1px solid ${type === t ? ACTIVITY_COLORS[t] : DS.border}`, padding: "4px 12px", borderRadius: 20, fontSize: 11, fontWeight: DS.fw.bold, cursor: "pointer", transition: "all 0.15s" }}>
+                {t}
+              </button>
+            ))}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && addActivity()} placeholder={`Log a ${type.toLowerCase()}...`} style={{ flex: 1, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none" }} />
-            <button onClick={addActivity} style={{ background: "#f59e0b", border: "none", color: "#0f1e2e", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 800 }}>Log</button>
+            <input
+              value={text}
+              onChange={e => setText(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addActivity()}
+              placeholder={type === "Call" ? "Called client re: pricing..." : type === "Email" ? "Sent LOI draft to counterparty..." : type === "Showing" ? "Showed property to client, feedback was..." : `Log a ${type.toLowerCase()}...`}
+              style={{ flex: 1, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "9px 12px", fontSize: 13, outline: "none" }}
+              autoFocus
+            />
+            <button onClick={addActivity} disabled={!text.trim()}
+              style={{ background: text.trim() ? DS.accent : DS.border, border: "none", color: text.trim() ? "#0a0f1a" : DS.textMute, padding: "9px 18px", borderRadius: DS.r.sm, cursor: text.trim() ? "pointer" : "default", fontSize: 13, fontWeight: DS.fw.black, whiteSpace: "nowrap" }}>
+              + Log
+            </button>
           </div>
+          <div style={{ color: DS.textFaint, fontSize: 10, marginTop: 6 }}>Logging as <strong style={{ color: DS.textMute }}>{author}</strong> · Press Enter to save</div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", marginTop: 12, display: "flex", flexDirection: "column", gap: 7 }}>
-          {activities.length === 0 && <div style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: "28px 0" }}>No activities yet.</div>}
-          {activities.map(a => (
-            <div key={a.id} style={{ background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 9, padding: "10px 12px", display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <span style={{ background: typeColors[a.type] || "#64748b", color: "#fff", padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>{a.type}</span>
-              <div style={{ flex: 1 }}><div style={{ color: "#f1f5f9", fontSize: 13 }}>{a.text}</div><div style={{ color: "#475569", fontSize: 10, marginTop: 2 }}>{new Date(a.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</div></div>
-              <button onClick={() => onSave({ ...deal, activities: activities.filter(x => x.id !== a.id) })} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer", fontSize: 12 }}></button>
+
+        {/* Feed */}
+        <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+          {activities.length === 0 && (
+            <div style={{ color: DS.textFaint, fontSize: 13, textAlign: "center", padding: "40px 0" }}>
+              <div style={{ marginBottom: 8, display:"flex", justifyContent:"center" }}><IcDoc s={28} /></div>
+              No activity yet — log a call, email, or note to get started.
             </div>
-          ))}
+          )}
+          {activities.map(a => {
+            const isSystem = a.type === "System";
+            const color = ACTIVITY_COLORS[a.type] || "#64748b";
+            return (
+              <div key={a.id} style={{ background: isSystem ? "transparent" : DS.bg, border: `1px solid ${isSystem ? "transparent" : DS.border}`, borderRadius: DS.r.md, padding: isSystem ? "4px 8px" : "11px 13px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                {isSystem
+                  ? <div style={{ flex: 1, display: "flex", gap: 8, alignItems: "center" }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: DS.border, flexShrink: 0 }} />
+                      <span style={{ color: DS.textFaint, fontSize: 11, fontStyle: "italic" }}>{a.text}</span>
+                      <span style={{ color: DS.textFaint, fontSize: 10, marginLeft: "auto", whiteSpace: "nowrap" }}>{new Date(a.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                    </div>
+                  : <>
+                      <span style={{ background: color + "22", color, border: `1px solid ${color}44`, padding: "3px 10px", borderRadius: 20, fontSize: 10, fontWeight: DS.fw.black, whiteSpace: "nowrap", flexShrink: 0 }}>{a.type}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: DS.text, fontSize: 13, lineHeight: 1.5 }}>{a.text}</div>
+                        <div style={{ color: DS.textFaint, fontSize: 10, marginTop: 3, display: "flex", gap: 8 }}>
+                          <span>{new Date(a.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+                          {a.author && <span style={{ color: DS.blue + "99" }}>· {a.author}</span>}
+                        </div>
+                      </div>
+                      <button onClick={() => onSave({ ...deal, activities: (deal.activities || []).filter(x => x.id !== a.id) })}
+                        style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: 13, padding: "2px 4px", flexShrink: 0 }} title="Delete">✕</button>
+                    </>
+                }
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1297,7 +2503,7 @@ function CSVImportModal({ onImport, onClose, submarketList }) {
     return rows.slice(0, 200).map((row, i) => {
       if (importType === "deals") {
         const get = (f) => mapping[f] ? row[mapping[f]] || "" : "";
-        const smList = submarketList || DEFAULT_SUBMARKETS;
+        const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
         return {
           id: Date.now() + i,
           name: get("name") || `Imported Deal ${i+1}`,
@@ -1591,7 +2797,7 @@ function DocumentsModal({ deal, onClose, onSave }) {
 }
 
 function DealModal({ deal, onSave, onClose, submarketList, comps = [] }) {
-  const smList = submarketList || DEFAULT_SUBMARKETS;
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
   const [form, setForm] = useState(deal || {
     name: "", client: "", counterparty: "", stage: "Prospect", dealType: "Sale", repType: "Seller/Landlord Rep",
     subtype: "Distribution", sqft: "", dealTotal: "", monthlyRent: "", leaseTerm: "", commissionRate: "",
@@ -1759,11 +2965,57 @@ function DealModal({ deal, onSave, onClose, submarketList, comps = [] }) {
   );
 }
 
+// ── Showing Log Modal ──────────────────────────────────────────
+const SHOWING_INTEREST = ["High", "Moderate", "Low", "No Interest"];
+const SHOWING_INTEREST_COLORS = { "High": "#10b981", "Moderate": "#f59e0b", "Low": "#f97316", "No Interest": "#ef4444" };
+
+function ShowingLogModal({ listing, onSave, onClose }) {
+  const [form, setForm] = useState({ date: today, time: "", prospect: "", company: "", phone: "", email: "", interest: "Moderate", feedback: "", followUpDate: "" });
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const iS = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "7px 10px", fontSize: DS.fs.sm, outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl = t => <label style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, display: "block", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px" }}>{t}</label>;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2100 }} onClick={onClose}>
+      <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, padding: 24, width: 480, boxShadow: DS.shadow.xl }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <div>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>Log Showing</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>{listing.name}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>{lbl("Date")}<input type="date" value={form.date} onChange={e => set("date", e.target.value)} style={iS} /></div>
+          <div>{lbl("Time (optional)")}<input type="time" value={form.time} onChange={e => set("time", e.target.value)} style={iS} /></div>
+          <div>{lbl("Prospect / Tenant Name")}<input value={form.prospect} onChange={e => set("prospect", e.target.value)} placeholder="Full name" style={iS} autoFocus /></div>
+          <div>{lbl("Company")}<input value={form.company} onChange={e => set("company", e.target.value)} placeholder="Company name" style={iS} /></div>
+          <div>{lbl("Phone")}<input value={form.phone} onChange={e => set("phone", e.target.value)} placeholder="(555) 000-0000" style={iS} /></div>
+          <div>{lbl("Email")}<input value={form.email} onChange={e => set("email", e.target.value)} placeholder="email@company.com" style={iS} /></div>
+          <div style={{ gridColumn: "span 2" }}>
+            {lbl("Interest Level")}
+            <div style={{ display: "flex", gap: 6 }}>
+              {SHOWING_INTEREST.map(lvl => (
+                <button key={lvl} onClick={() => set("interest", lvl)} style={{ flex: 1, padding: "7px 4px", background: form.interest === lvl ? SHOWING_INTEREST_COLORS[lvl] + "33" : DS.bg, border: `1px solid ${form.interest === lvl ? SHOWING_INTEREST_COLORS[lvl] : DS.border}`, borderRadius: DS.r.sm, color: form.interest === lvl ? SHOWING_INTEREST_COLORS[lvl] : DS.textMute, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: form.interest === lvl ? DS.fw.black : DS.fw.normal }}>{lvl}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ gridColumn: "span 2" }}>{lbl("Feedback / Notes")}<textarea value={form.feedback} onChange={e => set("feedback", e.target.value)} rows={2} placeholder="What did they say? Any objections, questions, or positives..." style={{ ...iS, resize: "vertical" }} /></div>
+          <div style={{ gridColumn: "span 2" }}>{lbl("Follow-up Date")}<input type="date" value={form.followUpDate} onChange={e => set("followUpDate", e.target.value)} style={iS} /></div>
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textMute, padding: "8px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>Cancel</button>
+          <button onClick={() => { if (!form.prospect.trim()) return; onSave({ ...form, id: Date.now() }); }} style={{ background: DS.blue, border: "none", color: "#fff", padding: "8px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>Save Showing</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Listing Modal ─────────────────────────────────────────────
 function ListingModal({ listing, onSave, onClose, submarketList }) {
-  const smList = submarketList || DEFAULT_SUBMARKETS;
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
   const [form, setForm] = useState(listing || {
-    name: "", address: "", submarket: (submarketList||DEFAULT_SUBMARKETS)[0]||"Northeast", subtype: "Distribution", sqft: "", askingPrice: "",
+    name: "", address: "", submarket: smList[0]||"Northeast", subtype: "Distribution", sqft: "", askingPrice: "",
     monthlyRent: "", dealType: "Lease", status: "Active", listedDate: today, showings: [],
     marketingNotes: "", askingPsfSale: "", askingPsfLease: ""
   });
@@ -1806,20 +3058,56 @@ function ListingModal({ listing, onSave, onClose, submarketList }) {
         </div>
         <div style={{ marginBottom: 14 }}>{label("Marketing Notes")}<textarea value={form.marketingNotes} onChange={e => set("marketingNotes", e.target.value)} rows={2} style={{ ...iStyle, resize: "vertical" }} placeholder="CoStar status, LoopNet, sign, email campaigns..." /></div>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, marginBottom: 8 }}>Showing History ({(form.showings||[]).length})</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-            <input value={showingText} onChange={e => setShowingText(e.target.value)} onKeyDown={e => e.key === "Enter" && addShowing()} placeholder="Prospect name / company" style={{ ...iStyle, flex: 1 }} />
-            <button onClick={addShowing} style={{ background: "#3b82f6", border: "none", color: "#fff", padding: "8px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>+ Add</button>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ color: DS.textSub, fontSize: 12, fontWeight: DS.fw.bold }}>Showing History ({(form.showings||[]).length})</div>
+            <button onClick={() => setShowingText("__open__")} style={{ background: DS.blue + "22", border: `1px solid ${DS.blue}44`, color: DS.blue, padding: "4px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 11, fontWeight: DS.fw.black }}>+ Log Showing</button>
           </div>
-          {(form.showings||[]).map(s => (
-            <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", borderRadius: 7, padding: "7px 10px", marginBottom: 5, border: `1px solid ${DS.border}` }}>
-              <span style={{ color: "#f1f5f9", fontSize: 12 }}>{s.prospect}</span>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span style={{ color: "#475569", fontSize: 10 }}>{s.date}</span>
-                <button onClick={() => setForm(f => ({ ...f, showings: f.showings.filter(x => x.id !== s.id) }))} style={{ background: "none", border: "none", color: "#475569", cursor: "pointer" }}></button>
+          {showingText === "__open__" && (
+            <div style={{ background: DS.bg, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.md, padding: "12px 14px", marginBottom: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+                <div><label style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.bold, display: "block", marginBottom: 2, textTransform: "uppercase" }}>Date</label><input type="date" value={form._newShowing?.date || today} onChange={e => setForm(f => ({ ...f, _newShowing: { ...(f._newShowing||{}), date: e.target.value } }))} style={{ ...iStyle, fontSize: 11 }} /></div>
+                <div><label style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.bold, display: "block", marginBottom: 2, textTransform: "uppercase" }}>Prospect</label><input autoFocus placeholder="Name / company" value={form._newShowing?.prospect || ""} onChange={e => setForm(f => ({ ...f, _newShowing: { ...(f._newShowing||{}), prospect: e.target.value } }))} style={{ ...iStyle, fontSize: 11 }} /></div>
+                <div style={{ gridColumn: "span 2" }}>
+                  <label style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.bold, display: "block", marginBottom: 4, textTransform: "uppercase" }}>Interest Level</label>
+                  <div style={{ display: "flex", gap: 5 }}>
+                    {SHOWING_INTEREST.map(lvl => {
+                      const active = (form._newShowing?.interest || "Moderate") === lvl;
+                      return <button key={lvl} onClick={() => setForm(f => ({ ...f, _newShowing: { ...(f._newShowing||{}), interest: lvl } }))} style={{ flex: 1, padding: "5px 4px", background: active ? SHOWING_INTEREST_COLORS[lvl] + "33" : "transparent", border: `1px solid ${active ? SHOWING_INTEREST_COLORS[lvl] : DS.border}`, borderRadius: DS.r.sm, color: active ? SHOWING_INTEREST_COLORS[lvl] : DS.textFaint, cursor: "pointer", fontSize: 10, fontWeight: active ? DS.fw.black : DS.fw.normal }}>{lvl}</button>;
+                    })}
+                  </div>
+                </div>
+                <div style={{ gridColumn: "span 2" }}><label style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.bold, display: "block", marginBottom: 2, textTransform: "uppercase" }}>Feedback</label><textarea placeholder="What did they say?" value={form._newShowing?.feedback || ""} onChange={e => setForm(f => ({ ...f, _newShowing: { ...(f._newShowing||{}), feedback: e.target.value } }))} rows={2} style={{ ...iStyle, fontSize: 11, resize: "vertical" }} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button onClick={() => { setShowingText(""); setForm(f => ({ ...f, _newShowing: null })); }} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textMute, padding: "5px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 11 }}>Cancel</button>
+                <button onClick={() => {
+                  const ns = form._newShowing;
+                  if (!ns?.prospect?.trim()) return;
+                  setForm(f => ({ ...f, showings: [...(f.showings||[]), { id: Date.now(), date: ns.date || today, prospect: ns.prospect.trim(), company: ns.company || "", interest: ns.interest || "Moderate", feedback: ns.feedback || "", followUpDate: ns.followUpDate || "" }], _newShowing: null }));
+                  setShowingText("");
+                }} style={{ background: DS.blue, border: "none", color: "#fff", padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 11, fontWeight: DS.fw.black }}>Save</button>
               </div>
             </div>
-          ))}
+          )}
+          {(form.showings||[]).slice().reverse().map(s => {
+            const ic = SHOWING_INTEREST_COLORS[s.interest] || DS.textMute;
+            return (
+              <div key={s.id} style={{ background: DS.bg, borderRadius: DS.r.sm, padding: "8px 12px", marginBottom: 6, border: `1px solid ${ic}22` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ color: DS.text, fontSize: 12, fontWeight: DS.fw.semi }}>{s.prospect}{s.company ? ` · ${s.company}` : ""}</div>
+                    {s.interest && <span style={{ background: ic + "22", color: ic, border: `1px solid ${ic}44`, fontSize: 9, padding: "1px 6px", borderRadius: 8, fontWeight: DS.fw.black }}>{s.interest}</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ color: DS.textFaint, fontSize: 10 }}>{s.date}</span>
+                    <button onClick={() => setForm(f => ({ ...f, showings: f.showings.filter(x => x.id !== s.id) }))} style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: 14, lineHeight: 1 }}>×</button>
+                  </div>
+                </div>
+                {s.feedback && <div style={{ color: DS.textMute, fontSize: 11, marginTop: 4, fontStyle: "italic" }}>{s.feedback}</div>}
+              </div>
+            );
+          })}
+          {(form.showings||[]).length === 0 && showingText !== "__open__" && <div style={{ color: DS.textFaint, fontSize: 12, textAlign: "center", padding: "12px 0" }}>No showings logged yet</div>}
         </div>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#94a3b8", padding: "8px 16px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>Cancel</button>
@@ -1832,7 +3120,7 @@ function ListingModal({ listing, onSave, onClose, submarketList }) {
 
 // ── Prospecting Modal ─────────────────────────────────────────
 function ProspectingModal({ campaign, onSave, onClose, submarketList }) {
-  const smList = submarketList || DEFAULT_SUBMARKETS;
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
   const [form, setForm] = useState(campaign || {
     name: "", type: "Letter/Mailer", submarket: "Northeast", targetCount: "", sendDate: today,
     responses: "", conversations: "", convertedDeals: "", notes: "", status: "Draft"
@@ -1880,172 +3168,576 @@ function ProspectingModal({ campaign, onSave, onClose, submarketList }) {
 // ── Listings Tab ─────────────────────────────────────────────
 function ListingsTab({ listings, setListings, submarketList }) {
   const [modal, setModal] = useState(null);
-  const statusColors = { "Active": { bg: "#0f2010", text: "#4ade80", border: "#14532d" }, "Under Contract": { bg: "#fff7ed", text: "#c2410c", border: "#fdba74" }, "Off Market": { bg: "#1e3048", text: "#64748b", border: "#1e3048" }, "Leased/Sold": { bg: "#f0fdf4", text: "#15803d", border: "#4ade80" } };
+  const [showingModal, setShowingModal] = useState(null); // listing id
+  const statusColors = { "Active": { bg: "#0f2010", text: "#4ade80", border: "#14532d" }, "Under Contract": { bg: "#1a1000", text: "#f59e0b", border: "#78350f" }, "Off Market": { bg: "#1e3048", text: "#64748b", border: "#1e3048" }, "Leased/Sold": { bg: "#0a1a2e", text: "#60a5fa", border: "#1e3a5f" } };
   const saveListing = (form) => {
     const d = { ...form, sqft: parseFloat(form.sqft)||0, askingPrice: parseFloat(form.askingPrice)||0, monthlyRent: parseFloat(form.monthlyRent)||0, askingPsfSale: parseFloat(form.askingPsfSale)||0, askingPsfLease: parseFloat(form.askingPsfLease)||0 };
     if (form.id) setListings(prev => prev.map(l => l.id === form.id ? d : l));
     else setListings(prev => [...prev, { ...d, id: Date.now(), daysOnMarket: 0 }]);
     setModal(null);
   };
+  const logShowing = (listingId, showing) => {
+    setListings(prev => prev.map(l => l.id === listingId ? { ...l, showings: [...(l.showings||[]), showing] } : l));
+    setShowingModal(null);
+    toast("Showing logged", "success");
+  };
   const activeSF = listings.filter(l => l.status === "Active").reduce((s,l) => s+(l.sqft||0), 0);
+  const totalShowings = listings.reduce((s,l) => s + (l.showings||[]).length, 0);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
-          <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 16 }}>Active Listings</div>
-          <div style={{ color: "#475569", fontSize: 11 }}>{listings.filter(l=>l.status==="Active").length} active · {activeSF.toLocaleString()} SF available</div>
+          <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.xl }}>Listings</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>
+            {listings.filter(l=>l.status==="Active").length} active · {activeSF.toLocaleString()} SF available · {totalShowings} total showings
+          </div>
         </div>
-        <button onClick={() => setModal("new")} style={{ background: "#10b981", border: "none", color: "#fff", padding: "7px 16px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 800 }}>+ Add Listing</button>
+        <button onClick={() => setModal("new")} style={{ background: DS.green, border: "none", color: "#fff", padding: "7px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>+ Add Listing</button>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
         {listings.map(l => {
           const sc = statusColors[l.status] || statusColors["Active"];
-          const dom = l.listedDate ? Math.floor((new Date() - new Date(l.listedDate)) / 86400000) : (l.daysOnMarket || 0);
+          const dom = l.listedDate ? Math.floor((new Date() - new Date(l.listedDate + "T00:00:00")) / 86400000) : (l.daysOnMarket || 0);
+          const showings = l.showings || [];
+          const lastShowing = showings.length > 0 ? [...showings].sort((a,b) => b.date.localeCompare(a.date))[0] : null;
+          const highCount = showings.filter(s => s.interest === "High").length;
+          const modCount = showings.filter(s => s.interest === "Moderate").length;
+          const lowCount = showings.filter(s => s.interest === "Low" || s.interest === "No Interest").length;
           return (
-            <div key={l.id} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "16px 18px" }}>
+            <div key={l.id} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 0 }}>
+              {/* Header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                <div>
-                  <div style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 14 }}>{l.name}</div>
-                  <div style={{ color: "#64748b", fontSize: 11, marginTop: 2 }}>{l.address} · {l.submarket}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>{l.name}</div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>{[l.address, l.submarket].filter(Boolean).join(" · ")}</div>
                 </div>
-                <span style={{ background: sc.bg, color: sc.text, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{l.status}</span>
+                <span style={{ background: sc.bg, color: sc.text, border: `1px solid ${sc.border}`, padding: "3px 9px", borderRadius: 20, fontSize: 10, fontWeight: DS.fw.bold, flexShrink: 0 }}>{l.status}</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-                <div style={{ background: "#070e1a", borderRadius: 7, padding: "8px 10px", border: `1px solid ${DS.border}` }}>
-                  <div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>SIZE</div>
-                  <div style={{ color: "#f1f5f9", fontSize: 13, fontWeight: 700 }}>{l.sqft ? l.sqft.toLocaleString() : "—"} SF</div>
-                </div>
-                <div style={{ background: "#070e1a", borderRadius: 7, padding: "8px 10px", border: `1px solid ${DS.border}` }}>
-                  <div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>{l.dealType === "Sale" ? "ASKING" : "RENT/MO"}</div>
-                  <div style={{ color: "#f59e0b", fontSize: 13, fontWeight: 700 }}>{l.dealType === "Sale" ? fmt(l.askingPrice) : fmt(l.monthlyRent)}</div>
-                </div>
-                <div style={{ background: dom > 90 ? "#2d1515" : "#0f1e2e", borderRadius: 7, padding: "8px 10px", border: `1px solid ${dom > 90 ? "#7f1d1d" : "#1e3048"}` }}>
-                  <div style={{ color: "#475569", fontSize: 9, fontWeight: 700 }}>DOM</div>
-                  <div style={{ color: dom > 90 ? "#fca5a5" : "#f1f5f9", fontSize: 13, fontWeight: 700 }}>{dom}d</div>
-                </div>
+              {/* Stats row */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 12 }}>
+                {[
+                  ["SIZE", `${l.sqft ? l.sqft.toLocaleString() : "—"} SF`, DS.text],
+                  [l.dealType === "Sale" ? "ASKING" : "RENT/MO", l.dealType === "Sale" ? fmt(l.askingPrice) : fmt(l.monthlyRent), DS.accent],
+                  ["DOM", `${dom}d`, dom > 90 ? DS.red : dom > 60 ? DS.orange || DS.accent : DS.green],
+                ].map(([label, val, color]) => (
+                  <div key={label} style={{ background: DS.bg, borderRadius: DS.r.sm, padding: "8px 10px", border: `1px solid ${DS.border}` }}>
+                    <div style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.4px" }}>{label}</div>
+                    <div style={{ color, fontSize: 13, fontWeight: DS.fw.black, marginTop: 2 }}>{val}</div>
+                  </div>
+                ))}
               </div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-                <span style={{ background: "#1e3048", color: "#94a3b8", padding: "2px 8px", borderRadius: 20, fontSize: 10 }}>{l.subtype}</span>
-                <span style={{ background: l.dealType === "Sale" ? "#1e3a5f" : "#1a2a1a", color: l.dealType === "Sale" ? "#60a5fa" : "#4ade80", padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{l.dealType}</span>
-                {(l.dealType === "Sale" ? l.askingPsfSale : l.askingPsfLease) > 0 && <span style={{ background: "#1e3048", color: "#f59e0b", padding: "2px 8px", borderRadius: 20, fontSize: 10 }}>${l.dealType === "Sale" ? l.askingPsfSale : l.askingPsfLease}/SF{l.dealType === "Lease" ? "/mo" : ""}</span>}
+              {/* Tags */}
+              <div style={{ display: "flex", gap: 5, marginBottom: 10, flexWrap: "wrap" }}>
+                <span style={{ background: DS.borderHi, color: DS.textMute, padding: "2px 8px", borderRadius: 20, fontSize: 10 }}>{l.subtype}</span>
+                <span style={{ background: l.dealType === "Sale" ? DS.blue + "22" : DS.green + "22", color: l.dealType === "Sale" ? DS.blue : DS.green, padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: DS.fw.bold }}>{l.dealType}</span>
+                {(l.dealType === "Sale" ? l.askingPsfSale : l.askingPsfLease) > 0 && <span style={{ background: DS.accent + "22", color: DS.accent, padding: "2px 8px", borderRadius: 20, fontSize: 10 }}>${l.dealType === "Sale" ? l.askingPsfSale : l.askingPsfLease}/SF{l.dealType === "Lease" ? "/mo" : ""}</span>}
               </div>
-              {(l.showings||[]).length > 0 && <div style={{ color: "#64748b", fontSize: 11, marginBottom: 8 }}> {l.showings.length} showing{l.showings.length !== 1 ? "s" : ""}</div>}
-              {l.marketingNotes && <div style={{ color: "#475569", fontSize: 11, marginBottom: 10, fontStyle: "italic" }}>{l.marketingNotes}</div>}
-              <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => setModal(l)} style={{ flex: 1, background: "#1e3048", border: "none", color: "#94a3b8", padding: "6px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}> Edit</button>
-                <button onClick={() => { if (window.confirm("Delete listing?")) setListings(prev => prev.filter(x => x.id !== l.id)); }} style={{ background: "none", border: `1px solid ${DS.border}`, color: "#475569", padding: "6px 10px", borderRadius: 7, cursor: "pointer", fontSize: 11 }}></button>
+              {/* Showings section */}
+              <div style={{ background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, padding: "10px 12px", marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: showings.length > 0 ? 8 : 0 }}>
+                  <div style={{ color: DS.textSub, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>
+                    {showings.length > 0 ? `${showings.length} Showing${showings.length !== 1 ? "s" : ""}` : "No showings yet"}
+                  </div>
+                  <button onClick={() => setShowingModal(l.id)} style={{ background: DS.blue + "22", border: `1px solid ${DS.blue}44`, color: DS.blue, padding: "3px 9px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 10, fontWeight: DS.fw.black }}>+ Log</button>
+                </div>
+                {showings.length > 0 && (
+                  <>
+                    {/* Interest bar */}
+                    <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                      {highCount > 0 && <div style={{ flex: highCount, background: "#10b981", height: 4, borderRadius: 2 }} title={`${highCount} High interest`} />}
+                      {modCount > 0 && <div style={{ flex: modCount, background: "#f59e0b", height: 4, borderRadius: 2 }} title={`${modCount} Moderate`} />}
+                      {lowCount > 0 && <div style={{ flex: lowCount, background: "#ef4444", height: 4, borderRadius: 2 }} title={`${lowCount} Low/No Interest`} />}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: DS.fs.xs }}>
+                      {highCount > 0 && <span style={{ color: "#10b981", fontWeight: DS.fw.bold }}>{highCount} High</span>}
+                      {modCount > 0 && <span style={{ color: "#f59e0b", fontWeight: DS.fw.bold }}>{modCount} Moderate</span>}
+                      {lowCount > 0 && <span style={{ color: "#ef4444" }}>{lowCount} Low</span>}
+                    </div>
+                    {lastShowing && (
+                      <div style={{ marginTop: 6, color: DS.textMute, fontSize: DS.fs.xs }}>
+                        Last: <span style={{ color: DS.textSub, fontWeight: DS.fw.semi }}>{lastShowing.prospect}</span>
+                        {lastShowing.interest && <span style={{ color: SHOWING_INTEREST_COLORS[lastShowing.interest], fontWeight: DS.fw.bold }}> · {lastShowing.interest}</span>}
+                        <span style={{ color: DS.textFaint }}> · {lastShowing.date}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              {l.marketingNotes && <div style={{ color: DS.textMute, fontSize: 11, marginBottom: 10, fontStyle: "italic" }}>{l.marketingNotes}</div>}
+              <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+                <button onClick={() => setModal(l)} style={{ flex: 1, background: DS.panelHi, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 11 }}>Edit</button>
+                <button onClick={() => { if (window.confirm("Delete listing?")) setListings(prev => prev.filter(x => x.id !== l.id)); }} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textFaint, padding: "6px 10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 11 }}>Del</button>
               </div>
             </div>
           );
         })}
-        {listings.length === 0 && <div style={{ color: "#475569", fontSize: 13, padding: "40px 0", textAlign: "center", gridColumn: "1/-1" }}>No listings yet. Add your first active listing.</div>}
+        {listings.length === 0 && <div style={{ color: DS.textFaint, fontSize: DS.fs.md, padding: "40px 0", textAlign: "center", gridColumn: "1/-1" }}>No listings yet. Add your first active listing.</div>}
       </div>
       {modal && <ListingModal listing={modal === "new" ? null : modal} onSave={saveListing} onClose={() => setModal(null)} submarketList={submarketList} />}
+      {showingModal && (() => {
+        const listing = listings.find(l => l.id === showingModal);
+        return listing ? <ShowingLogModal listing={listing} onSave={showing => logShowing(showingModal, showing)} onClose={() => setShowingModal(null)} /> : null;
+      })()}
+    </div>
+  );
+}
+
+// ── Commission Dashboard ──────────────────────────────────────
+function CommissionDashboard({ deals }) {
+  const enriched = useMemo(() => deals.map(calcDeal), [deals]);
+  const now = new Date();
+  const thisYear = now.getFullYear();
+
+  const closed = enriched.filter(d => d.stage === "Closed" && d.netCommission > 0);
+  const underContract = enriched.filter(d => d.stage === "Under Contract");
+  const active = enriched.filter(d => d.stage !== "Closed" && d.stage !== "Lost");
+
+  const earnedYTD = closed.filter(d => d.expectedClose?.startsWith(String(thisYear))).reduce((s,d) => s + d.netCommission, 0);
+  const receivedYTD = closed.filter(d => d.commissionPaid && d.expectedClose?.startsWith(String(thisYear))).reduce((s,d) => s + d.netCommission, 0);
+  const pendingReceivable = closed.filter(d => !d.commissionPaid).reduce((s,d) => s + d.netCommission, 0);
+  const underContractValue = underContract.reduce((s,d) => s + d.netCommission, 0);
+  const weightedPipeline = active.reduce((s,d) => s + d.weighted, 0);
+
+  // Splits breakdown
+  const splitDeals = closed.filter(d => d.isSplit);
+  const splitPaid = splitDeals.reduce((s,d) => s + d.netCommission, 0);
+  const fullDeals = closed.filter(d => !d.isSplit);
+  const fullPaid = fullDeals.reduce((s,d) => s + d.netCommission, 0);
+
+  // Monthly earned this year
+  const monthlyEarned = Array.from({ length: 12 }, (_, i) => {
+    const key = `${thisYear}-${String(i+1).padStart(2,"0")}`;
+    const earned = closed.filter(d => d.expectedClose?.startsWith(key)).reduce((s,d) => s + d.netCommission, 0);
+    const received = closed.filter(d => d.commissionPaid && d.commissionPaidDate?.startsWith(key)).reduce((s,d) => s + d.netCommission, 0);
+    return { month: MONTHS[i].slice(0,3), earned, received };
+  });
+
+  // Pending receivables list (closed but unpaid)
+  const unpaid = closed.filter(d => !d.commissionPaid).sort((a,b) => (b.netCommission - a.netCommission));
+
+  // Under contract projections (sorted by close date)
+  const ucDeals = underContract.sort((a,b) => (a.expectedClose||"9999").localeCompare(b.expectedClose||"9999"));
+
+  const Row = ({ label, value, color, sub, bold }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 14px", borderBottom: `1px solid ${DS.border}` }}>
+      <div>
+        <div style={{ color: DS.textSub, fontSize: DS.fs.sm, fontWeight: bold ? DS.fw.bold : DS.fw.normal }}>{label}</div>
+        {sub && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 1 }}>{sub}</div>}
+      </div>
+      <div style={{ color: color || DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.md, fontFamily: "'DM Mono', monospace" }}>{fmt(value)}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 10 }}>
+        {[
+          { label: "Earned YTD", value: earnedYTD, color: DS.green, sub: `${thisYear} closed deals` },
+          { label: "Received YTD", value: receivedYTD, color: "#10b981", sub: "Cash in hand" },
+          { label: "Pending Receivable", value: pendingReceivable, color: DS.accent, sub: "Closed, not yet paid" },
+          { label: "Under Contract", value: underContractValue, color: DS.blue, sub: `${underContract.length} deal${underContract.length !== 1 ? "s" : ""}` },
+          { label: "Weighted Pipeline", value: weightedPipeline, color: DS.purple, sub: "Prob-adjusted active" },
+        ].map(c => (
+          <div key={c.label} style={{ background: DS.panel, border: `1px solid ${c.color}33`, borderRadius: DS.r.md, padding: "14px 16px" }}>
+            <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 6 }}>{c.label}</div>
+            <div style={{ color: c.color, fontWeight: DS.fw.black, fontSize: 20, fontFamily: "'DM Mono', monospace" }}>{fmt(c.value)}</div>
+            <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 4 }}>{c.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        {/* Monthly earned vs received bar chart */}
+        <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
+          <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Monthly Earned vs. Received</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 12 }}>{thisYear} — net commissions</div>
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={monthlyEarned} barGap={2}>
+              <CartesianGrid strokeDasharray="3 3" stroke={DS.border} vertical={false} />
+              <XAxis dataKey="month" tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: DS.textMute, fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={v => "$"+(v>=1000?(v/1000).toFixed(0)+"k":v)} />
+              <Tooltip contentStyle={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: 8, color: DS.text, fontSize: 12 }} formatter={v => [fmt(v)]} />
+              <Legend wrapperStyle={{ color: DS.textSub, fontSize: 10 }} />
+              <Bar dataKey="earned" name="Earned" fill={DS.green} radius={[3,3,0,0]} />
+              <Bar dataKey="received" name="Received" fill={DS.blue} radius={[3,3,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Split vs full commission breakdown */}
+        <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
+          <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Deal Structure</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 16 }}>Full commission vs. co-brokered splits</div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+            {[
+              { label: "Full Commission", value: fullPaid, count: fullDeals.length, color: DS.green },
+              { label: "Split Deals", value: splitPaid, count: splitDeals.length, color: DS.purple },
+            ].map(s => (
+              <div key={s.label} style={{ flex: 1, background: s.color + "11", border: `1px solid ${s.color}33`, borderRadius: DS.r.md, padding: "12px 14px", textAlign: "center" }}>
+                <div style={{ color: s.color, fontWeight: DS.fw.black, fontSize: DS.fs.xl }}>{fmt(s.value)}</div>
+                <div style={{ color: s.color, fontSize: DS.fs.xs, marginTop: 2 }}>{s.label}</div>
+                <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{s.count} deal{s.count !== 1 ? "s" : ""}</div>
+              </div>
+            ))}
+          </div>
+          {(fullPaid + splitPaid) > 0 && (
+            <div>
+              <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginBottom: 4 }}>Revenue mix</div>
+              <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", height: 8 }}>
+                <div style={{ flex: fullPaid, background: DS.green }} />
+                <div style={{ flex: splitPaid, background: DS.purple }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                <span style={{ color: DS.green, fontSize: DS.fs.xs }}>{fullPaid + splitPaid > 0 ? Math.round(fullPaid / (fullPaid + splitPaid) * 100) : 0}% full</span>
+                <span style={{ color: DS.purple, fontSize: DS.fs.xs }}>{fullPaid + splitPaid > 0 ? Math.round(splitPaid / (fullPaid + splitPaid) * 100) : 0}% split</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        {/* Pending receivables */}
+        <div style={{ background: DS.panel, borderRadius: DS.r.lg, border: `1px solid ${DS.border}`, overflow: "hidden" }}>
+          <div style={{ padding: "14px 18px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>Pending Receivables</div>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 1 }}>Closed deals — commission not yet received</div>
+            </div>
+            <div style={{ color: DS.accent, fontWeight: DS.fw.black, fontSize: DS.fs.lg, fontFamily: "'DM Mono', monospace" }}>{fmt(pendingReceivable)}</div>
+          </div>
+          {unpaid.length === 0 ? (
+            <div style={{ padding: "20px", color: DS.green, fontSize: DS.fs.sm, textAlign: "center" }}>All commissions received</div>
+          ) : unpaid.map(d => (
+            <Row key={d.id} label={d.name} value={d.netCommission} color={DS.accent} sub={`${d.client} · Closed ${d.expectedClose || "—"}`} />
+          ))}
+        </div>
+
+        {/* Under contract projections */}
+        <div style={{ background: DS.panel, borderRadius: DS.r.lg, border: `1px solid ${DS.border}`, overflow: "hidden" }}>
+          <div style={{ padding: "14px 18px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg }}>Under Contract</div>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 1 }}>Projected commissions pending close</div>
+            </div>
+            <div style={{ color: DS.blue, fontWeight: DS.fw.black, fontSize: DS.fs.lg, fontFamily: "'DM Mono', monospace" }}>{fmt(underContractValue)}</div>
+          </div>
+          {ucDeals.length === 0 ? (
+            <div style={{ padding: "20px", color: DS.textFaint, fontSize: DS.fs.sm, textAlign: "center" }}>No deals under contract</div>
+          ) : ucDeals.map(d => (
+            <Row key={d.id} label={d.name} value={d.netCommission} color={DS.blue} sub={`${d.client} · Close ${d.expectedClose ? new Date(d.expectedClose+"T00:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"}) : "TBD"} · ${d.probability}%`} />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Commission Forecast Tab ───────────────────────────────────
-function ForecastTab({ deals }) {
+function ForecastTab({ deals, gciGoal, closedYTD }) {
   const enriched = useMemo(() => deals.map(calcDeal), [deals]);
   const now = new Date();
-  const getMonthKey = (d) => {
-    if (!d.expectedClose) return null;
-    return d.expectedClose.substring(0, 7);
-  };
-  // Build next 6 months
-  const months = [];
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    months.push({ key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`, month: d.getMonth(), year: d.getFullYear() });
-  }
-  const forecastData = months.map(m => {
-    const mDeals = enriched.filter(d => getMonthKey(d) === m.key && d.stage !== "Lost");
-    const certain = mDeals.filter(d => d.probability >= 80 && d.stage !== "Closed");
-    const probable = mDeals.filter(d => d.probability >= 50 && d.probability < 80);
-    const speculative = mDeals.filter(d => d.probability < 50);
-    const closed = mDeals.filter(d => d.stage === "Closed");
-    const weightedTotal = mDeals.reduce((s,d) => s + d.weighted, 0);
-    return { ...m, mDeals, certain, probable, speculative, closed, weightedTotal };
+  const goal = gciGoal || 500000;
+  const ytd = closedYTD || 0;
+
+  // Active pipeline deals with commission
+  const active = useMemo(() =>
+    enriched.filter(d => d.stage !== "Closed" && d.stage !== "Lost" && d.netCommission > 0),
+    [enriched]
+  );
+
+  // Per-deal probability overrides (sliders)
+  const [probOverrides, setProbOverrides] = useState({});
+  const [savedScenarios, setSavedScenarios] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cre-gci-scenarios") || "[]"); } catch { return []; }
   });
-  const thisMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const nextMonthD = new Date(now.getFullYear(), now.getMonth()+1, 1);
-  const nextMonthKey = `${nextMonthD.getFullYear()}-${String(nextMonthD.getMonth()+1).padStart(2,"0")}`;
-  const qEnd = new Date(now.getFullYear(), now.getMonth() + (3 - now.getMonth() % 3), 0);
-  const quarterTotal = enriched.filter(d => {
-    if (!d.expectedClose || d.stage === "Lost") return false;
-    const cd = new Date(d.expectedClose);
-    return cd >= now && cd <= qEnd;
-  }).reduce((s,d) => s + d.weighted, 0);
+  const [scenarioName, setScenarioName] = useState("");
+  const [showSliders, setShowSliders] = useState(false);
+
+  const getProb = (d) => probOverrides[d.id] !== undefined ? probOverrides[d.id] : d.probability;
+
+  const saveScenario = () => {
+    if (!scenarioName.trim()) return;
+    const sc = { name: scenarioName.trim(), overrides: { ...probOverrides }, savedAt: today };
+    const next = [...savedScenarios.filter(s => s.name !== sc.name), sc];
+    setSavedScenarios(next);
+    try { localStorage.setItem("cre-gci-scenarios", JSON.stringify(next)); } catch {}
+    setScenarioName("");
+    toast("Scenario saved", "success");
+  };
+
+  const deleteScenario = (name) => {
+    const next = savedScenarios.filter(s => s.name !== name);
+    setSavedScenarios(next);
+    try { localStorage.setItem("cre-gci-scenarios", JSON.stringify(next)); } catch {}
+  };
+
+  // ── Monte Carlo (5,000 iterations) ──────────────────────────────
+  const mc = useMemo(() => {
+    if (active.length === 0) return { p10: ytd, p50: ytd, p90: ytd, pHit: 0, mean: ytd, hist: [], needsMore: goal - ytd };
+    const N = 5000;
+    const results = new Float64Array(N);
+    for (let i = 0; i < N; i++) {
+      let total = ytd;
+      for (let j = 0; j < active.length; j++) {
+        if (Math.random() * 100 < getProb(active[j])) total += active[j].netCommission;
+      }
+      results[i] = total;
+    }
+    results.sort();
+    const p10 = results[Math.floor(N * 0.10)];
+    const p25 = results[Math.floor(N * 0.25)];
+    const p50 = results[Math.floor(N * 0.50)];
+    const p75 = results[Math.floor(N * 0.75)];
+    const p90 = results[Math.floor(N * 0.90)];
+    let hitCount = 0;
+    for (let i = 0; i < N; i++) if (results[i] >= goal) { hitCount = N - i; break; }
+    const pHit = (hitCount / N) * 100;
+    let sum = 0;
+    for (let i = 0; i < N; i++) sum += results[i];
+    const mean = sum / N;
+
+    // 28-bucket histogram
+    const lo = results[0], hi = results[N - 1];
+    const bSize = Math.max((hi - lo) / 28, 1);
+    const hist = Array.from({ length: 28 }, (_, i) => {
+      const bLo = lo + i * bSize;
+      return { bLo, bHi: bLo + bSize, count: 0, aboveGoal: bLo >= goal, isGoalBucket: bLo <= goal && goal < bLo + bSize };
+    });
+    for (let i = 0; i < N; i++) {
+      const idx = Math.min(Math.floor((results[i] - lo) / bSize), 27);
+      hist[idx].count++;
+    }
+    return { p10, p25, p50, p75, p90, pHit, mean, hist, needsMore: Math.max(0, goal - ytd) };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, probOverrides, ytd, goal]);
+
+  // ── Deal impact: how much does closing each deal move pHit? ────
+  const dealImpact = useMemo(() => {
+    if (active.length === 0) return [];
+    return active.map(d => {
+      const N = 1500;
+      let hits = 0;
+      for (let i = 0; i < N; i++) {
+        let total = ytd;
+        for (let j = 0; j < active.length; j++) {
+          const p = active[j].id === d.id ? 100 : getProb(active[j]);
+          if (Math.random() * 100 < p) total += active[j].netCommission;
+        }
+        if (total >= goal) hits++;
+      }
+      return { ...d, pHitWith: (hits / N) * 100, impactDelta: (hits / N) * 100 - mc.pHit };
+    }).sort((a, b) => b.impactDelta - a.impactDelta);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, probOverrides, ytd, goal, mc.pHit]);
+
+  const pHitColor = mc.pHit >= 75 ? DS.green : mc.pHit >= 50 ? DS.accent : mc.pHit >= 25 ? "#f97316" : DS.red;
+  const pHitLabel = mc.pHit >= 75 ? "On Track" : mc.pHit >= 50 ? "Possible" : mc.pHit >= 25 ? "Stretch" : "At Risk";
+  const hasOverrides = Object.keys(probOverrides).length > 0;
+  const maxBucket = mc.hist.length > 0 ? Math.max(...mc.hist.map(b => b.count)) : 1;
+
+  // Monthly calendar (next 6 months, existing logic)
+  const getMonthKey = (d) => d.expectedClose?.substring(0, 7) || null;
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    return { key: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`, label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}` };
+  });
+  const thisMonthKey = months[0].key;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
-        <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 16 }}>Commission Forecast</div>
-        <div style={{ color: "#475569", fontSize: 11 }}>Probability-weighted cash flow calendar · next 6 months</div>
-      </div>
-      {/* Summary cards */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {[
-          { label: "This Month", value: fmt(forecastData[0]?.weightedTotal||0), sub: `${forecastData[0]?.mDeals.length||0} deals closing`, color: "#f59e0b" },
-          { label: "Next Month", value: fmt(forecastData[1]?.weightedTotal||0), sub: `${forecastData[1]?.mDeals.length||0} deals closing`, color: "#60a5fa" },
-          { label: "This Quarter", value: fmt(quarterTotal), sub: "Weighted pipeline", color: "#34d399" },
-        ].map(c => (
-          <div key={c.label} style={{ flex: 1, minWidth: 160, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "14px 16px" }}>
-            <div style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600 }}>{c.label}</div>
-            <div style={{ color: c.color, fontSize: 22, fontWeight: 800, margin: "4px 0" }}>{c.value}</div>
-            <div style={{ color: "#475569", fontSize: 10 }}>{c.sub}</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+
+      {/* ── HERO: Probability Gauge ── */}
+      <div style={{ background: `linear-gradient(135deg, ${DS.panel} 0%, #0d1e30 100%)`, border: `2px solid ${pHitColor}33`, borderRadius: DS.r.lg, padding: "24px 28px", display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 28, alignItems: "center" }}>
+        {/* Left: big probability number */}
+        <div style={{ textAlign: "center", minWidth: 140 }}>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, fontWeight: DS.fw.bold, marginBottom: 4, letterSpacing: "0.5px" }}>PROBABILITY OF HITTING GOAL</div>
+          <div style={{ color: pHitColor, fontWeight: DS.fw.black, fontSize: 64, lineHeight: 1, fontFamily: "'DM Mono', monospace" }}>
+            {mc.pHit.toFixed(0)}<span style={{ fontSize: 28 }}>%</span>
           </div>
-        ))}
-      </div>
-      {/* Monthly breakdown */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {forecastData.map(m => (
-          <div key={m.key} style={{ background: m.key === thisMonthKey ? "#1a2d42" : DS.panel, border: `1px solid ${m.key === thisMonthKey ? "#3b82f6" : "#1e3048"}`, borderRadius: 12, padding: "14px 18px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: m.mDeals.length > 0 ? 12 : 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 14 }}>{m.label}</div>
-                {m.key === thisMonthKey && <span style={{ background: "#3b82f6", color: "#fff", padding: "1px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>THIS MONTH</span>}
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 18 }}>{fmt(m.weightedTotal)}</div>
-                <div style={{ color: "#475569", fontSize: 10 }}>weighted</div>
-              </div>
+          <div style={{ color: pHitColor, fontSize: DS.fs.sm, fontWeight: DS.fw.black, marginTop: 4, background: pHitColor + "18", padding: "3px 12px", borderRadius: DS.r.full, display: "inline-block" }}>{pHitLabel}</div>
+          {hasOverrides && <div style={{ color: DS.accent, fontSize: DS.fs.xs, marginTop: 6 }}>★ Scenario active</div>}
+        </div>
+
+        {/* Center: distribution histogram */}
+        <div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 6 }}>Year-end GCI distribution · 5,000 simulated outcomes</div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 1, height: 60, position: "relative" }}>
+            {mc.hist.map((b, i) => (
+              <div key={i} title={`${fmt(b.bLo)}–${fmt(b.bHi)}: ${b.count} outcomes`}
+                style={{ flex: 1, height: `${(b.count / maxBucket) * 100}%`, minHeight: b.count > 0 ? 2 : 0, background: b.isGoalBucket ? DS.accent : b.aboveGoal ? DS.green + "cc" : DS.blue + "66", borderRadius: "2px 2px 0 0", transition: "height 0.3s", cursor: "default" }} />
+            ))}
+            {/* Goal line overlay */}
+            {mc.hist.length > 0 && (() => {
+              const lo = mc.hist[0].bLo, hi = mc.hist[mc.hist.length - 1].bHi;
+              const pct = Math.max(0, Math.min(100, ((goal - lo) / (hi - lo)) * 100));
+              return <div style={{ position: "absolute", left: `${pct}%`, top: 0, bottom: 0, width: 2, background: DS.accent, zIndex: 2 }}>
+                <div style={{ position: "absolute", top: -18, left: -20, color: DS.accent, fontSize: 9, fontWeight: DS.fw.black, whiteSpace: "nowrap" }}>GOAL</div>
+              </div>;
+            })()}
+          </div>
+          {/* P10/P50/P90 range bar */}
+          <div style={{ marginTop: 8, position: "relative" }}>
+            {mc.hist.length > 0 && (() => {
+              const lo = mc.hist[0].bLo, hi = mc.hist[mc.hist.length - 1].bHi, range = hi - lo || 1;
+              const toP = (v) => `${Math.max(0, Math.min(100, ((v - lo) / range) * 100))}%`;
+              return (
+                <div>
+                  <div style={{ background: DS.border, height: 4, borderRadius: 2, position: "relative", marginBottom: 4 }}>
+                    <div style={{ position: "absolute", left: toP(mc.p10), width: `${((mc.p90 - mc.p10) / range) * 100}%`, height: "100%", background: pHitColor + "55", borderRadius: 2 }} />
+                    <div style={{ position: "absolute", left: toP(mc.p50), width: 2, height: "100%", background: pHitColor }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", color: DS.textFaint, fontSize: 9 }}>
+                    <span>{fmt(mc.p10)} <span style={{ color: DS.textMute }}>P10</span></span>
+                    <span style={{ color: pHitColor, fontWeight: DS.fw.bold }}>{fmt(mc.p50)} median</span>
+                    <span>{fmt(mc.p90)} <span style={{ color: DS.textMute }}>P90</span></span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* Right: key stats */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 160 }}>
+          {[
+            { label: "Closed YTD", value: fmt(ytd), color: DS.green },
+            { label: "Goal", value: fmt(goal), color: DS.accent },
+            { label: "Gap Remaining", value: fmt(mc.needsMore), color: mc.needsMore > 0 ? DS.red : DS.green },
+            { label: "Expected (mean)", value: fmt(mc.mean), color: DS.textSub },
+          ].map(s => (
+            <div key={s.label} style={{ background: DS.bg, borderRadius: DS.r.sm, padding: "8px 12px" }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{s.label}</div>
+              <div style={{ color: s.color, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>{s.value}</div>
             </div>
-            {m.mDeals.length === 0 && <div style={{ color: "#334155", fontSize: 12 }}>No deals closing this month</div>}
-            {m.mDeals.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {m.closed.map(d => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0f2010", border: "1px solid #14532d", borderRadius: 8, padding: "8px 12px" }}>
-                    <div><div style={{ color: "#4ade80", fontSize: 12, fontWeight: 600 }}> {d.name}</div><div style={{ color: "#16a34a", fontSize: 10 }}>{d.client} · Closed</div></div>
-                    <div style={{ color: "#4ade80", fontWeight: 800, fontSize: 13 }}>{fmt(d.netCommission)}</div>
-                  </div>
-                ))}
-                {m.certain.map(d => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, padding: "8px 12px" }}>
-                    <div><div style={{ color: "#f1f5f9", fontSize: 12, fontWeight: 600 }}>{d.name}</div><div style={{ color: "#64748b", fontSize: 10 }}>{d.client} · {d.stage} · {d.probability}% probability</div></div>
-                    <div style={{ textAlign: "right" }}><div style={{ color: "#f59e0b", fontWeight: 700, fontSize: 13 }}>{fmt(d.weighted)}</div><div style={{ color: "#475569", fontSize: 10 }}>of {fmt(d.netCommission)}</div></div>
-                  </div>
-                ))}
-                {m.probable.map(d => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, padding: "8px 12px", opacity: 0.85 }}>
-                    <div><div style={{ color: "#f1f5f9", fontSize: 12 }}>{d.name}</div><div style={{ color: "#64748b", fontSize: 10 }}>{d.client} · {d.stage} · {d.probability}% probability</div></div>
-                    <div style={{ textAlign: "right" }}><div style={{ color: "#f59e0b", fontSize: 12 }}>{fmt(d.weighted)}</div><div style={{ color: "#475569", fontSize: 10 }}>of {fmt(d.netCommission)}</div></div>
-                  </div>
-                ))}
-                {m.speculative.map(d => (
-                  <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#070e1a", border: "1px dashed #1e3048", borderRadius: 8, padding: "8px 12px", opacity: 0.65 }}>
-                    <div><div style={{ color: "#94a3b8", fontSize: 12 }}>{d.name}</div><div style={{ color: "#475569", fontSize: 10 }}>{d.client} · {d.stage} · {d.probability}% probability</div></div>
-                    <div style={{ textAlign: "right" }}><div style={{ color: "#94a3b8", fontSize: 12 }}>{fmt(d.weighted)}</div><div style={{ color: "#475569", fontSize: 10 }}>of {fmt(d.netCommission)}</div></div>
-                  </div>
-                ))}
-              </div>
-            )}
+          ))}
+        </div>
+      </div>
+
+      {/* ── Scenarios ── */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Scenarios:</span>
+        {savedScenarios.map(s => (
+          <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 0, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.full, overflow: "hidden" }}>
+            <button onClick={() => setProbOverrides(s.overrides)} style={{ background: "none", border: "none", color: DS.textSub, padding: "4px 12px", cursor: "pointer", fontSize: DS.fs.sm }}>
+              {s.name}
+            </button>
+            <button onClick={() => deleteScenario(s.name)} style={{ background: "none", border: "none", color: DS.textFaint, padding: "4px 8px 4px 0", cursor: "pointer", fontSize: 14 }}>×</button>
           </div>
         ))}
+        {hasOverrides && (
+          <>
+            <input value={scenarioName} onChange={e => setScenarioName(e.target.value)} placeholder="Name this scenario…" onKeyDown={e => e.key === "Enter" && saveScenario()}
+              style={{ background: DS.bg, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.full, color: DS.text, padding: "4px 12px", fontSize: DS.fs.sm, outline: "none", width: 180 }} />
+            <button onClick={saveScenario} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "4px 12px", borderRadius: DS.r.full, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>Save</button>
+            <button onClick={() => setProbOverrides({})} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textMute, padding: "4px 12px", borderRadius: DS.r.full, cursor: "pointer", fontSize: DS.fs.sm }}>Reset</button>
+          </>
+        )}
       </div>
-      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 10, padding: "10px 14px" }}>
-        <div style={{ color: "#475569", fontSize: 11 }}> Solid borders = 50%+ probability · Dashed borders = speculative (&lt;50%) · Green = already closed</div>
+
+      {/* ── Deal Impact Analysis ── */}
+      {dealImpact.length > 0 && (
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+          <div style={{ padding: "12px 18px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.md }}>Deal Impact Analysis</div>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Which deal moves your odds the most if closed</div>
+            </div>
+            <button onClick={() => setShowSliders(s => !s)} style={{ background: DS.accent + "22", border: `1px solid ${DS.accent}44`, color: DS.accent, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>
+              {showSliders ? "Hide" : "Adjust"} Probabilities
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            {dealImpact.slice(0, 8).map((d, i) => {
+              const currentProb = getProb(d);
+              const impColor = d.impactDelta >= 15 ? DS.green : d.impactDelta >= 5 ? DS.accent : DS.textMute;
+              return (
+                <div key={d.id} style={{ padding: "12px 18px", borderBottom: `1px solid ${DS.border}`, display: "flex", alignItems: "center", gap: 14 }}>
+                  <div style={{ width: 20, color: DS.textFaint, fontSize: DS.fs.xs, fontWeight: DS.fw.black, flexShrink: 0 }}>#{i+1}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{d.stage} · {fmt(d.netCommission)} commission</div>
+                    {showSliders && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                        <input type="range" min={0} max={100} value={currentProb}
+                          onChange={e => setProbOverrides(prev => ({ ...prev, [d.id]: parseInt(e.target.value) }))}
+                          style={{ flex: 1, accentColor: DS.accent, cursor: "pointer" }} />
+                        <span style={{ color: DS.accent, fontWeight: DS.fw.black, fontSize: DS.fs.sm, minWidth: 32, textAlign: "right" }}>{currentProb}%</span>
+                        {probOverrides[d.id] !== undefined && (
+                          <button onClick={() => setProbOverrides(prev => { const n = {...prev}; delete n[d.id]; return n; })}
+                            style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: 13, padding: 0 }}>↺</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ color: impColor, fontWeight: DS.fw.black, fontSize: DS.fs.md }}>
+                      {d.impactDelta > 0 ? "+" : ""}{d.impactDelta.toFixed(1)}%
+                    </div>
+                    <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>→ {d.pHitWith.toFixed(0)}% goal prob</div>
+                  </div>
+                  {/* Impact bar */}
+                  <div style={{ width: 60, flexShrink: 0 }}>
+                    <div style={{ background: DS.border, height: 4, borderRadius: 2 }}>
+                      <div style={{ width: `${Math.min(100, Math.abs(d.impactDelta) * 3)}%`, height: "100%", background: impColor, borderRadius: 2 }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Monthly Calendar (existing) ── */}
+      <div>
+        <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.md, marginBottom: 10 }}>6-Month Close Calendar</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {months.map(m => {
+            const mDeals = enriched.filter(d => getMonthKey(d) === m.key && d.stage !== "Lost");
+            const weightedTotal = mDeals.reduce((s, d) => s + d.weighted, 0);
+            const closed = mDeals.filter(d => d.stage === "Closed");
+            const open = mDeals.filter(d => d.stage !== "Closed");
+            return (
+              <div key={m.key} style={{ background: m.key === thisMonthKey ? "#1a2d42" : DS.panel, border: `1px solid ${m.key === thisMonthKey ? DS.blue : DS.border}`, borderRadius: DS.r.md, padding: "12px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: mDeals.length > 0 ? 10 : 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.md }}>{m.label}</div>
+                    {m.key === thisMonthKey && <span style={{ background: DS.blue, color: "#fff", padding: "1px 8px", borderRadius: 20, fontSize: 9, fontWeight: DS.fw.black }}>THIS MONTH</span>}
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ color: DS.accent, fontWeight: DS.fw.black, fontSize: DS.fs.xl }}>{fmt(weightedTotal)}</div>
+                    <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>weighted</div>
+                  </div>
+                </div>
+                {mDeals.length === 0 && <div style={{ color: DS.textFaint, fontSize: DS.fs.sm }}>No deals scheduled this month</div>}
+                {mDeals.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    {closed.map(d => (
+                      <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: DS.greenSoft, border: `1px solid ${DS.green}33`, borderRadius: DS.r.sm, padding: "7px 11px" }}>
+                        <div style={{ color: DS.green, fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>✓ {d.name} <span style={{ color: DS.green + "88", fontWeight: DS.fw.normal }}>· {d.client}</span></div>
+                        <div style={{ color: DS.green, fontWeight: DS.fw.black, fontSize: DS.fs.sm }}>{fmt(d.netCommission)}</div>
+                      </div>
+                    ))}
+                    {open.map(d => (
+                      <div key={d.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: DS.bg, border: `1px solid ${d.probability >= 80 ? DS.border : DS.textFaint + "22"}`, borderRadius: DS.r.sm, padding: "7px 11px", opacity: d.probability < 50 ? 0.65 : 1, borderStyle: d.probability < 50 ? "dashed" : "solid" }}>
+                        <div>
+                          <div style={{ color: DS.text, fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>{d.name}</div>
+                          <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{d.client} · {d.stage} · {getProb(d)}%</div>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ color: DS.accent, fontWeight: DS.fw.semi, fontSize: DS.fs.sm }}>{fmt(d.weighted)}</div>
+                          <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>of {fmt(d.netCommission)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -2053,7 +3745,7 @@ function ForecastTab({ deals }) {
 
 // ── Prospecting Tab ───────────────────────────────────────────
 function ProspectingTab({ campaigns, setCampaigns, deals, submarketList }) {
-  const smList = submarketList || DEFAULT_SUBMARKETS;
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
   const [modal, setModal] = useState(null);
   const saveCampaign = (form) => {
     const d = { ...form, targetCount: parseInt(form.targetCount)||0, responses: parseInt(form.responses)||0, conversations: parseInt(form.conversations)||0, convertedDeals: parseInt(form.convertedDeals)||0 };
@@ -2080,7 +3772,7 @@ function ProspectingTab({ campaigns, setCampaigns, deals, submarketList }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {[
             { label: "Total Sent", value: totalSent.toLocaleString(), icon: "" },
-            { label: "Responses", value: totalResp.toLocaleString() + (overallRate ? ` (${overallRate}%)` : ""), icon: "↩️" },
+            { label: "Responses", value: totalResp.toLocaleString() + (overallRate ? ` (${overallRate}%)` : ""), icon: "" },
             { label: "Conversations", value: totalConv, icon: "" },
             { label: "Deals Created", value: totalDeals, icon: "" },
           ].map(c => (
@@ -2141,14 +3833,155 @@ function ProspectingTab({ campaigns, setCampaigns, deals, submarketList }) {
 }
 
 // ── Market Comps Tab ──────────────────────────────────────────
-function MarketCompsTab({ comps, setComps, submarketList }) {
+function mapCoStarSubtype(raw) {
+  if (!raw) return "Distribution";
+  const r = raw.toLowerCase();
+  if (/distrib|warehouse/i.test(r)) return "Distribution";
+  if (/flex/i.test(r)) return "Flex";
+  if (/light\s+mfg|light\s+manuf/i.test(r)) return "Light Industrial";
+  if (/manufactur/i.test(r)) return "Manufacturing";
+  if (/cold|refriger/i.test(r)) return "Cold Storage";
+  if (/heavy/i.test(r)) return "Heavy Industrial";
+  if (/truck|terminal/i.test(r)) return "Truck Terminal";
+  if (/service|showroom/i.test(r)) return "Flex";
+  return "Distribution";
+}
+
+function parseCoStarRent(rentStr) {
+  // Handles "$0.75", "$0.85 - 1.03 (Est.)", "$0.65", etc.
+  if (!rentStr) return null;
+  const str = String(rentStr).replace(/\$/g, "").trim();
+  const rangeM = str.match(/([0-9.]+)\s*-\s*([0-9.]+)/);
+  if (rangeM) {
+    // Return midpoint of range, annualized
+    return ((parseFloat(rangeM[1]) + parseFloat(rangeM[2])) / 2 * 12).toFixed(2);
+  }
+  const singleM = str.match(/^([0-9.]+)/);
+  if (singleM) return (parseFloat(singleM[1]) * 12).toFixed(2); // $/SF/Mo → $/SF/YR
+  return null;
+}
+
+function mapCoStarRowToListing(row) {
+  const addr = row["Property Address"] || "";
+  const name = row["Property Name"] || addr;
+  const city = row["City"] || "";
+  const submarket = row["Submarket Name"] || row["Market Name"] || "";
+  const sqft = row["RBA"] || row["Total Available Space (SF)"] || "";
+  const forSalePrice = row["For Sale Price"];
+  const forSaleStatus = row["For Sale Status"];
+  const rentRaw = row["Rent/SF/Mo"];
+  const hasSale = forSaleStatus === "Y" || (forSalePrice && parseFloat(forSalePrice) > 0);
+  const hasLease = rentRaw && String(rentRaw).trim() !== "";
+  // Prefer Sale if for-sale price exists, otherwise Lease
+  const listingType = hasSale ? "Sale" : "Lease";
+  const leasingBroker = row["Leasing Company Name"] || "";
+  const saleBroker = row["Sale Company Name"] || "";
+  const listingBroker = listingType === "Lease" ? (leasingBroker || saleBroker) : (saleBroker || leasingBroker);
+  const notes = [
+    row["Year Built"] ? `Year Built: ${row["Year Built"]}` : "",
+    row["Ceiling Ht"] ? `Clear Height: ${row["Ceiling Ht"]}` : "",
+    row["Number Of Loading Docks"] ? `Docks: ${row["Number Of Loading Docks"]}` : "",
+    row["Drive Ins"] ? `Drive-ins: ${row["Drive Ins"]}` : "",
+    row["Building Class"] ? `Class ${row["Building Class"]}` : "",
+    row["Percent Leased"] !== undefined && row["Percent Leased"] !== null ? `${Math.round(parseFloat(row["Percent Leased"])*100)}% Leased` : "",
+  ].filter(Boolean).join(" · ");
+  return {
+    name: name || addr,
+    address: addr,
+    city,
+    submarket,
+    subtype: mapCoStarSubtype(row["Secondary Type"]),
+    listingType,
+    sqft: sqft ? String(sqft) : "",
+    askingPrice: hasSale && forSalePrice ? String(forSalePrice) : "",
+    askingPsfLease: hasLease ? (parseCoStarRent(rentRaw) || "") : "",
+    listedDate: today,
+    seller: "",
+    listingBroker,
+    source: "CoStar",
+    status: "Active",
+    notes,
+    vsAskingPct: null,
+    closeDate: "",
+    closePrice: 0,
+  };
+}
+
+function mapCoStarCompRow(row) {
+  const addr = row["Property Address"] || "";
+  const name = row["Property Name"] || addr;
+  const city = row["Property City"] || row["City"] || "";
+  const submarket = row["Submarket Name"] || row["Market"] || "";
+  const sqft = row["Building SF"] || row["RBA"] || "";
+  const salePrice = row["Sale Price"] || 0;
+  const psfSale = row["Price Per SF"] || 0;
+  const saleDateRaw = row["Sale Date"];
+  let closeDate = "";
+  if (saleDateRaw) {
+    try {
+      const d = saleDateRaw instanceof Date ? saleDateRaw : new Date(saleDateRaw);
+      if (!isNaN(d.getTime()) && d.getFullYear() > 1990) {
+        closeDate = d.toISOString().split("T")[0];
+      }
+    } catch {}
+  }
+  const buyer = row["Buyer (True) Company"] || row["Buyer Company"] || "";
+  const seller = row["Seller (True) Company"] || row["Seller Company"] || "";
+  const listingBroker = row["Listing Broker Company"] || row["Leasing Company Name"] || "";
+  const tenantBroker = row["Buyers Broker Company"] || row["Buyer Broker Company"] || "";
+  const notes = [
+    row["Year Built"] ? `Year Built: ${row["Year Built"]}` : "",
+    row["Ceiling Height"] ? `Clear Height: ${row["Ceiling Height"]}` : "",
+    row["Loading Docks"] && row["Loading Docks"] !== "None" ? `Docks: ${row["Loading Docks"]}` : "",
+    row["Drive Ins"] && row["Drive Ins"] !== "None" ? `Drive-ins: ${row["Drive Ins"]}` : "",
+    row["Building Class"] ? `Class ${row["Building Class"]}` : "",
+    row["Land Area AC"] ? `Site: ${row["Land Area AC"]} AC` : "",
+  ].filter(Boolean).join(" · ");
+  return {
+    name: name || addr,
+    address: addr,
+    city,
+    submarket,
+    subtype: mapCoStarSubtype(row["Secondary Type"]),
+    compType: "Sale",
+    sqft: sqft ? String(sqft) : "",
+    salePrice: salePrice ? String(salePrice) : "",
+    psfSale: psfSale ? String(psfSale) : "",
+    monthlyRent: "",
+    leaseTerm: "",
+    psfLease: "",
+    closeDate,
+    seller,
+    buyer,
+    listingBroker,
+    tenantBroker,
+    source: "CoStar",
+    notes,
+    verified: false,
+  };
+}
+
+function MarketCompsTab({ comps, setComps, submarketList, marketListings, setMarketListings }) {
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
+  const [compsView, setCompsView] = useState("comps"); // "comps" | "listings"
   const [modal, setModal] = useState(null);
+  const [listingModal, setListingModal] = useState(null);
+  const [closeTarget, setCloseTarget] = useState(null);
+  const [compImportModal, setCompImportModal] = useState(false);
+  const [lastImportSnapshot, setLastImportSnapshot] = useState(null);
   const [filterSm, setFilterSm] = useState("All");
   const [filterType, setFilterType] = useState("All");
   const [search, setSearch] = useState("");
   const [expandedComp, setExpandedComp] = useState(null);
   const iStyle = { background: "#070e1a", border: `1px solid ${DS.border}`, borderRadius: 8, color: "#f1f5f9", padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
   const label = (t) => <label style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, display: "block", marginBottom: 4 }}>{t}</label>;
+
+  const exportCompsCSV = (rows) => {
+    const h = ["Property","Address","City","Submarket","Type","Subtype","Sq Ft","Sale Price","$/SF Sale","Monthly Rent","Lease Term (mo)","$/SF/mo Lease","Close Date","Seller/LL","Buyer/Tenant","Listing Broker","Tenant Broker","Source","Notes"];
+    const r = rows.map(c => [c.name||"",c.address||"",c.city||"",c.submarket||"",c.compType||"",c.subtype||"",c.sqft||"",c.salePrice||"",c.psfSale||"",c.monthlyRent||"",c.leaseTerm||"",c.psfLease||"",c.closeDate||"",c.seller||"",c.buyer||"",c.listingBroker||"",c.tenantBroker||"",c.source||"",c.notes||""]);
+    const csv = [h,...r].map(row=>row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a = document.createElement("a"); a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv); a.download="market-comps.csv"; a.click();
+  };
 
   const saveComp = (form) => {
     const d = { ...form, sqft: parseFloat(form.sqft)||0, salePrice: parseFloat(form.salePrice)||0, monthlyRent: parseFloat(form.monthlyRent)||0, leaseTerm: parseFloat(form.leaseTerm)||0, psfSale: parseFloat(form.psfSale)||0, psfLease: parseFloat(form.psfLease)||0 };
@@ -2183,23 +4016,32 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
 
   // Analytics data
   const PIE_COLORS = [DS.blue, DS.green, DS.accent, DS.purple, "#f97316", "#ec4899", "#06b6d4", "#84cc16"];
+  const [analyticsSfFilter, setAnalyticsSfFilter] = useState("all"); // "all" | "under50" | "over50"
+
+  // SF-filtered subset for analytics only (doesn't affect the main table)
+  const analyticsComps = useMemo(() => {
+    if (analyticsSfFilter === "under50") return filtered.filter(c => (c.sqft||0) < 50000);
+    if (analyticsSfFilter === "over50") return filtered.filter(c => (c.sqft||0) >= 50000);
+    return filtered;
+  }, [filtered, analyticsSfFilter]);
+
   const subtypePie = Object.entries(
-    filtered.reduce((acc,c) => { const k=c.subtype||"Other"; acc[k]=(acc[k]||0)+1; return acc; }, {})
+    analyticsComps.reduce((acc,c) => { const k=c.subtype||"Other"; acc[k]=(acc[k]||0)+1; return acc; }, {})
   ).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);
 
   const smPie = Object.entries(
-    filtered.reduce((acc,c) => { const k=c.submarket||"Other"; acc[k]=(acc[k]||0)+1; return acc; }, {})
+    analyticsComps.reduce((acc,c) => { const k=c.submarket||"Other"; acc[k]=(acc[k]||0)+1; return acc; }, {})
   ).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value);
 
   const typeSplit = [
-    { name:"Sales", value: filtered.filter(c=>c.compType==="Sale").length },
-    { name:"Leases", value: filtered.filter(c=>c.compType==="Lease").length },
+    { name:"Sales", value: analyticsComps.filter(c=>c.compType==="Sale").length },
+    { name:"Leases", value: analyticsComps.filter(c=>c.compType==="Lease").length },
   ].filter(d=>d.value>0);
 
   // PSF trend over time (by quarter)
   const psfTrend = (() => {
     const byQ = {};
-    filtered.filter(c=>c.closeDate&&(c.psfSale>0||c.psfLease>0)).forEach(c=>{
+    analyticsComps.filter(c=>c.closeDate&&(c.psfSale>0||c.psfLease>0)).forEach(c=>{
       const d = new Date(c.closeDate+"T00:00:00");
       const q = `${d.getFullYear()} Q${Math.ceil((d.getMonth()+1)/3)}`;
       if(!byQ[q]) byQ[q]={q, saleSum:0, saleCount:0, leaseSum:0, leaseCount:0};
@@ -2214,8 +4056,8 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
   })();
 
   // Submarket avg PSF table
-  const smStats = submarketList.map(sm => {
-    const smComps = filtered.filter(c=>c.submarket===sm);
+  const smStats = smList.map(sm => {
+    const smComps = analyticsComps.filter(c=>c.submarket===sm);
     const sales = smComps.filter(c=>c.compType==="Sale"&&c.psfSale>0);
     const leases = smComps.filter(c=>c.compType==="Lease"&&c.psfLease>0);
     return {
@@ -2226,12 +4068,66 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
     };
   }).filter(r=>r.count>0).sort((a,b)=>b.count-a.count);
 
+  // Broker leaderboard
+  const brokerBoard = (() => {
+    const tally = {};
+    analyticsComps.forEach(c => {
+      if (c.listingBroker) { const k = c.listingBroker.trim(); if (k) { if (!tally[k]) tally[k] = {name:k,listing:0,tenant:0,vol:0}; tally[k].listing++; tally[k].vol += (c.salePrice||0); } }
+      if (c.tenantBroker) { const k = c.tenantBroker.trim(); if (k) { if (!tally[k]) tally[k] = {name:k,listing:0,tenant:0,vol:0}; tally[k].tenant++; } }
+    });
+    return Object.values(tally).map(b => ({ ...b, total: b.listing + b.tenant })).sort((a,b) => b.total - a.total).slice(0, 8);
+  })();
+
+  // DOM by submarket (from active listings that have closed)
+  const domBySm = (() => {
+    const smDom = {};
+    marketListings.filter(l => l.status === "Closed" && l.listedDate && l.closeDate).forEach(l => {
+      const dom = Math.floor((new Date(l.closeDate+"T00:00:00") - new Date(l.listedDate+"T00:00:00")) / 86400000);
+      const sm = l.submarket || "Unknown";
+      if (!smDom[sm]) smDom[sm] = { sm, total: 0, count: 0 };
+      smDom[sm].total += dom; smDom[sm].count++;
+    });
+    return Object.values(smDom).map(r => ({ sm: r.sm, avgDom: Math.round(r.total / r.count), count: r.count })).sort((a,b) => a.avgDom - b.avgDom);
+  })();
+
+  // Absorption: active SF available vs closed SF last 180 days
+  const absorptionData = (() => {
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 180);
+    const activeSF = marketListings.filter(l => l.status === "Active").reduce((s,l) => s + (parseFloat(l.sqft)||0), 0);
+    const closedSF180 = marketListings.filter(l => l.status === "Closed" && l.closeDate && new Date(l.closeDate+"T00:00:00") >= cutoff).reduce((s,l) => s + (parseFloat(l.sqft)||0), 0);
+    const compsSF180 = comps.filter(c => c.closeDate && new Date(c.closeDate+"T00:00:00") >= cutoff).reduce((s,c) => s + (c.sqft||0), 0);
+    return { activeSF, closedSF180, compsSF180, totalAbsorbed: closedSF180 + compsSF180 };
+  })();
+
+  // Asking vs closing $/SF by quarter (from market listings that closed)
+  const askVsCloseData = (() => {
+    const byQ = {};
+    marketListings.filter(l => l.status === "Closed" && l.closeDate && l.listingType === "Sale" && l.sqft > 0).forEach(l => {
+      const d = new Date(l.closeDate+"T00:00:00");
+      const q = `${d.getFullYear()} Q${Math.ceil((d.getMonth()+1)/3)}`;
+      if (!byQ[q]) byQ[q] = { q, askSum:0, closeSum:0, count:0 };
+      const sqft = parseFloat(l.sqft);
+      if (l.askingPrice > 0) byQ[q].askSum += l.askingPrice / sqft;
+      if (l.closePrice > 0) byQ[q].closeSum += l.closePrice / sqft;
+      byQ[q].count++;
+    });
+    return Object.values(byQ).sort((a,b) => a.q.localeCompare(b.q)).map(r => ({
+      q: r.q,
+      "Asking $/SF": r.count > 0 ? parseFloat((r.askSum / r.count).toFixed(2)) : null,
+      "Closed $/SF": r.count > 0 ? parseFloat((r.closeSum / r.count).toFixed(2)) : null,
+    }));
+  })();
+
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [quickAdd, setQuickAdd] = useState(false);
+  const [filterDateRange, setFilterDateRange] = useState("all");
+  const [filterSizeMin, setFilterSizeMin] = useState("");
+  const [filterSizeMax, setFilterSizeMax] = useState("");
 
   function CompModal({ comp }) {
     const [form, setForm] = useState(comp || {
-      name:"", address:"", city:"", submarket: submarketList[0]||"Northeast", subtype:"Distribution",
+      name:"", address:"", city:"", submarket: smList[0]||"Northeast", subtype:"Distribution",
       sqft:"", compType:"Sale", salePrice:"", monthlyRent:"", leaseTerm:"", psfSale:"", psfLease:"",
       closeDate:today, seller:"", buyer:"", listingBroker:"", tenantBroker:"", source:"CoStar", notes:"", verified:false
     });
@@ -2251,7 +4147,7 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
             <div style={{ gridColumn:"span 2" }}>{label("Property Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. Northgate Distribution Center" style={iStyle}/></div>
             <div>{label("Address")}<input value={form.address} onChange={e=>set("address",e.target.value)} placeholder="e.g. 800 Commerce Dr" style={iStyle}/></div>
             <div>{label("City")}<input value={form.city||""} onChange={e=>set("city",e.target.value)} placeholder="e.g. Columbus" style={iStyle}/></div>
-            <div>{label("Submarket")}<select value={form.submarket} onChange={e=>set("submarket",e.target.value)} style={iStyle}>{submarketList.map(s=><option key={s}>{s}</option>)}</select></div>
+            <div>{label("Submarket")}<select value={form.submarket} onChange={e=>set("submarket",e.target.value)} style={iStyle}>{smList.map(s=><option key={s}>{s}</option>)}</select></div>
             <div>{label("Subtype")}<select value={form.subtype} onChange={e=>set("subtype",e.target.value)} style={iStyle}>{INDUSTRIAL_SUBTYPES.map(s=><option key={s}>{s}</option>)}</select></div>
             <div>{label("Comp Type")}<select value={form.compType} onChange={e=>set("compType",e.target.value)} style={iStyle}>{COMP_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
             <div>{label("Square Footage")}<input type="number" value={form.sqft} onChange={e=>set("sqft",e.target.value)} style={iStyle}/></div>
@@ -2297,26 +4193,206 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
     );
   }
 
+  function QuickAddModal() {
+    const [form, setQForm] = useState({ address:"", submarket:smList[0]||"", subtype:"Distribution", sqft:"", compType:"Sale", salePrice:"", monthlyRent:"", psfSale:"", psfLease:"", closeDate:today, source:"CoStar" });
+    const setQ = (k,v) => setQForm(f=>({...f,[k]:v}));
+    const autoSf = parseFloat(form.sqft) > 0;
+    const autoPsfSale = autoSf && parseFloat(form.salePrice) > 0 ? (parseFloat(form.salePrice)/parseFloat(form.sqft)).toFixed(2) : "";
+    const autoPsfLease = autoSf && parseFloat(form.monthlyRent) > 0 ? (parseFloat(form.monthlyRent)/parseFloat(form.sqft)).toFixed(4) : "";
+    const doSave = (andAnother) => {
+      if (!form.address.trim()) return;
+      const d = { ...form, id: Date.now(), name: form.address, sqft: parseFloat(form.sqft)||0, salePrice: parseFloat(form.salePrice)||0, monthlyRent: parseFloat(form.monthlyRent)||0, psfSale: parseFloat(form.psfSale||autoPsfSale)||0, psfLease: parseFloat(form.psfLease||autoPsfLease)||0, leaseTerm: 0 };
+      setComps(prev => [...prev, d]);
+      toast("Comp saved", "success");
+      if (andAnother) setQForm({ address:"", submarket:form.submarket, subtype:form.subtype, sqft:"", compType:form.compType, salePrice:"", monthlyRent:"", psfSale:"", psfLease:"", closeDate:today, source:form.source });
+      else setQuickAdd(false);
+    };
+    return (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"22px 24px", width:520 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+            <div style={{ color:DS.text, fontSize:DS.fs.h3, fontWeight:DS.fw.black }}>Quick Add Comp</div>
+            <button onClick={()=>setQuickAdd(false)} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}>×</button>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <div style={{ gridColumn:"span 2" }}><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>Address (required)</label><input value={form.address} onChange={e=>setQ("address",e.target.value)} placeholder="e.g. 800 Commerce Drive, Columbus, OH" style={iStyle} autoFocus/></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>Property Type</label><select value={form.compType} onChange={e=>setQ("compType",e.target.value)} style={iStyle}>{COMP_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>Subtype</label><select value={form.subtype} onChange={e=>setQ("subtype",e.target.value)} style={iStyle}>{INDUSTRIAL_SUBTYPES.map(s=><option key={s}>{s}</option>)}</select></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>Size (SF)</label><input type="number" value={form.sqft} onChange={e=>setQ("sqft",e.target.value)} placeholder="0" style={iStyle}/></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>{form.compType==="Sale"?"Sale Price ($)":"Monthly Rent ($)"}</label><input type="number" value={form.compType==="Sale"?form.salePrice:form.monthlyRent} onChange={e=>setQ(form.compType==="Sale"?"salePrice":"monthlyRent",e.target.value)} placeholder="0" style={iStyle}/></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>$/SF {form.compType==="Lease"?"(auto)":"(auto)"}</label><input type="number" value={form.compType==="Sale"?(form.psfSale||autoPsfSale):(form.psfLease||autoPsfLease)} onChange={e=>setQ(form.compType==="Sale"?"psfSale":"psfLease",e.target.value)} placeholder={form.compType==="Sale"?autoPsfSale:autoPsfLease} style={iStyle}/></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>Date</label><input type="date" value={form.closeDate} onChange={e=>setQ("closeDate",e.target.value)} style={iStyle}/></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>Submarket</label><select value={form.submarket} onChange={e=>setQ("submarket",e.target.value)} style={iStyle}>{smList.map(s=><option key={s}>{s}</option>)}</select></div>
+            <div><label style={{ color:DS.textMute, fontSize:10, fontWeight:700, display:"block", marginBottom:3, textTransform:"uppercase" }}>Source</label><select value={form.source} onChange={e=>setQ("source",e.target.value)} style={iStyle}>{COMP_SOURCES.map(s=><option key={s}>{s}</option>)}</select></div>
+          </div>
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:16 }}>
+            <button onClick={()=>setQuickAdd(false)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Cancel</button>
+            <button onClick={()=>doSave(true)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Save & Add Another</button>
+            <button onClick={()=>doSave(false)} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"7px 18px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>Save & Close</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <div>
           <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h2, letterSpacing:"-0.3px" }}>Market Comps</div>
-          <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:2 }}>Track what's trading in your submarkets — sales, leases, brokers, pricing</div>
+          <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:2 }}>Track active listings and closed transactions in your submarkets</div>
         </div>
-        <div style={{ display:"flex", gap:8 }}>
-          <button onClick={()=>setShowAnalytics(a=>!a)} style={{ background: showAnalytics ? DS.blueSoft : DS.panel, border:`1px solid ${showAnalytics ? DS.blue+"55" : DS.border}`, color: showAnalytics ? DS.blue : DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>
-            {showAnalytics ? "Hide Analytics" : "Analytics"}
-          </button>
-          <button onClick={()=>setShowMap(m=>!m)} style={{ background: showMap ? DS.greenSoft : DS.panel, border:`1px solid ${showMap ? DS.green+"55" : DS.border}`, color: showMap ? DS.green : DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>
-            {showMap ? "Hide Map" : "🗺 Map View"}
-          </button>
-          <button onClick={()=>setModal("new")} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.black }}>+ Add Comp</button>
+        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          {/* View toggle */}
+          <div style={{ display:"flex", background:"#0f1e2e", borderRadius:8, border:`1px solid ${DS.border}`, padding:2 }}>
+            <button onClick={()=>setCompsView("listings")} style={{ background: compsView==="listings"?"#1e2d48":"none", border:"none", color: compsView==="listings"?DS.blue:DS.textMute, padding:"5px 14px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight: compsView==="listings"?700:400 }}>
+              Active Listings {marketListings.filter(l=>l.status==="Active").length > 0 && <span style={{ background:DS.blue, color:"#fff", borderRadius:20, padding:"0 5px", fontSize:9, marginLeft:4 }}>{marketListings.filter(l=>l.status==="Active").length}</span>}
+            </button>
+            <button onClick={()=>setCompsView("comps")} style={{ background: compsView==="comps"?"#1e2d48":"none", border:"none", color: compsView==="comps"?DS.blue:DS.textMute, padding:"5px 14px", borderRadius:6, cursor:"pointer", fontSize:12, fontWeight: compsView==="comps"?700:400 }}>
+              Closed Comps {comps.length > 0 && <span style={{ background:DS.green+"33", color:DS.green, borderRadius:20, padding:"0 5px", fontSize:9, marginLeft:4 }}>{comps.length}</span>}
+            </button>
+          </div>
+          {compsView === "comps" && <>
+            <button onClick={()=>setShowAnalytics(a=>!a)} style={{ background: showAnalytics ? DS.blueSoft : DS.panel, border:`1px solid ${showAnalytics ? DS.blue+"55" : DS.border}`, color: showAnalytics ? DS.blue : DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>
+              {showAnalytics ? "Hide Analytics" : "Analytics"}
+            </button>
+            <button onClick={()=>setShowMap(m=>!m)} style={{ background: showMap ? DS.greenSoft : DS.panel, border:`1px solid ${showMap ? DS.green+"55" : DS.border}`, color: showMap ? DS.green : DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>
+              {showMap ? "Hide Map" : <span style={{display:"flex",alignItems:"center",gap:5}}><IcMap />Map View</span>}
+            </button>
+            {lastImportSnapshot !== null && (
+              <button onClick={() => { setComps(lastImportSnapshot); setLastImportSnapshot(null); }} style={{ background:"#2a1a0a", border:`1px solid ${DS.accent}55`, color:DS.accent, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>↩ Undo Import</button>
+            )}
+            <button onClick={()=>exportCompsCSV(filtered)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>↓ Export CSV</button>
+            <button onClick={()=>setCompImportModal(true)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>↑ Import CoStar</button>
+            <button onClick={()=>setQuickAdd(true)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>Quick Add</button>
+            <button onClick={()=>setModal("new")} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.black }}>+ Add Comp</button>
+          </>}
+          {compsView === "listings" && (
+            <button onClick={()=>setListingModal("new")} style={{ background:DS.blue, border:"none", color:"#fff", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.black }}>+ Track Listing</button>
+          )}
         </div>
       </div>
 
+      {/* ── ACTIVE LISTINGS VIEW ── */}
+      {compsView === "listings" && (() => {
+        const activeCount = marketListings.filter(l=>l.status==="Active").length;
+        const closedListings = marketListings.filter(l=>l.status==="Closed");
+        const activeSF = marketListings.filter(l=>l.status==="Active").reduce((s,l)=>s+(parseFloat(l.sqft)||0),0);
+        const avgAskSale = (() => { const s=marketListings.filter(l=>l.status==="Active"&&l.listingType==="Sale"&&l.sqft>0&&l.askingPrice>0); return s.length ? (s.reduce((a,l)=>a+(l.askingPrice/l.sqft),0)/s.length).toFixed(2) : null; })();
+        const avgVsPct = (() => { const c=closedListings.filter(l=>l.vsAskingPct!==null&&l.vsAskingPct!==undefined); return c.length ? (c.reduce((a,l)=>a+l.vsAskingPct,0)/c.length).toFixed(1) : null; })();
+        const daysSince = (d) => d ? Math.floor((new Date()-new Date(d+"T00:00:00"))/86400000) : null;
+        const statusColors = { "Active":DS.green, "Closed":DS.blue, "Off Market":DS.textMute, "Withdrawn":DS.red };
+        const filteredListings = marketListings.filter(l => {
+          if (filterSm !== "All" && l.submarket !== filterSm) return false;
+          if (filterType !== "All" && l.listingType !== filterType) return false;
+          if (search && !`${l.name} ${l.address} ${l.seller} ${l.listingBroker}`.toLowerCase().includes(search.toLowerCase())) return false;
+          return true;
+        }).sort((a,b) => {
+          const order = ["Active","Off Market","Withdrawn","Closed"];
+          const si = order.indexOf(a.status)-order.indexOf(b.status);
+          if (si !== 0) return si;
+          return (b.listedDate||"").localeCompare(a.listedDate||"");
+        });
+        return (
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            {/* Stats */}
+            <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+              {[
+                { label:"Active Listings", value:activeCount, color:DS.blue, sub:"being tracked" },
+                { label:"Active SF", value:activeSF > 0 ? activeSF.toLocaleString()+" SF" : "—", color:DS.accent, sub:"total inventory" },
+                { label:"Avg Asking $/SF", value:avgAskSale ? "$"+avgAskSale : "—", color:DS.green, sub:"sale listings" },
+                { label:"Avg Close vs Asking", value:avgVsPct ? (parseFloat(avgVsPct)>0?"+":"")+avgVsPct+"%" : "—", color: avgVsPct && parseFloat(avgVsPct) < 0 ? DS.red : DS.green, sub:`${closedListings.length} closed listings` },
+              ].map(c=>(
+                <div key={c.label} style={{ flex:1, minWidth:130, background:DS.panel, border:`1px solid ${DS.border}`, borderLeft:`3px solid ${c.color}`, borderRadius:DS.r.md, padding:"13px 16px" }}>
+                  <div style={{ color:c.color, fontWeight:900, fontSize:DS.fs.h2, fontFamily:"'DM Mono', monospace" }}>{c.value}</div>
+                  <div style={{ color:DS.textMute, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", marginTop:4 }}>{c.label}</div>
+                  <div style={{ color:DS.textFaint, fontSize:9, marginTop:2 }}>{c.sub}</div>
+                </div>
+              ))}
+            </div>
+            {/* Filters */}
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property, broker, seller..." style={{ flex:1, minWidth:200, background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:DS.text, padding:"7px 11px", fontSize:12, outline:"none" }}/>
+              <select value={filterSm} onChange={e=>setFilterSm(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:DS.textSub, padding:"7px 11px", fontSize:12, outline:"none" }}>
+                <option value="All">All Submarkets</option>
+                {smList.map(s=><option key={s}>{s}</option>)}
+              </select>
+              <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:DS.textSub, padding:"7px 11px", fontSize:12, outline:"none" }}>
+                <option value="All">Sale + Lease</option>
+                <option value="Sale">For Sale</option>
+                <option value="Lease">For Lease</option>
+              </select>
+            </div>
+            {/* Listings table */}
+            <div style={{ background:DS.panel, borderRadius:DS.r.lg, border:`1px solid ${DS.border}`, overflowX:"auto" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", minWidth:860 }}>
+                <thead>
+                  <tr style={{ borderBottom:`1px solid ${DS.border}`, background:"rgba(7,14,26,0.6)" }}>
+                    {["Property","Submarket","Type","SF","Asking","$/SF","DOM","Status","vs Asking","Listing Broker",""].map(h=>(
+                      <th key={h} style={{ color:DS.textMute, fontSize:10, fontWeight:700, textAlign:"left", padding:"10px 12px", whiteSpace:"nowrap", letterSpacing:"0.6px", textTransform:"uppercase" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredListings.map(l => {
+                    const dom = l.status==="Closed" && l.closeDate && l.listedDate
+                      ? Math.floor((new Date(l.closeDate+"T00:00:00")-new Date(l.listedDate+"T00:00:00"))/86400000)
+                      : daysSince(l.listedDate);
+                    const sc = statusColors[l.status] || DS.textMute;
+                    const vp = l.vsAskingPct;
+                    const vpColor = vp === null || vp === undefined ? DS.textFaint : vp > 0 ? DS.green : vp < 0 ? DS.red : DS.textSub;
+                    const vpLabel = vp === null || vp === undefined ? "—" : vp === 0 ? "At asking" : `${vp > 0 ? "+" : ""}${vp.toFixed(1)}%`;
+                    return (
+                      <tr key={l.id} style={{ borderBottom:`1px solid ${DS.border}` }} onMouseEnter={e=>e.currentTarget.style.background=DS.panelHi} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <td style={{ padding:"11px 12px", maxWidth:180 }}>
+                          <div style={{ color:DS.text, fontWeight:600, fontSize:DS.fs.md }}>{l.name||"—"}</div>
+                          {l.address && <div style={{ color:DS.textMute, fontSize:10, marginTop:1 }}>{l.address}{l.city ? `, ${l.city}` : ""}</div>}
+                        </td>
+                        <td style={{ padding:"11px 12px", color:DS.textSub, fontSize:DS.fs.sm }}>{l.submarket||"—"}</td>
+                        <td style={{ padding:"11px 12px" }}>
+                          <span style={{ background: l.listingType==="Sale"?DS.blueSoft:DS.greenSoft, color: l.listingType==="Sale"?DS.blue:DS.green, padding:"2px 9px", borderRadius:DS.r.full, fontSize:10, fontWeight:700 }}>{l.listingType==="Sale"?"For Sale":"For Lease"}</span>
+                          {l.subtype && <div style={{ color:DS.textFaint, fontSize:9, marginTop:3 }}>{l.subtype}</div>}
+                        </td>
+                        <td style={{ padding:"11px 12px", color:DS.text, fontSize:DS.fs.md, fontFamily:"'DM Mono', monospace" }}>{l.sqft ? parseFloat(l.sqft).toLocaleString() : "—"}</td>
+                        <td style={{ padding:"11px 12px", color:DS.accent, fontWeight:700, fontSize:DS.fs.md, fontFamily:"'DM Mono', monospace" }}>
+                          {l.listingType==="Sale" ? (l.askingPrice > 0 ? fmt(l.askingPrice) : "—") : (l.askingPsfLease > 0 ? `$${l.askingPsfLease}/SF/YR` : "—")}
+                          {l.status==="Closed" && l.closePrice > 0 && <div style={{ color:DS.textMute, fontSize:9, fontFamily:"sans-serif" }}>Closed: {fmt(l.closePrice)}</div>}
+                        </td>
+                        <td style={{ padding:"11px 12px", color:DS.green, fontWeight:700, fontSize:DS.fs.md, fontFamily:"'DM Mono', monospace" }}>
+                          {l.listingType==="Sale" && l.sqft > 0 && l.askingPrice > 0 ? "$"+(l.askingPrice/l.sqft).toFixed(0)+"/SF" : l.listingType==="Lease" && l.askingPsfLease > 0 ? "$"+l.askingPsfLease+"/SF/YR" : "—"}
+                        </td>
+                        <td style={{ padding:"11px 12px", color: dom > 180 ? DS.red : dom > 90 ? DS.accent : DS.textSub, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{dom !== null ? `${dom}d` : "—"}</td>
+                        <td style={{ padding:"11px 12px" }}>
+                          <span style={{ background:sc+"18", color:sc, border:`1px solid ${sc}44`, padding:"2px 9px", borderRadius:DS.r.full, fontSize:10, fontWeight:700 }}>{l.status}</span>
+                        </td>
+                        <td style={{ padding:"11px 12px" }}>
+                          {l.status==="Closed"
+                            ? <span style={{ color:vpColor, fontWeight:700, fontSize:13, fontFamily:"'DM Mono', monospace" }}>{vpLabel}</span>
+                            : <span style={{ color:DS.textFaint, fontSize:11 }}>Pending</span>
+                          }
+                        </td>
+                        <td style={{ padding:"11px 12px", color:DS.blue, fontSize:DS.fs.sm, maxWidth:140 }}><div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{l.listingBroker||"—"}</div></td>
+                        <td style={{ padding:"11px 12px" }}>
+                          <div style={{ display:"flex", gap:5 }}>
+                            {l.status==="Active" && <button onClick={()=>setCloseTarget(l)} style={{ background:DS.greenSoft, border:`1px solid ${DS.green}44`, color:DS.green, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm, fontWeight:700 }}>Close</button>}
+                            <button onClick={()=>setListingModal(l)} style={{ background:DS.panelHi, border:`1px solid ${DS.border}`, color:DS.textSub, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm }}>Edit</button>
+                            <button onClick={()=>{ if(window.confirm("Delete listing?")) setMarketListings(prev=>prev.filter(x=>x.id!==l.id)); }} style={{ background:"none", border:`1px solid ${DS.red}33`, color:DS.red, cursor:"pointer", fontSize:DS.fs.xs, padding:"3px 9px", borderRadius:DS.r.sm }}>Del</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {filteredListings.length === 0 && <div style={{ color:DS.textMute, fontSize:DS.fs.lg, textAlign:"center", padding:"48px 0" }}>No listings tracked yet. Add active listings from CoStar or LoopNet to monitor your market.</div>}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── CLOSED COMPS VIEW ── */}
       {/* Summary stats */}
-      {comps.length > 0 && <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+      {compsView === "comps" && comps.length > 0 && <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
         {[
           { label:"Total Comps", value:comps.length, color:DS.blue, sub:`${filtered.length} shown` },
           { label:"SF Tracked", value: totalSF > 0 ? totalSF.toLocaleString()+" SF" : "—", color:DS.accent, sub:"in filtered view" },
@@ -2333,8 +4409,25 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
       </div>}
 
       {/* Analytics panels */}
-      {showAnalytics && comps.length > 0 && (
+      {compsView === "comps" && showAnalytics && comps.length > 0 && (
         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          {/* SF size filter */}
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ color:DS.textMute, fontSize:11, fontWeight:600 }}>Analytics SF Filter:</span>
+            <div style={{ display:"flex", background:"#0f1e2e", borderRadius:8, border:`1px solid ${DS.border}`, padding:2 }}>
+              {[["all","All Sizes"],["under50","< 50K SF"],["over50","≥ 50K SF"]].map(([val,label]) => (
+                <button key={val} onClick={()=>setAnalyticsSfFilter(val)} style={{ background: analyticsSfFilter===val?"#1e3048":"none", border:"none", color: analyticsSfFilter===val?DS.text:DS.textMute, padding:"4px 12px", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight: analyticsSfFilter===val?700:400 }}>{label}</button>
+              ))}
+            </div>
+            <span style={{ color:DS.textFaint, fontSize:10 }}>{analyticsComps.length} of {filtered.length} comps</span>
+          </div>
+          {analyticsComps.length === 0 && (
+            <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"32px 20px", textAlign:"center" }}>
+              <div style={{ color:DS.textMute, fontSize:13, fontWeight:600, marginBottom:6 }}>No comps match the current filters</div>
+              <div style={{ color:DS.textFaint, fontSize:11 }}>Try adjusting the SF filter or adding comps to populate analytics.</div>
+            </div>
+          )}
+          {analyticsComps.length > 0 && <>
           {/* Row 1: Pie charts */}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
             {/* Sales vs Leases */}
@@ -2442,11 +4535,115 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
               </div>
             )}
           </div>
+
+          {/* Row 3: Broker leaderboard + Absorption + DOM by submarket */}
+          <div style={{ display:"grid", gridTemplateColumns:"1.4fr 1fr 1fr", gap:12 }}>
+            {/* Broker leaderboard */}
+            {brokerBoard.length > 0 && (
+              <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+                <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:12 }}>Broker Activity</div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 44px 44px 44px", gap:0 }}>
+                  <div style={{ color:DS.textMute, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", paddingBottom:6, borderBottom:`1px solid ${DS.border}` }}>Firm</div>
+                  {["List","Ten","Vol"].map(h => <div key={h} style={{ color:DS.textMute, fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.5px", textAlign:"right", paddingBottom:6, borderBottom:`1px solid ${DS.border}` }}>{h}</div>)}
+                  {brokerBoard.map((b,i) => {
+                    const barW = Math.round((b.total / brokerBoard[0].total) * 100);
+                    return (
+                      <React.Fragment key={b.name}>
+                        <div style={{ padding:"6px 0 6px", borderBottom:`1px solid ${DS.border}`, position:"relative", overflow:"hidden" }}>
+                          <div style={{ position:"absolute", left:0, top:0, bottom:0, width:barW+"%", background:PIE_COLORS[i % PIE_COLORS.length]+"18", borderRadius:2 }}/>
+                          <span style={{ color:DS.text, fontSize:11, fontWeight:600, position:"relative" }}>{b.name}</span>
+                        </div>
+                        <div style={{ padding:"6px 0", borderBottom:`1px solid ${DS.border}`, color:DS.blue, fontSize:11, fontFamily:"'DM Mono', monospace", textAlign:"right" }}>{b.listing||"—"}</div>
+                        <div style={{ padding:"6px 0", borderBottom:`1px solid ${DS.border}`, color:DS.purple, fontSize:11, fontFamily:"'DM Mono', monospace", textAlign:"right" }}>{b.tenant||"—"}</div>
+                        <div style={{ padding:"6px 0", borderBottom:`1px solid ${DS.border}`, color:DS.textFaint, fontSize:10, fontFamily:"'DM Mono', monospace", textAlign:"right" }}>{b.vol > 0 ? "$"+Math.round(b.vol/1000)+"K" : "—"}</div>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Absorption snapshot */}
+            <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+              <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:4 }}>Absorption</div>
+              <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginBottom:14 }}>Active inventory vs. 180-day absorption</div>
+              {[
+                { label:"Active SF Available", value: absorptionData.activeSF.toLocaleString()+" SF", color:DS.accent },
+                { label:"SF Absorbed (180d)", value: absorptionData.totalAbsorbed.toLocaleString()+" SF", color:DS.green },
+                { label:"From Tracked Listings", value: absorptionData.closedSF180.toLocaleString()+" SF", color:DS.textSub },
+                { label:"From Closed Comps", value: absorptionData.compsSF180.toLocaleString()+" SF", color:DS.textSub },
+              ].map(r => (
+                <div key={r.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"7px 0", borderBottom:`1px solid ${DS.border}` }}>
+                  <span style={{ color:DS.textMute, fontSize:11 }}>{r.label}</span>
+                  <span style={{ color:r.color, fontWeight:700, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{r.value}</span>
+                </div>
+              ))}
+              {absorptionData.activeSF > 0 && absorptionData.totalAbsorbed > 0 && (
+                <div style={{ marginTop:10, background:DS.greenSoft, borderRadius:6, padding:"8px 12px", textAlign:"center" }}>
+                  <span style={{ color:DS.green, fontWeight:800, fontSize:13, fontFamily:"'DM Mono', monospace" }}>
+                    {((absorptionData.totalAbsorbed / absorptionData.activeSF) * 100).toFixed(0)}%
+                  </span>
+                  <span style={{ color:DS.textSub, fontSize:11, marginLeft:6 }}>of active inventory absorbed in 180d</span>
+                </div>
+              )}
+            </div>
+
+            {/* DOM by submarket */}
+            {domBySm.length > 0 ? (
+              <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+                <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:4 }}>Days on Market</div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginBottom:12 }}>Avg DOM by submarket (closed listings)</div>
+                {domBySm.map(r => {
+                  const maxDom = Math.max(...domBySm.map(x => x.avgDom));
+                  const barW = Math.round((r.avgDom / maxDom) * 100);
+                  const color = r.avgDom < 60 ? DS.green : r.avgDom < 120 ? DS.accent : DS.red;
+                  return (
+                    <div key={r.sm} style={{ marginBottom:8 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                        <span style={{ color:DS.textSub, fontSize:11, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:120 }}>{r.sm}</span>
+                        <span style={{ color, fontWeight:700, fontSize:11, fontFamily:"'DM Mono', monospace" }}>{r.avgDom}d <span style={{ color:DS.textFaint, fontWeight:400 }}>({r.count})</span></span>
+                      </div>
+                      <div style={{ height:4, background:DS.bg, borderRadius:2, overflow:"hidden" }}>
+                        <div style={{ height:"100%", width:barW+"%", background:color, borderRadius:2 }}/>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                <div style={{ textAlign:"center" }}>
+                  <div style={{ color:DS.textMute, fontSize:12, fontWeight:600, marginBottom:4 }}>Days on Market</div>
+                  <div style={{ color:DS.textFaint, fontSize:11 }}>Will populate as tracked listings close</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Row 4: Asking vs Closing $/SF trend */}
+          {askVsCloseData.length > 1 && (
+            <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, padding:"16px 20px" }}>
+              <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:4 }}>Asking vs. Closing $/SF</div>
+              <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginBottom:12 }}>Sale listings — asking price vs. what they actually closed at, by quarter</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={askVsCloseData} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={DS.border} />
+                  <XAxis dataKey="q" tick={{ fill:DS.textMute, fontSize:9 }} />
+                  <YAxis tick={{ fill:DS.textMute, fontSize:9 }} width={44} tickFormatter={v => "$"+v} />
+                  <Tooltip contentStyle={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, fontSize:11 }} formatter={v => ["$"+v+"/SF"]} />
+                  <Legend wrapperStyle={{ fontSize:11, color:DS.textSub }} />
+                  <Line type="monotone" dataKey="Asking $/SF" stroke={DS.accent} strokeWidth={2} dot={{ fill:DS.accent, r:3 }} connectNulls strokeDasharray="5 3" />
+                  <Line type="monotone" dataKey="Closed $/SF" stroke={DS.green} strokeWidth={2} dot={{ fill:DS.green, r:3 }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </>}
         </div>
       )}
 
       {/* Map View */}
-      {showMap && (
+      {compsView === "comps" && showMap && (
         <div style={{ background: "#0d1826", border:`1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
           <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.md, marginBottom: 8 }}>
             Comp Locations Map <span style={{ color: DS.textFaint, fontSize: DS.fs.xs, fontWeight: DS.fw.normal }}>— addresses auto-located via OpenStreetMap</span>
@@ -2455,22 +4652,22 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
         </div>
       )}
 
-      {/* Filters */}
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+      {/* Filters (comps view only) */}
+      {compsView === "comps" && <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property, buyer, seller, broker..." style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"7px 11px", fontSize:12, outline:"none", flex:1, minWidth:200 }}/>
         <select value={filterSm} onChange={e=>setFilterSm(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
           <option value="All">All Submarkets</option>
-          {submarketList.map(s=><option key={s}>{s}</option>)}
+          {smList.map(s=><option key={s}>{s}</option>)}
         </select>
         <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"7px 11px", fontSize:12, outline:"none" }}>
           <option value="All">Sales + Leases</option>
           <option value="Sale">Sales Only</option>
           <option value="Lease">Leases Only</option>
         </select>
-      </div>
+      </div>}
 
-      {/* Table */}
-      <div style={{ background:DS.panel, borderRadius:DS.r.lg, border:`1px solid ${DS.border}`, overflowX:"auto" }}>
+      {/* Table (comps view only) */}
+      {compsView === "comps" && <div style={{ background:DS.panel, borderRadius:DS.r.lg, border:`1px solid ${DS.border}`, overflowX:"auto" }}>
         <table style={{ width:"100%", borderCollapse:"collapse", minWidth:900 }}>
           <thead>
             <tr style={{ borderBottom:`1px solid ${DS.border}`, background:"rgba(7,14,26,0.6)" }}>
@@ -2573,10 +4770,372 @@ function MarketCompsTab({ comps, setComps, submarketList }) {
           </tfoot>}
         </table>
         {filtered.length === 0 && <div style={{ color:DS.textMute, fontSize:DS.fs.lg, textAlign:"center", padding:"48px 0" }}>No comps yet. Add market transactions from CoStar, LoopNet, or broker intel.</div>}
-      </div>
+      </div>}
       {modal && <CompModal comp={modal==="new"?null:modal}/>}
+      {quickAdd && <QuickAddModal/>}
+      {compImportModal && <CompImportModal/>}
+      {listingModal && <ActiveListingModal listing={listingModal==="new"?null:listingModal}/>}
+      {closeTarget && <CloseListingModal listing={closeTarget}/>}
     </div>
   );
+
+  function CompImportModal() {
+    const fileRef = useRef();
+    const [xlRows, setXlRows] = useState(null);
+    const [selected, setSelected] = useState(new Set());
+    const handleFile = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const wb = XLSX.read(ev.target.result, { type:"array", cellDates: true });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval:"" });
+          const mapped = rows.map(r => mapCoStarCompRow(r));
+          setXlRows(mapped);
+          setSelected(new Set(mapped.map((_,i)=>i)));
+        } catch { alert("Could not read file. Make sure it's a CoStar .xlsx export."); }
+      };
+      reader.readAsArrayBuffer(file);
+    };
+    const toggle = (i) => setSelected(prev => { const n = new Set(prev); n.has(i)?n.delete(i):n.add(i); return n; });
+    const handleImport = () => {
+      const toAdd = [...selected].map(i => {
+        const d = xlRows[i];
+        const sqft = parseFloat(d.sqft)||0;
+        const sp = parseFloat(d.salePrice)||0;
+        const psf = parseFloat(d.psfSale)||(sqft && sp ? parseFloat((sp/sqft).toFixed(2)) : 0);
+        const id = Date.now() + i;
+        return { ...d, id, sqft, salePrice:sp, psfSale:psf, monthlyRent:0, leaseTerm:0, psfLease:0 };
+      });
+      setLastImportSnapshot(comps);
+      setComps(prev => [...prev, ...toAdd]);
+      setCompImportModal(false);
+    };
+    return (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.87)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width: xlRows ? 860 : 480, maxHeight:"92vh", overflowY:"auto" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <h2 style={{ color:DS.text, fontSize:17, fontWeight:800, margin:0 }}>{xlRows ? "Review Comps Import" : "Import Closed Comps from CoStar"}</h2>
+            <button onClick={()=>setCompImportModal(false)} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}></button>
+          </div>
+          {!xlRows && (
+            <div style={{ background:"#07111e", border:`2px dashed ${DS.green}44`, borderRadius:10, padding:"28px 20px", textAlign:"center" }}>
+              <div style={{ color:DS.green, fontSize:13, fontWeight:700, marginBottom:6 }}>CoStar Sales Comps Export (.xlsx)</div>
+              <div style={{ color:DS.textMute, fontSize:11, marginBottom:16 }}>In CoStar: Sales Comps search → Export → Export to Excel. All rows previewed before import.</div>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display:"none" }}/>
+              <button onClick={()=>fileRef.current.click()} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"9px 24px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Choose .xlsx File</button>
+            </div>
+          )}
+          {xlRows && (
+            <>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ color:DS.textSub, fontSize:12 }}><span style={{ color:DS.green, fontWeight:700 }}>{selected.size}</span> of {xlRows.length} comps selected</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>setSelected(new Set(xlRows.map((_,i)=>i)))} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"4px 10px", borderRadius:6, cursor:"pointer", fontSize:11 }}>All</button>
+                  <button onClick={()=>setSelected(new Set())} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"4px 10px", borderRadius:6, cursor:"pointer", fontSize:11 }}>None</button>
+                  <button onClick={()=>setXlRows(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textMute, padding:"4px 10px", borderRadius:6, cursor:"pointer", fontSize:11 }}>← Back</button>
+                </div>
+              </div>
+              <div style={{ overflowX:"auto", borderRadius:8, border:`1px solid ${DS.border}`, marginBottom:14 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", minWidth:760 }}>
+                  <thead>
+                    <tr style={{ background:"rgba(7,14,26,0.8)", borderBottom:`1px solid ${DS.border}` }}>
+                      <th style={{ padding:"8px 10px", width:32 }}/>
+                      {["Address","City","Submarket","Type","SF","Sale Price","$/SF","Close Date","Seller","Buyer","Listing Broker"].map(h => (
+                        <th key={h} style={{ padding:"8px 10px", color:DS.textMute, fontSize:10, fontWeight:700, textAlign:"left", textTransform:"uppercase", letterSpacing:"0.5px", whiteSpace:"nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {xlRows.map((r,i) => (
+                      <tr key={i} onClick={()=>toggle(i)} style={{ borderBottom:`1px solid ${DS.border}`, cursor:"pointer", background: selected.has(i)?"rgba(16,185,129,0.06)":"transparent" }}
+                        onMouseEnter={e=>e.currentTarget.style.background=selected.has(i)?"rgba(16,185,129,0.1)":DS.panelHi}
+                        onMouseLeave={e=>e.currentTarget.style.background=selected.has(i)?"rgba(16,185,129,0.06)":"transparent"}>
+                        <td style={{ padding:"8px 10px", textAlign:"center" }}>
+                          <input type="checkbox" checked={selected.has(i)} onChange={()=>toggle(i)} onClick={e=>e.stopPropagation()} style={{ accentColor:DS.green }}/>
+                        </td>
+                        <td style={{ padding:"8px 10px", color:DS.text, fontSize:12, maxWidth:150, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address||"—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.textSub, fontSize:12 }}>{r.city||"—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.textSub, fontSize:12, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.submarket||"—"}</td>
+                        <td style={{ padding:"8px 10px" }}>
+                          <span style={{ background:DS.blueSoft, color:DS.blue, padding:"1px 7px", borderRadius:20, fontSize:10, fontWeight:700 }}>Sale</span>
+                          {r.subtype && <div style={{ color:DS.textFaint, fontSize:9, marginTop:2 }}>{r.subtype}</div>}
+                        </td>
+                        <td style={{ padding:"8px 10px", color:DS.text, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{r.sqft ? parseInt(r.sqft).toLocaleString() : "—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.accent, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{r.salePrice ? fmt(parseFloat(r.salePrice)) : "—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.green, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{r.psfSale ? "$"+parseFloat(r.psfSale).toFixed(0)+"/SF" : "—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.textSub, fontSize:11 }}>{r.closeDate||"—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.textSub, fontSize:11, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.seller||"—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.textSub, fontSize:11, maxWidth:110, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.buyer||"—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.blue, fontSize:11, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.listingBroker||"—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+                <button onClick={()=>setCompImportModal(false)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+                <button onClick={handleImport} disabled={selected.size===0} style={{ background:selected.size>0?DS.green:"#1e3048", border:"none", color:selected.size>0?"#0a0f1a":DS.textFaint, padding:"8px 22px", borderRadius:8, cursor:selected.size>0?"pointer":"default", fontSize:13, fontWeight:800 }}>
+                  Import {selected.size} Comp{selected.size!==1?"s":""}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function ActiveListingModal({ listing }) {
+    const iS = { background:"#070e1a", border:`1px solid ${DS.border}`, borderRadius:8, color:DS.text, padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+    const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
+    const fileRef = useRef();
+    const [xlRows, setXlRows] = useState(null); // parsed rows from xlsx
+    const [selectedRows, setSelectedRows] = useState(new Set());
+    const [form, setForm] = useState(listing || {
+      name:"", address:"", city:"", submarket:smList[0]||"Northeast", subtype:"Distribution",
+      listingType:"Sale", sqft:"", askingPrice:"", askingPsfLease:"", listedDate:today,
+      seller:"", listingBroker:"", source:"CoStar", status:"Active", notes:""
+    });
+    const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+    const handleFile = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const wb = XLSX.read(ev.target.result, { type:"array", cellDates: true });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval:"" });
+          const mapped = rows.map(r => mapCoStarRowToListing(r));
+          setXlRows(mapped);
+          setSelectedRows(new Set(mapped.map((_,i)=>i)));
+        } catch(err) {
+          alert("Could not read file. Make sure it's a CoStar .xlsx export.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    };
+
+    const toggleRow = (i) => setSelectedRows(prev => {
+      const n = new Set(prev);
+      n.has(i) ? n.delete(i) : n.add(i);
+      return n;
+    });
+
+    const handleBulkImport = () => {
+      const toAdd = [...selectedRows].map(i => ({ ...xlRows[i], id: Date.now() + i, vsAskingPct:null, closeDate:"", closePrice:0 }));
+      setMarketListings(prev => [...prev, ...toAdd]);
+      setListingModal(null);
+    };
+
+    const handleSave = () => {
+      const d = { ...form, sqft:parseFloat(form.sqft)||0, askingPrice:parseFloat(form.askingPrice)||0, askingPsfLease:parseFloat(form.askingPsfLease)||0 };
+      if (listing?.id) setMarketListings(prev=>prev.map(l=>l.id===listing.id?{...l,...d}:l));
+      else setMarketListings(prev=>[...prev,{...d,id:Date.now(),vsAskingPct:null,closeDate:"",closePrice:0}]);
+      setListingModal(null);
+    };
+
+    return (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.87)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:xlRows?800:660, maxHeight:"92vh", overflowY:"auto" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <h2 style={{ color:DS.text, fontSize:17, fontWeight:800, margin:0 }}>{listing?.id?"Edit Listing":xlRows?"Review CoStar Import":"Track Active Listing"}</h2>
+            <button onClick={()=>setListingModal(null)} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}></button>
+          </div>
+
+          {/* CoStar Excel import — only show when not editing an existing listing */}
+          {!listing?.id && !xlRows && (
+            <div style={{ background:"#07111e", border:`2px dashed ${DS.blue}44`, borderRadius:10, padding:"18px 20px", marginBottom:16, textAlign:"center" }}>
+              <div style={{ color:DS.blue, fontSize:13, fontWeight:700, marginBottom:6 }}>Import from CoStar Export (.xlsx)</div>
+              <div style={{ color:DS.textMute, fontSize:11, marginBottom:12 }}>Export from CoStar → Property Search → Export to Excel. All rows will be previewed before import.</div>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFile} style={{ display:"none" }}/>
+              <button onClick={()=>fileRef.current.click()} style={{ background:DS.blue, border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:700 }}>Choose .xlsx File</button>
+              <div style={{ color:DS.textFaint, fontSize:10, marginTop:10 }}>— or fill in manually below —</div>
+            </div>
+          )}
+
+          {/* Row preview table after xlsx is parsed */}
+          {xlRows && (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                <div style={{ color:DS.textSub, fontSize:12 }}><span style={{ color:DS.green, fontWeight:700 }}>{selectedRows.size}</span> of {xlRows.length} listings selected</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>setSelectedRows(new Set(xlRows.map((_,i)=>i)))} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"4px 10px", borderRadius:6, cursor:"pointer", fontSize:11 }}>Select All</button>
+                  <button onClick={()=>setSelectedRows(new Set())} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"4px 10px", borderRadius:6, cursor:"pointer", fontSize:11 }}>Deselect All</button>
+                  <button onClick={()=>setXlRows(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textMute, padding:"4px 10px", borderRadius:6, cursor:"pointer", fontSize:11 }}>← Back</button>
+                </div>
+              </div>
+              <div style={{ overflowX:"auto", borderRadius:8, border:`1px solid ${DS.border}` }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", minWidth:700 }}>
+                  <thead>
+                    <tr style={{ background:"rgba(7,14,26,0.8)", borderBottom:`1px solid ${DS.border}` }}>
+                      <th style={{ padding:"8px 10px", width:32 }}></th>
+                      {["Address","City","Submarket","Type","SF","Asking","Broker"].map(h=>(
+                        <th key={h} style={{ padding:"8px 10px", color:DS.textMute, fontSize:10, fontWeight:700, textAlign:"left", textTransform:"uppercase", letterSpacing:"0.5px", whiteSpace:"nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {xlRows.map((r,i) => (
+                      <tr key={i} onClick={()=>toggleRow(i)} style={{ borderBottom:`1px solid ${DS.border}`, cursor:"pointer", background: selectedRows.has(i)?"rgba(59,130,246,0.06)":"transparent" }} onMouseEnter={e=>e.currentTarget.style.background=selectedRows.has(i)?"rgba(59,130,246,0.1)":DS.panelHi} onMouseLeave={e=>e.currentTarget.style.background=selectedRows.has(i)?"rgba(59,130,246,0.06)":"transparent"}>
+                        <td style={{ padding:"8px 10px", textAlign:"center" }}>
+                          <input type="checkbox" checked={selectedRows.has(i)} onChange={()=>toggleRow(i)} onClick={e=>e.stopPropagation()} style={{ accentColor:DS.blue }}/>
+                        </td>
+                        <td style={{ padding:"8px 10px", color:DS.text, fontSize:12, maxWidth:160, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.address}</td>
+                        <td style={{ padding:"8px 10px", color:DS.textSub, fontSize:12 }}>{r.city}</td>
+                        <td style={{ padding:"8px 10px", color:DS.textSub, fontSize:12, maxWidth:120, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.submarket}</td>
+                        <td style={{ padding:"8px 10px" }}>
+                          <span style={{ background:r.listingType==="Sale"?DS.blueSoft:DS.greenSoft, color:r.listingType==="Sale"?DS.blue:DS.green, padding:"1px 7px", borderRadius:20, fontSize:10, fontWeight:700 }}>{r.listingType==="Sale"?"Sale":"Lease"}</span>
+                          {r.subtype && <div style={{ color:DS.textFaint, fontSize:9, marginTop:2 }}>{r.subtype}</div>}
+                        </td>
+                        <td style={{ padding:"8px 10px", color:DS.text, fontSize:12, fontFamily:"'DM Mono', monospace" }}>{r.sqft ? parseInt(r.sqft).toLocaleString() : "—"}</td>
+                        <td style={{ padding:"8px 10px", color:DS.accent, fontSize:12, fontFamily:"'DM Mono', monospace" }}>
+                          {r.listingType==="Sale" && r.askingPrice ? fmt(parseFloat(r.askingPrice)) : r.askingPsfLease ? `$${r.askingPsfLease}/SF/YR` : "—"}
+                        </td>
+                        <td style={{ padding:"8px 10px", color:DS.blue, fontSize:11, maxWidth:130, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{r.listingBroker||"—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:14 }}>
+                <button onClick={()=>setListingModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+                <button onClick={handleBulkImport} disabled={selectedRows.size===0} style={{ background: selectedRows.size>0?DS.blue:"#1e3048", border:"none", color: selectedRows.size>0?"#fff":DS.textFaint, padding:"8px 22px", borderRadius:8, cursor: selectedRows.size>0?"pointer":"default", fontSize:13, fontWeight:800 }}>
+                  Import {selectedRows.size} Listing{selectedRows.size!==1?"s":""}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Manual form — hidden when reviewing import */}
+          {!xlRows && <>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
+              <div style={{ gridColumn:"span 2" }}>{lbl("Property Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} style={iS}/></div>
+              <div>{lbl("Address")}<input value={form.address} onChange={e=>set("address",e.target.value)} style={iS}/></div>
+              <div>{lbl("City")}<input value={form.city||""} onChange={e=>set("city",e.target.value)} style={iS}/></div>
+              <div>{lbl("Submarket")}<select value={form.submarket} onChange={e=>set("submarket",e.target.value)} style={iS}>{smList.map(s=><option key={s}>{s}</option>)}</select></div>
+              <div>{lbl("Subtype")}<select value={form.subtype} onChange={e=>set("subtype",e.target.value)} style={iS}>{INDUSTRIAL_SUBTYPES.map(s=><option key={s}>{s}</option>)}</select></div>
+              <div>{lbl("Listing Type")}<select value={form.listingType} onChange={e=>set("listingType",e.target.value)} style={iS}><option value="Sale">For Sale</option><option value="Lease">For Lease</option></select></div>
+              <div>{lbl("Square Footage")}<input type="number" value={form.sqft} onChange={e=>set("sqft",e.target.value)} style={iS}/></div>
+              {form.listingType==="Sale"
+                ? <div style={{ gridColumn:"span 2" }}>{lbl("Asking Price ($)")}<input type="number" value={form.askingPrice} onChange={e=>set("askingPrice",e.target.value)} style={iS}/></div>
+                : <div style={{ gridColumn:"span 2" }}>{lbl("Asking Rent ($/SF/YR)")}<input type="number" value={form.askingPsfLease} onChange={e=>set("askingPsfLease",e.target.value)} placeholder="e.g. 9.00" style={iS}/></div>
+              }
+              <div>{lbl("Listed Date")}<input type="date" value={form.listedDate} onChange={e=>set("listedDate",e.target.value)} style={iS}/></div>
+              <div>{lbl("Status")}<select value={form.status} onChange={e=>set("status",e.target.value)} style={iS}>{["Active","Off Market","Withdrawn","Closed"].map(s=><option key={s}>{s}</option>)}</select></div>
+              <div>{lbl("Owner / Seller")}<input value={form.seller||""} onChange={e=>set("seller",e.target.value)} style={iS}/></div>
+              <div>{lbl("Listing Broker / Firm")}<input value={form.listingBroker||""} onChange={e=>set("listingBroker",e.target.value)} style={iS}/></div>
+              <div>{lbl("Source")}<select value={form.source} onChange={e=>set("source",e.target.value)} style={iS}>{COMP_SOURCES.map(s=><option key={s}>{s}</option>)}</select></div>
+            </div>
+            <div style={{ marginBottom:16 }}>{lbl("Notes")}<textarea value={form.notes||""} onChange={e=>set("notes",e.target.value)} rows={2} style={{...iS,resize:"vertical"}}/></div>
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+              <button onClick={()=>setListingModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+              <button onClick={handleSave} style={{ background:DS.blue, border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save Listing</button>
+            </div>
+          </>}
+        </div>
+      </div>
+    );
+  }
+
+  function CloseListingModal({ listing }) {
+    const iS = { background:"#070e1a", border:`1px solid ${DS.border}`, borderRadius:8, color:DS.text, padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+    const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
+    const [closeDate, setCloseDate] = useState(today);
+    const [closePrice, setClosePriceVal] = useState("");
+    const [closePsfLease, setClosePsfLease] = useState("");
+    const [buyer, setBuyer] = useState("");
+    const [addAsComp, setAddAsComp] = useState(true);
+    const isSale = listing.listingType === "Sale";
+    const asking = isSale ? parseFloat(listing.askingPrice)||0 : parseFloat(listing.askingPsfLease)||0;
+    const finalVal = isSale ? parseFloat(closePrice)||0 : parseFloat(closePsfLease)||0;
+    const vsAskingPct = asking > 0 && finalVal > 0 ? parseFloat(((finalVal - asking) / asking * 100).toFixed(1)) : null;
+    const vpColor = vsAskingPct === null ? DS.textFaint : vsAskingPct > 0 ? DS.green : vsAskingPct < 0 ? DS.red : DS.textSub;
+    const handleClose = () => {
+      const updated = {
+        ...listing,
+        status: "Closed",
+        closeDate,
+        closePrice: isSale ? parseFloat(closePrice)||0 : 0,
+        closePsfLease: isSale ? 0 : parseFloat(closePsfLease)||0,
+        vsAskingPct,
+      };
+      setMarketListings(prev => prev.map(l => l.id === listing.id ? updated : l));
+      if (addAsComp) {
+        const sqft = parseFloat(listing.sqft) || 0;
+        const sp = parseFloat(closePrice) || 0;
+        const mr = isSale ? 0 : parseFloat(closePsfLease) * sqft / 12;
+        const comp = {
+          id: Date.now(),
+          name: listing.name,
+          address: listing.address,
+          city: listing.city || "",
+          submarket: listing.submarket,
+          subtype: listing.subtype || "Distribution",
+          compType: isSale ? "Sale" : "Lease",
+          sqft,
+          closeDate,
+          salePrice: isSale ? sp : 0,
+          psfSale: isSale && sqft > 0 ? parseFloat((sp/sqft).toFixed(2)) : 0,
+          monthlyRent: mr,
+          leaseTerm: 0,
+          psfLease: !isSale && sqft > 0 ? parseFloat((parseFloat(closePsfLease)/12).toFixed(4)) : 0,
+          seller: listing.seller || "",
+          buyer,
+          listingBroker: listing.listingBroker || "",
+          tenantBroker: "",
+          source: listing.source || "CoStar",
+          notes: `Listed at ${isSale ? fmt(asking) : "$"+asking+"/SF/YR"}. Closed ${vsAskingPct !== null ? (vsAskingPct > 0 ? `+${vsAskingPct}%` : `${vsAskingPct}%`) : "at"} asking.${listing.notes ? " "+listing.notes : ""}`,
+          verified: false,
+        };
+        setComps(prev => [...prev, comp]);
+      }
+      setCloseTarget(null);
+    };
+    return (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.87)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1001 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:480 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <h2 style={{ color:DS.text, fontSize:17, fontWeight:800, margin:0 }}>Close Listing</h2>
+            <button onClick={()=>setCloseTarget(null)} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}></button>
+          </div>
+          <div style={{ background:"#0a1420", border:`1px solid ${DS.border}`, borderRadius:8, padding:"10px 14px", marginBottom:16 }}>
+            <div style={{ color:DS.text, fontWeight:700, fontSize:13 }}>{listing.name}</div>
+            <div style={{ color:DS.textMute, fontSize:11, marginTop:2 }}>{listing.address}{listing.city?`, ${listing.city}`:""} · {listing.submarket}</div>
+            <div style={{ color:DS.accent, fontSize:12, marginTop:4 }}>
+              Asking: {isSale ? fmt(asking) : `$${asking}/SF/YR`} · {parseFloat(listing.sqft||0).toLocaleString()} SF
+            </div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
+            <div style={{ gridColumn:"span 2" }}>
+              {lbl(isSale ? "Final Sale Price ($)" : "Final Lease Rate ($/SF/YR)")}
+              <input type="number" value={isSale ? closePrice : closePsfLease} onChange={e=>isSale?setClosePriceVal(e.target.value):setClosePsfLease(e.target.value)} placeholder={isSale?"e.g. 2100000":"e.g. 4.25"} style={iS}/>
+            </div>
+            {vsAskingPct !== null && (
+              <div style={{ gridColumn:"span 2", background: vsAskingPct > 0 ? DS.greenSoft : vsAskingPct < 0 ? DS.redSoft : DS.panel, border:`1px solid ${vpColor}44`, borderRadius:8, padding:"10px 14px", textAlign:"center" }}>
+                <span style={{ color:vpColor, fontWeight:900, fontSize:22, fontFamily:"'DM Mono', monospace" }}>{vsAskingPct > 0 ? "+" : ""}{vsAskingPct}%</span>
+                <span style={{ color:DS.textSub, fontSize:12, marginLeft:8 }}>{vsAskingPct > 0 ? "over" : vsAskingPct < 0 ? "under" : "at"} asking</span>
+              </div>
+            )}
+            <div style={{ gridColumn:"span 2" }}>{lbl("Buyer / Tenant")}<input value={buyer} onChange={e=>setBuyer(e.target.value)} style={iS}/></div>
+            <div style={{ gridColumn:"span 2" }}>{lbl("Close Date")}<input type="date" value={closeDate} onChange={e=>setCloseDate(e.target.value)} style={iS}/></div>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, background:"#0a1f14", border:`1px solid ${DS.green}33`, borderRadius:8, padding:"10px 14px" }}>
+            <input type="checkbox" checked={addAsComp} onChange={e=>setAddAsComp(e.target.checked)} id="addComp" style={{ accentColor:DS.green, width:15, height:15 }}/>
+            <label htmlFor="addComp" style={{ color:DS.textSub, fontSize:12, cursor:"pointer" }}>Also add to Closed Comps database</label>
+          </div>
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+            <button onClick={()=>setCloseTarget(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+            <button onClick={handleClose} style={{ background:DS.green, border:"none", color:"#0a0f1a", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Mark Closed</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }
 
 // ── Submarket Tab ─────────────────────────────────────────────
@@ -2619,6 +5178,132 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
     setSubmarketList(prev => [...prev, entry]);
     setNewSm(""); setNewSmLat(""); setNewSmLng("");
   };
+
+  const printSubmarketReport = (r) => {
+    const brokerName = localStorage.getItem("cre-broker-name") || "";
+    const brokerage  = localStorage.getItem("cre-brokerage")  || "";
+    const dateStr    = new Date().toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+    const f = (n) => n > 0 ? "$" + Math.round(n).toLocaleString() : "—";
+    const recentComps = [...r.smComps].sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||"")).slice(0,8);
+    const activeListings = r.smListings.filter(l => l.status === "Active").slice(0,8);
+    const activeDeals = r.active.slice(0,6);
+    const closedDeals = r.closed.slice(0,6);
+    const absorption180 = r.smComps.filter(c => { const d = c.closeDate; if (!d) return false; return (new Date() - new Date(d+"T00:00:00")) / 86400000 <= 180; }).reduce((s,c) => s+(c.sqft||0), 0);
+    const win = window.open("", "_blank");
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Submarket Report — ${r.sm}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{font-family:'Helvetica Neue',Arial,sans-serif;color:#1a1a1a;background:#fff;font-size:11px;line-height:1.5}
+      .hdr{background:#0f172a;color:#fff;padding:14px 28px;display:flex;justify-content:space-between;align-items:center}
+      .hdr-title{font-size:18px;font-weight:900;letter-spacing:-0.3px}
+      .hdr-sub{font-size:10px;color:#94a3b8;margin-top:2px}
+      .hdr-right{text-align:right;font-size:10px;color:#94a3b8}
+      .body{padding:20px 28px;display:flex;flex-direction:column;gap:14px}
+      .sh{background:#1a3a5c;color:#fff;font-weight:800;font-size:10px;padding:5px 10px;letter-spacing:.6px;text-transform:uppercase;margin-bottom:0}
+      .card{border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;margin-bottom:0}
+      .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:0;border-bottom:1px solid #e2e8f0}
+      .stat{padding:10px 12px;border-right:1px solid #e2e8f0}
+      .stat:last-child{border-right:none}
+      .stat-val{font-size:16px;font-weight:900;color:#1a3a5c}
+      .stat-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#64748b;margin-top:2px}
+      table{width:100%;border-collapse:collapse;font-size:10px}
+      th{background:#f1f5f9;color:#334155;font-weight:700;padding:5px 8px;text-align:left;border:1px solid #e2e8f0;font-size:9px;text-transform:uppercase;letter-spacing:.4px}
+      td{padding:5px 8px;border:1px solid #e2e8f0;color:#334155;vertical-align:top}
+      tr:nth-child(even) td{background:#f8fafc}
+      .green{color:#059669;font-weight:700}
+      .blue{color:#2563eb;font-weight:700}
+      .amber{color:#d97706;font-weight:700}
+      .two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+      .disc{font-size:8px;color:#94a3b8;margin-top:10px;padding-top:8px;border-top:1px solid #e2e8f0;line-height:1.5}
+      @media print{button{display:none!important}}
+    </style></head><body>
+    <div class="hdr">
+      <div>
+        <div class="hdr-title">${r.sm} Submarket Report</div>
+        <div class="hdr-sub">Industrial / Commercial Real Estate Intelligence · As of ${dateStr}</div>
+      </div>
+      <div class="hdr-right">${brokerage ? `<strong>${brokerage}</strong><br/>` : ""}${brokerName}</div>
+    </div>
+    <div class="body">
+      <!-- Key Stats -->
+      <div class="card">
+        <div class="sh">Submarket Snapshot</div>
+        <div class="stats">
+          <div class="stat"><div class="stat-val">${r.smComps.length}</div><div class="stat-lbl">Closed Comps</div></div>
+          <div class="stat"><div class="stat-val">${r.activeSF > 0 ? Math.round(r.activeSF/1000)+"K SF" : "—"}</div><div class="stat-lbl">Active Inventory</div></div>
+          <div class="stat"><div class="stat-val">${absorption180 > 0 ? Math.round(absorption180/1000)+"K SF" : "—"}</div><div class="stat-lbl">180-Day Absorption</div></div>
+          <div class="stat"><div class="stat-val">${r.mktAvgSale ? "$"+r.mktAvgSale.toFixed(2) : "—"}</div><div class="stat-lbl">Avg Sale $/SF</div></div>
+          <div class="stat"><div class="stat-val">${r.mktAvgLease ? "$"+r.mktAvgLease.toFixed(3) : "—"}</div><div class="stat-lbl">Avg Lease $/SF/mo</div></div>
+        </div>
+      </div>
+
+      ${recentComps.length > 0 ? `
+      <!-- Closed Comps -->
+      <div class="card">
+        <div class="sh">Recent Closed Transactions</div>
+        <table><thead><tr>
+          <th>Property</th><th>Type</th><th>SF</th><th>Sale Price</th><th>$/SF</th><th>Close Date</th><th>Seller/LL</th><th>Buyer/Tenant</th>
+        </tr></thead><tbody>
+          ${recentComps.map(c => `<tr>
+            <td>${c.name||c.address||"—"}</td>
+            <td>${c.compType||"—"}${c.subtype?" / "+c.subtype:""}</td>
+            <td>${c.sqft?parseInt(c.sqft).toLocaleString():"—"}</td>
+            <td class="blue">${c.salePrice>0?f(c.salePrice):"—"}</td>
+            <td class="green">${c.psfSale>0?"$"+parseFloat(c.psfSale).toFixed(2)+"/SF":c.psfLease>0?"$"+parseFloat(c.psfLease).toFixed(3)+"/mo":"—"}</td>
+            <td>${c.closeDate||"—"}</td>
+            <td>${c.seller||"—"}</td>
+            <td>${c.buyer||"—"}</td>
+          </tr>`).join("")}
+        </tbody></table>
+      </div>` : ""}
+
+      ${activeListings.length > 0 ? `
+      <!-- Active Listings -->
+      <div class="card">
+        <div class="sh">Active Listings</div>
+        <table><thead><tr>
+          <th>Property</th><th>Type</th><th>SF</th><th>Asking Price</th><th>Asking $/SF</th><th>Listed</th><th>Broker</th>
+        </tr></thead><tbody>
+          ${activeListings.map(l => `<tr>
+            <td>${l.name||l.address||"—"}</td>
+            <td>${l.listingType||"—"}${l.subtype?" / "+l.subtype:""}</td>
+            <td>${l.sqft?parseInt(l.sqft).toLocaleString():"—"}</td>
+            <td class="amber">${l.askingPrice>0?f(l.askingPrice):"—"}</td>
+            <td>${l.sqft>0&&l.askingPrice>0?"$"+(l.askingPrice/l.sqft).toFixed(2)+"/SF":"—"}</td>
+            <td>${l.listedDate||"—"}</td>
+            <td>${l.listingBroker||"—"}</td>
+          </tr>`).join("")}
+        </tbody></table>
+      </div>` : ""}
+
+      ${(activeDeals.length > 0 || closedDeals.length > 0) ? `
+      <!-- Your Pipeline -->
+      <div class="card">
+        <div class="sh">My Pipeline in ${r.sm}</div>
+        <table><thead><tr>
+          <th>Deal</th><th>Client</th><th>Type</th><th>Stage</th><th>SF</th><th>Value</th><th>Commission</th>
+        </tr></thead><tbody>
+          ${[...activeDeals,...closedDeals].map(d => `<tr>
+            <td>${d.name||"—"}</td>
+            <td>${d.client||"—"}</td>
+            <td>${d.dealType||"—"}</td>
+            <td>${d.stage}</td>
+            <td>${d.sqft>0?d.sqft.toLocaleString():"—"}</td>
+            <td>${d.totalValue>0?f(d.totalValue):"—"}</td>
+            <td class="${d.stage==="Closed"?"green":"blue"}">${d.netCommission>0?f(d.netCommission):"—"}</td>
+          </tr>`).join("")}
+        </tbody></table>
+      </div>` : ""}
+
+      <div class="disc">
+        This submarket report was prepared by ${brokerName}${brokerage ? ", " + brokerage : ""} on ${dateStr} using internally tracked transaction and listing data.
+        Market comp data sourced from CoStar and broker intel. This report is for informational purposes only and is intended solely for the named recipient.
+        ${brokerage ? "All " + brokerage + " offices independently owned and operated." : ""}
+      </div>
+      <br/><button onclick="window.print()" style="background:#0f172a;color:#fff;border:none;padding:9px 22px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:900;margin-top:4px">Print / Save as PDF</button>
+    </div></body></html>`);
+    win.document.close();
+  };
   // Helper: normalize submarket entry (support old string format)
   const smName = (s) => typeof s === "string" ? s : s.name;
   const smLat = (s) => typeof s === "string" ? null : s.lat;
@@ -2633,7 +5318,7 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
         </div>
         <div style={{ display:"flex", gap:8 }}>
           <button onClick={()=>setShowSmMap(m=>!m)} style={{ background: showSmMap ? DS.greenSoft : DS.panel, border:`1px solid ${showSmMap ? DS.green+"55" : DS.border}`, color: showSmMap ? DS.green : "#64748b", padding:"6px 13px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight: showSmMap?700:400 }}>
-            {showSmMap ? "Hide Map" : "🗺 Map View"}
+            {showSmMap ? "Hide Map" : <span style={{display:"flex",alignItems:"center",gap:5}}><IcMap />Map View</span>}
           </button>
           <button onClick={()=>setEditMode(e=>!e)} style={{ background: editMode?"#1e3048":DS.panel, border:`1px solid ${DS.border}`, color: editMode?"#f59e0b":"#64748b", padding:"6px 13px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight: editMode?700:400 }}>Edit Submarkets</button>
         </div>
@@ -2649,14 +5334,14 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
             <input type="number" step="any" value={newSmLng} onChange={e=>setNewSmLng(e.target.value)} placeholder="Longitude (optional)" style={{ flex:1, minWidth:100, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#94a3b8", padding:"8px 11px", fontSize:12, outline:"none" }}/>
             <button onClick={addSubmarket} style={{ background:"#f59e0b", border:"none", color:"#0d1826", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>+ Add</button>
           </div>
-          <div style={{ color:"#475569", fontSize:10, marginBottom:8 }}>💡 Tip: Right-click a location in Google Maps → copy coordinates → paste lat/lng above to place submarket on the map.</div>
+          <div style={{ color:"#475569", fontSize:10, marginBottom:8 }}>Tip: Right-click a location in Google Maps → copy coordinates → paste lat/lng above to place submarket on the map.</div>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
             {submarketList.map((sm, idx) => {
               const nm = typeof sm === "string" ? sm : sm.name;
               const hasCoords = typeof sm !== "string" && sm.lat && sm.lng;
               return (
                 <div key={nm} style={{ display:"flex", alignItems:"center", gap:4, background:"#0f1e2e", border:`1px solid ${hasCoords ? DS.green+"44" : DS.border}`, borderRadius:20, padding:"4px 10px" }}>
-                  {hasCoords && <span style={{ fontSize:9, color:DS.green }}>📍</span>}
+                  {hasCoords && <span style={{ color:DS.green, display:"flex" }}><IcPin /></span>}
                   <span style={{ color:"#f1f5f9", fontSize:12 }}>{nm}</span>
                   <button onClick={(e)=>{ e.stopPropagation(); setSubmarketList(prev=>prev.filter((_,i)=>i!==idx)); }} style={{ background:"none", border:"none", color:"#f87171", cursor:"pointer", fontSize:13, padding:"0 2px", lineHeight:1, fontWeight:700 }} title="Remove submarket">×</button>
                 </div>
@@ -2682,13 +5367,16 @@ function SubmarketTab({ deals, listings, comps, submarketList, setSubmarketList 
           <div key={r.sm} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: 12, padding: "16px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
-                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 15, display:"flex", alignItems:"center", gap:6 }}>{r.sm}{r.lat&&r.lng&&<span style={{ fontSize:10, color:DS.green, fontWeight:400 }}>📍 mapped</span>}</div>
+                <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 15, display:"flex", alignItems:"center", gap:6 }}>{r.sm}{r.lat&&r.lng&&<span style={{ fontSize:10, color:DS.green, fontWeight:400, display:"flex", alignItems:"center", gap:3 }}><IcPin s={9} /> mapped</span>}</div>
                 <div style={{ color: "#475569", fontSize: 11 }}>{r.smDeals.length} deal{r.smDeals.length!==1?"s":""} · {r.smListings.length} listing{r.smListings.length!==1?"s":""} · {r.smComps.length} comp{r.smComps.length!==1?"s":""}</div>
               </div>
-              {r.commissions > 0 && <div style={{ textAlign: "right" }}>
-                <div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16 }}>{fmt(r.commissions)}</div>
-                <div style={{ color: "#475569", fontSize: 10 }}>earned commissions</div>
-              </div>}
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                {r.commissions > 0 && <div style={{ textAlign: "right" }}>
+                  <div style={{ color: "#f59e0b", fontWeight: 800, fontSize: 16 }}>{fmt(r.commissions)}</div>
+                  <div style={{ color: "#475569", fontSize: 10 }}>earned commissions</div>
+                </div>}
+                <button onClick={() => printSubmarketReport(r)} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 12px", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace:"nowrap", display:"flex", alignItems:"center", gap:5 }}><IcPrint /> Print Report</button>
+              </div>
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {[
@@ -3156,14 +5844,32 @@ function ContactBriefModal({ contact, deals, onClose }) {
   );
 }
 
-function ContactsTab({ contacts, setContacts, deals, submarketList }) {
-  const smList = submarketList || DEFAULT_SUBMARKETS;
+const REQUIREMENT_TIMELINES = ["ASAP", "1–3 months", "3–6 months", "6–12 months", "12+ months"];
+
+function matchRequirementToListings(req, listings) {
+  return (listings || []).filter(l => {
+    if (l.status !== "Active") return false;
+    if (req.dealType && l.dealType !== req.dealType) return false;
+    if (req.subtypes?.length > 0 && !req.subtypes.includes(l.subtype)) return false;
+    if (req.submarkets?.length > 0 && !req.submarkets.includes(l.submarket)) return false;
+    if (req.sqftMin && l.sqft < parseFloat(req.sqftMin)) return false;
+    if (req.sqftMax && l.sqft > parseFloat(req.sqftMax)) return false;
+    const price = l.dealType === "Sale" ? l.askingPrice : l.monthlyRent;
+    if (req.budgetMax && price > parseFloat(req.budgetMax)) return false;
+    return true;
+  });
+}
+
+function ContactsTab({ contacts, setContacts, deals, listings, submarketList, onConvertToDeal }) {
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
   const [modal, setModal] = useState(null);
   const [briefContact, setBriefContact] = useState(null);
   const [activityContact, setActivityContact] = useState(null);
+  const [convertContact, setConvertContact] = useState(null);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("All");
   const [activeView, setActiveView] = useState("all");
+  const [matchesFor, setMatchesFor] = useState(null); // { contact, req, matches }
   const relColors = { "Cold":"#475569","Warm":"#f59e0b","Active":"#10b981","Key Relationship":"#ec4899" };
   const outreachThresholds = { "Key Relationship":30, "Active":45, "Warm":60, "Cold":90 };
 
@@ -3195,7 +5901,11 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
   });
 
   function ContactModal({ contact }) {
-    const [form, setForm] = useState(contact || { name:"", company:"", type:"Owner", phone:"", email:"", submarket:smList[0]||"Northeast", properties:"", relationshipLevel:"Warm", lastContact:today, notes:"" });
+    const [form, setForm] = useState(contact || { name:"", company:"", type:"Owner", phone:"", email:"", submarket:smList[0]||"Northeast", properties:"", relationshipLevel:"Warm", lastContact:today, notes:"", requirements:[] });
+    const [addingReq, setAddingReq] = useState(false);
+    const [newReq, setNewReq] = useState({ dealType:"Lease", subtypes:[], submarkets:[], sqftMin:"", sqftMax:"", budgetMin:"", budgetMax:"", timeline:"3–6 months", notes:"", active:true });
+    const setR = (k,v) => setNewReq(r => ({ ...r, [k]:v }));
+    const toggleArr = (k, val) => setNewReq(r => ({ ...r, [k]: r[k].includes(val) ? r[k].filter(x=>x!==val) : [...r[k], val] }));
     const set = (k,v) => setForm(f=>({...f,[k]:v}));
     const iStyle = { background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
     const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
@@ -3218,9 +5928,136 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
             <div style={{ gridColumn:"span 2" }}>{lbl("Properties / Buildings (optional)")}<input value={form.properties} onChange={e=>set("properties",e.target.value)} placeholder="42 Commerce Park, 100 Industrial Way" style={iStyle}/></div>
             <div style={{ gridColumn:"span 2" }}>{lbl("Notes")}<textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={3} style={{...iStyle,resize:"vertical"}} placeholder="Background, relationship history, opportunities..."/></div>
           </div>
-          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+
+          {/* Requirements section — shown for tenant/buyer types */}
+          <div style={{ borderTop:`1px solid ${DS.border}`, paddingTop:14, marginTop:4 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+              <div style={{ color:DS.textSub, fontSize:12, fontWeight:DS.fw.bold }}>Space Requirements ({(form.requirements||[]).length})</div>
+              <button onClick={()=>setAddingReq(r=>!r)} style={{ background:DS.accent+"22", border:`1px solid ${DS.accent}44`, color:DS.accent, padding:"3px 11px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:10, fontWeight:DS.fw.black }}>{addingReq ? "Cancel" : "+ Add Requirement"}</button>
+            </div>
+            {addingReq && (
+              <div style={{ background:DS.bg, border:`1px solid ${DS.borderHi}`, borderRadius:DS.r.md, padding:"12px 14px", marginBottom:10 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:8 }}>
+                  <div>
+                    {lbl("Deal Type")}
+                    <select value={newReq.dealType} onChange={e=>setR("dealType",e.target.value)} style={iStyle}>
+                      {DEAL_TYPES.map(t=><option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    {lbl("Timeline")}
+                    <select value={newReq.timeline} onChange={e=>setR("timeline",e.target.value)} style={iStyle}>
+                      {REQUIREMENT_TIMELINES.map(t=><option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>{lbl("SF Min")}<input type="number" value={newReq.sqftMin} onChange={e=>setR("sqftMin",e.target.value)} placeholder="e.g. 20000" style={iStyle}/></div>
+                  <div>{lbl("SF Max")}<input type="number" value={newReq.sqftMax} onChange={e=>setR("sqftMax",e.target.value)} placeholder="e.g. 50000" style={iStyle}/></div>
+                  <div>{lbl("Budget Min ($)")}<input type="number" value={newReq.budgetMin} onChange={e=>setR("budgetMin",e.target.value)} placeholder="Monthly rent or sale price" style={iStyle}/></div>
+                  <div>{lbl("Budget Max ($)")}<input type="number" value={newReq.budgetMax} onChange={e=>setR("budgetMax",e.target.value)} style={iStyle}/></div>
+                </div>
+                <div style={{ marginBottom:8 }}>
+                  {lbl("Target Submarkets")}
+                  <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                    {smList.slice(0,10).map(s => <button key={s} onClick={()=>toggleArr("submarkets",s)} style={{ padding:"3px 9px", background:newReq.submarkets.includes(s)?DS.blue+"33":"transparent", border:`1px solid ${newReq.submarkets.includes(s)?DS.blue:DS.border}`, borderRadius:DS.r.sm, color:newReq.submarkets.includes(s)?DS.blue:DS.textMute, cursor:"pointer", fontSize:10 }}>{s}</button>)}
+                  </div>
+                </div>
+                <div style={{ marginBottom:8 }}>
+                  {lbl("Property Subtypes")}
+                  <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                    {INDUSTRIAL_SUBTYPES.map(s => <button key={s} onClick={()=>toggleArr("subtypes",s)} style={{ padding:"3px 9px", background:newReq.subtypes.includes(s)?DS.purple+"33":"transparent", border:`1px solid ${newReq.subtypes.includes(s)?DS.purple:DS.border}`, borderRadius:DS.r.sm, color:newReq.subtypes.includes(s)?DS.purple:DS.textMute, cursor:"pointer", fontSize:10 }}>{s}</button>)}
+                  </div>
+                </div>
+                <div style={{ marginBottom:8 }}>{lbl("Notes")}<input value={newReq.notes} onChange={e=>setR("notes",e.target.value)} placeholder="Special requirements, flexibility notes..." style={iStyle}/></div>
+                <button onClick={()=>{
+                  if (!newReq.sqftMin && !newReq.sqftMax && !newReq.budgetMax && newReq.submarkets.length===0) return;
+                  setForm(f=>({...f, requirements:[...(f.requirements||[]), { ...newReq, id:Date.now(), createdDate:today }]}));
+                  setNewReq({ dealType:"Lease", subtypes:[], submarkets:[], sqftMin:"", sqftMax:"", budgetMin:"", budgetMax:"", timeline:"3–6 months", notes:"", active:true });
+                  setAddingReq(false);
+                }} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"6px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:11, fontWeight:DS.fw.black }}>Add Requirement</button>
+              </div>
+            )}
+            {(form.requirements||[]).map(r => {
+              const matches = matchRequirementToListings(r, listings||[]);
+              return (
+                <div key={r.id} style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, padding:"8px 12px", marginBottom:6, display:"flex", alignItems:"flex-start", gap:10 }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:4 }}>
+                      <span style={{ background:r.dealType==="Sale"?DS.blue+"22":DS.green+"22", color:r.dealType==="Sale"?DS.blue:DS.green, fontSize:9, padding:"1px 7px", borderRadius:8, fontWeight:DS.fw.bold }}>{r.dealType}</span>
+                      {r.sqftMin || r.sqftMax ? <span style={{ color:DS.textSub, fontSize:10 }}>{r.sqftMin||"0"}–{r.sqftMax||"∞"} SF</span> : null}
+                      {r.budgetMax ? <span style={{ color:DS.accent, fontSize:10 }}>≤ {fmt(parseFloat(r.budgetMax))}</span> : null}
+                      <span style={{ color:DS.textFaint, fontSize:9 }}>{r.timeline}</span>
+                      {matches.length > 0 && <span style={{ background:DS.green+"22", color:DS.green, fontSize:9, padding:"1px 6px", borderRadius:8, fontWeight:DS.fw.black, cursor:"pointer" }} onClick={()=>setMatchesFor({contact:form, req:r, matches})}>{matches.length} match{matches.length!==1?"es":""}</span>}
+                    </div>
+                    {(r.submarkets||[]).length > 0 && <div style={{ color:DS.textFaint, fontSize:9 }}>{r.submarkets.join(", ")}</div>}
+                    {r.notes && <div style={{ color:DS.textMute, fontSize:10, fontStyle:"italic" }}>{r.notes}</div>}
+                  </div>
+                  <button onClick={()=>setForm(f=>({...f, requirements:(f.requirements||[]).filter(x=>x.id!==r.id)}))} style={{ background:"none", border:"none", color:DS.textFaint, cursor:"pointer", fontSize:14, padding:0 }}>×</button>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:14 }}>
             <button onClick={()=>setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
             <button onClick={()=>saveContact(form)} style={{ background:"#ec4899", border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save Contact</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function ConvertToDealModal({ contact }) {
+    const iStyle = { background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
+    const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
+    const defaultName = contact.company ? `${contact.company} — Deal` : `${contact.name} — Deal`;
+    const [form, setForm] = useState({
+      name: defaultName,
+      client: contact.company || contact.name,
+      dealType: "Sale",
+      repType: "Seller/Landlord Rep",
+      subtype: "Distribution",
+      stage: "Prospect",
+      submarket: contact.submarket || smList[0] || "Northeast",
+      sqft: "",
+      commissionRate: "5",
+      probability: "25",
+      expectedClose: "",
+      leadSource: "Other",
+      notes: contact.notes || "",
+    });
+    const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+    const handleConvert = () => {
+      if (!form.name.trim()) return;
+      onConvertToDeal(contact, form);
+      setConvertContact(null);
+    };
+    return (
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:560, maxHeight:"90vh", overflowY:"auto" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+            <h2 style={{ color:"#f1f5f9", fontSize:17, fontWeight:800, margin:0 }}>Convert to Pipeline Deal</h2>
+            <button onClick={()=>setConvertContact(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
+          </div>
+          <div style={{ background:"#0f1e2e", border:"1px solid #1e3048", borderRadius:8, padding:"8px 12px", marginBottom:16, fontSize:12, color:"#64748b" }}>
+            Converting <span style={{ color:"#f59e0b", fontWeight:700 }}>{contact.name}</span>{contact.company ? ` (${contact.company})` : ""} — a new deal will be added to your pipeline.
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
+            <div style={{ gridColumn:"span 2" }}>{lbl("Deal Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} style={iStyle}/></div>
+            <div>{lbl("Client / Company")}<input value={form.client} onChange={e=>set("client",e.target.value)} style={iStyle}/></div>
+            <div>{lbl("Submarket")}<select value={form.submarket} onChange={e=>set("submarket",e.target.value)} style={iStyle}>{smList.map(s=><option key={s}>{s}</option>)}</select></div>
+            <div>{lbl("Deal Type")}<select value={form.dealType} onChange={e=>set("dealType",e.target.value)} style={iStyle}>{DEAL_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+            <div>{lbl("Rep Type")}<select value={form.repType} onChange={e=>set("repType",e.target.value)} style={iStyle}>{REP_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+            <div>{lbl("Property Subtype")}<select value={form.subtype} onChange={e=>set("subtype",e.target.value)} style={iStyle}>{INDUSTRIAL_SUBTYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+            <div>{lbl("Stage")}<select value={form.stage} onChange={e=>set("stage",e.target.value)} style={iStyle}>{STAGES.filter(s=>s!=="Closed"&&s!=="Lost").map(s=><option key={s}>{s}</option>)}</select></div>
+            <div>{lbl("SF (optional)")}<input type="number" value={form.sqft} onChange={e=>set("sqft",e.target.value)} placeholder="e.g. 50000" style={iStyle}/></div>
+            <div>{lbl("Expected Close")}<input type="date" value={form.expectedClose} onChange={e=>set("expectedClose",e.target.value)} style={iStyle}/></div>
+            <div>{lbl("Commission Rate %")}<input type="number" value={form.commissionRate} onChange={e=>set("commissionRate",e.target.value)} style={iStyle}/></div>
+            <div>{lbl("Lead Source")}<select value={form.leadSource} onChange={e=>set("leadSource",e.target.value)} style={iStyle}>{LEAD_SOURCES.map(s=><option key={s}>{s}</option>)}</select></div>
+            <div style={{ gridColumn:"span 2" }}>{lbl("Notes")}<textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={3} style={{...iStyle,resize:"vertical"}}/></div>
+          </div>
+          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+            <button onClick={()=>setConvertContact(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
+            <button onClick={handleConvert} style={{ background:"#f59e0b", border:"none", color:"#000", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Add to Pipeline →</button>
           </div>
         </div>
       </div>
@@ -3243,6 +6080,9 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
           <button onClick={()=>setActiveView("all")} style={{ background: activeView==="all"?"#1e3048":"none", border:"none", color: activeView==="all"?"#f1f5f9":"#64748b", padding:"5px 13px", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight: activeView==="all"?700:400 }}>All Contacts ({contacts.length})</button>
           <button onClick={()=>setActiveView("outreach")} style={{ background: activeView==="outreach"?"#4a1a3a":"none", border:"none", color: activeView==="outreach"?"#ec4899":"#64748b", padding:"5px 13px", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight: activeView==="outreach"?700:400 }}>
             Outreach Queue {outreachQueue.length > 0 && <span style={{ background:"#ec4899", color:"#fff", borderRadius:20, padding:"0px 5px", fontSize:9, fontWeight:800 }}>{outreachQueue.length}</span>}
+          </button>
+          <button onClick={()=>setActiveView("requirements")} style={{ background: activeView==="requirements"?DS.accent+"22":"none", border:"none", color: activeView==="requirements"?DS.accent:"#64748b", padding:"5px 13px", borderRadius:6, cursor:"pointer", fontSize:11, fontWeight: activeView==="requirements"?700:400 }}>
+            Requirements {(() => { const n = contacts.reduce((s,c)=>(c.requirements||[]).filter(r=>r.active).length+s,0); return n > 0 ? <span style={{ background:DS.accent, color:"#0a0f1a", borderRadius:20, padding:"0px 5px", fontSize:9, fontWeight:800 }}>{n}</span> : null; })()}
           </button>
         </div>
         {activeView === "all" && <>
@@ -3290,22 +6130,89 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
         </div>
       )}
 
+      {/* Requirements view */}
+      {activeView === "requirements" && (() => {
+        const allReqs = contacts.flatMap(c => (c.requirements||[]).filter(r=>r.active).map(r => ({ ...r, _contact: c })));
+        if (allReqs.length === 0) return <div style={{ color:DS.textFaint, fontSize:DS.fs.md, textAlign:"center", padding:"40px 0" }}>No active requirements. Add requirements to contacts to track what tenants and buyers are looking for.</div>;
+        return (
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ background:DS.panel, border:`1px solid ${DS.accent}22`, borderRadius:DS.r.md, padding:"10px 14px", fontSize:DS.fs.xs, color:DS.textMute }}>
+              {allReqs.length} active requirement{allReqs.length!==1?"s":" "} across {contacts.filter(c=>(c.requirements||[]).some(r=>r.active)).length} contacts · matched against {(listings||[]).filter(l=>l.status==="Active").length} active listings
+            </div>
+            {allReqs.map(r => {
+              const matches = matchRequirementToListings(r, listings||[]);
+              const c = r._contact;
+              return (
+                <div key={r.id} style={{ background:DS.panel, border:`1px solid ${matches.length>0?DS.green+"44":DS.border}`, borderRadius:DS.r.lg, padding:"14px 18px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+                    <div>
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
+                        <span style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.md }}>{c.name}</span>
+                        {c.company && <span style={{ color:DS.textMute, fontSize:DS.fs.sm }}>{c.company}</span>}
+                        <span style={{ background:"#1e3048", color:"#94a3b8", fontSize:9, padding:"1px 6px", borderRadius:8 }}>{c.type}</span>
+                      </div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        <span style={{ background:r.dealType==="Sale"?DS.blue+"22":DS.green+"22", color:r.dealType==="Sale"?DS.blue:DS.green, fontSize:10, padding:"2px 8px", borderRadius:8, fontWeight:DS.fw.bold }}>{r.dealType}</span>
+                        {r.sqftMin||r.sqftMax ? <span style={{ background:DS.borderHi, color:DS.textSub, fontSize:10, padding:"2px 8px", borderRadius:8 }}>{(parseFloat(r.sqftMin)||0).toLocaleString()}–{r.sqftMax?(parseFloat(r.sqftMax)).toLocaleString():"∞"} SF</span> : null}
+                        {r.budgetMax ? <span style={{ background:DS.accent+"22", color:DS.accent, fontSize:10, padding:"2px 8px", borderRadius:8 }}>≤ {fmt(parseFloat(r.budgetMax))}</span> : null}
+                        <span style={{ background:DS.borderHi, color:DS.textFaint, fontSize:10, padding:"2px 8px", borderRadius:8 }}>{r.timeline}</span>
+                        {(r.submarkets||[]).length>0 && <span style={{ background:DS.blue+"11", color:DS.blue, fontSize:10, padding:"2px 8px", borderRadius:8 }}>{r.submarkets.join(", ")}</span>}
+                        {(r.subtypes||[]).length>0 && <span style={{ background:DS.purple+"11", color:DS.purple, fontSize:10, padding:"2px 8px", borderRadius:8 }}>{r.subtypes.join(", ")}</span>}
+                      </div>
+                      {r.notes && <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginTop:6, fontStyle:"italic" }}>{r.notes}</div>}
+                    </div>
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6, flexShrink:0, marginLeft:16 }}>
+                      {matches.length > 0
+                        ? <button onClick={()=>setMatchesFor({contact:c, req:r, matches})} style={{ background:DS.green+"22", border:`1px solid ${DS.green}44`, color:DS.green, padding:"5px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:11, fontWeight:DS.fw.black }}>{matches.length} Listing Match{matches.length!==1?"es":""}</button>
+                        : <span style={{ color:DS.textFaint, fontSize:10 }}>No matches yet</span>
+                      }
+                      <button onClick={()=>setModal(c)} style={{ background:DS.panelHi, border:`1px solid ${DS.border}`, color:DS.textMute, padding:"4px 11px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:10 }}>Edit Contact</button>
+                    </div>
+                  </div>
+                  {/* Matching listings mini-list */}
+                  {matches.length > 0 && (
+                    <div style={{ borderTop:`1px solid ${DS.border}`, paddingTop:8, display:"flex", gap:6, flexWrap:"wrap" }}>
+                      {matches.slice(0,4).map(l => (
+                        <div key={l.id} style={{ background:DS.bg, border:`1px solid ${DS.green}33`, borderRadius:DS.r.sm, padding:"5px 10px", fontSize:DS.fs.xs }}>
+                          <span style={{ color:DS.text, fontWeight:DS.fw.semi }}>{l.name}</span>
+                          <span style={{ color:DS.textFaint }}> · {l.sqft?.toLocaleString()} SF · {l.dealType==="Sale"?fmt(l.askingPrice):fmt(l.monthlyRent)+"/mo"} · {l.submarket}</span>
+                        </div>
+                      ))}
+                      {matches.length > 4 && <div style={{ color:DS.textFaint, fontSize:DS.fs.xs, alignSelf:"center" }}>+{matches.length-4} more</div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {/* All contacts grid */}
       {activeView === "all" && <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:12 }}>
         {filtered.map(c => {
           const ds = daysSince(c.lastContact);
           const stale = ds !== null && ds > 30;
           const linkedD = deals.filter(d => (c.linkedDeals||[]).includes(d.id));
+          const score = calcContactScore(c, deals);
           return (
             <div key={c.id} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"16px 18px" }}>
               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
-                <div>
+                <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:14 }}>{c.name}</div>
                   <div style={{ color:"#64748b", fontSize:11, marginTop:2 }}>{c.company}</div>
                 </div>
-                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
-                  <span style={{ background:"#1e3048", color:relColors[c.relationshipLevel]||"#64748b", border:`1px solid ${relColors[c.relationshipLevel]||"#1e3048"}`, padding:"2px 8px", borderRadius:20, fontSize:10, fontWeight:700 }}>{c.relationshipLevel}</span>
-                  <span style={{ background:"#0f1e2e", color:"#475569", padding:"2px 8px", borderRadius:20, fontSize:9 }}>{c.type}</span>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:5, flexShrink:0, marginLeft:8 }}>
+                  {/* Relationship score ring */}
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <div title={`Relationship score: ${score.score}/100`} style={{ width:34, height:34, borderRadius:"50%", background:score.color+"18", border:`2px solid ${score.color}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                      <span style={{ color:score.color, fontWeight:900, fontSize:10, fontFamily:"'DM Mono',monospace" }}>{score.score}</span>
+                    </div>
+                    <div>
+                      <span style={{ background:"#1e3048", color:relColors[c.relationshipLevel]||"#64748b", border:`1px solid ${relColors[c.relationshipLevel]||"#1e3048"}44`, padding:"2px 8px", borderRadius:20, fontSize:9, fontWeight:700, display:"block" }}>{c.relationshipLevel}</span>
+                      <span style={{ color:"#475569", fontSize:9, display:"block", textAlign:"right", marginTop:2 }}>{c.type}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
@@ -3314,11 +6221,22 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
               </div>
               <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
                 {c.submarket && <span style={{ background:"#1e3048", color:"#94a3b8", padding:"2px 8px", borderRadius:20, fontSize:10 }}>{c.submarket}</span>}
-                {ds !== null && <span style={{ background: stale?"#2d1515":"#0f1e2e", color: stale?"#fca5a5":"#475569", border:`1px solid ${stale?"#7f1d1d":"#1e3048"}`, padding:"2px 8px", borderRadius:20, fontSize:10 }}>{stale?"️ ":""}{ds === 0 ? "Today" : `${ds}d ago`}</span>}
+                {ds !== null && <span style={{ background: stale?"#2d1515":"#0f1e2e", color: stale?"#fca5a5":"#475569", border:`1px solid ${stale?"#7f1d1d":"#1e3048"}`, padding:"2px 8px", borderRadius:20, fontSize:10 }}>{ds === 0 ? "Today" : `${ds}d ago`}</span>}
               </div>
               {c.properties && <div style={{ color:"#475569", fontSize:11, marginBottom:8 }}>{c.properties}</div>}
               {c.notes && <div style={{ color:"#475569", fontSize:11, marginBottom:10, fontStyle:"italic", borderLeft:"2px solid #1e3048", paddingLeft:8 }}>{c.notes}</div>}
               {linkedD.length > 0 && <div style={{ marginBottom:10 }}><div style={{ color:"#334155", fontSize:9, fontWeight:700, marginBottom:4 }}>LINKED DEALS</div>{linkedD.map(d=><span key={d.id} style={{ background:"#1e3048", color:"#94a3b8", padding:"2px 8px", borderRadius:20, fontSize:10, marginRight:4 }}>{d.name}</span>)}</div>}
+              {(c.requirements||[]).filter(r=>r.active).length > 0 && (() => {
+                const reqs = (c.requirements||[]).filter(r=>r.active);
+                const totalMatches = reqs.reduce((s,r)=>s+matchRequirementToListings(r,listings||[]).length,0);
+                return (
+                  <div style={{ marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+                    <span style={{ color:DS.textFaint, fontSize:9, fontWeight:700 }}>REQUIREMENTS</span>
+                    <span style={{ background:DS.accent+"22", color:DS.accent, fontSize:9, padding:"1px 7px", borderRadius:8, fontWeight:DS.fw.black }}>{reqs.length} active</span>
+                    {totalMatches>0 && <span style={{ background:DS.green+"22", color:DS.green, fontSize:9, padding:"1px 7px", borderRadius:8, fontWeight:DS.fw.black, cursor:"pointer" }} onClick={()=>setActiveView("requirements")}>{totalMatches} listing match{totalMatches!==1?"es":""}</span>}
+                  </div>
+                );
+              })()}
               {/* Recent activity preview */}
               {(c.activityLog||[]).length > 0 && (() => {
                 const recent = (c.activityLog||[]).slice(0, 2);
@@ -3341,6 +6259,7 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
                 <button onClick={()=>setActivityContact(c)} style={{ background:DS.blueSoft, border:`1px solid ${DS.blue}44`, color:DS.blue, padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }}>Log</button>
                 <button onClick={()=>setBriefContact(c)} style={{ background:DS.accentSoft, border:`1px solid ${DS.accent}44`, color:DS.accent, padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }}>Brief</button>
                 <button onClick={()=>markContacted(c.id)} style={{ background:"#0a2a1a", border:"1px solid #16a34a", color:"#4ade80", padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }}>Contacted</button>
+                {onConvertToDeal && <button onClick={()=>setConvertContact(c)} style={{ background:"#1a1500", border:"1px solid #f59e0b66", color:"#f59e0b", padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11, fontWeight:700 }} title="Convert to Pipeline Deal">→ Pipeline</button>}
                 <button onClick={()=>setModal(c)} style={{ flex:1, background:"#1e3048", border:"none", color:"#94a3b8", padding:"6px", borderRadius:7, cursor:"pointer", fontSize:11 }}>Edit</button>
                 <button onClick={()=>{ if(window.confirm("Delete contact?")) setContacts(prev=>prev.filter(x=>x.id!==c.id)); }} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#475569", padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:11 }}></button>
               </div>
@@ -3352,6 +6271,47 @@ function ContactsTab({ contacts, setContacts, deals, submarketList }) {
       {modal && <ContactModal contact={modal==="new"?null:modal}/>}
       {briefContact && <ContactBriefModal contact={briefContact} deals={deals} onClose={()=>setBriefContact(null)} />}
       {activityContact && <ContactActivityModal contact={activityContact} onSave={updated => { setContacts(prev => prev.map(c => c.id === updated.id ? updated : c)); setActivityContact(updated); }} onClose={()=>setActivityContact(null)} />}
+      {convertContact && <ConvertToDealModal contact={convertContact}/>}
+      {matchesFor && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2200 }} onClick={()=>setMatchesFor(null)}>
+          <div style={{ background:DS.panel, border:`1px solid ${DS.borderHi}`, borderRadius:DS.r.xl, padding:26, width:600, maxHeight:"80vh", overflowY:"auto", boxShadow:DS.shadow.xl }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <div>
+                <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h3 }}>Listing Matches</div>
+                <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginTop:2 }}>{matchesFor.contact.name} · {matchesFor.matches.length} match{matchesFor.matches.length!==1?"es":""}</div>
+              </div>
+              <button onClick={()=>setMatchesFor(null)} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}>✕</button>
+            </div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14, padding:"8px 12px", background:DS.bg, borderRadius:DS.r.sm }}>
+              {matchesFor.req.dealType && <span style={{ background:DS.blue+"22", color:DS.blue, fontSize:10, padding:"2px 8px", borderRadius:8 }}>{matchesFor.req.dealType}</span>}
+              {matchesFor.req.sqftMin||matchesFor.req.sqftMax ? <span style={{ color:DS.textSub, fontSize:10 }}>{(parseFloat(matchesFor.req.sqftMin)||0).toLocaleString()}–{matchesFor.req.sqftMax?(parseFloat(matchesFor.req.sqftMax)).toLocaleString():"∞"} SF</span> : null}
+              {(matchesFor.req.submarkets||[]).length>0 && <span style={{ color:DS.textFaint, fontSize:10 }}>{matchesFor.req.submarkets.join(", ")}</span>}
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {matchesFor.matches.map(l => (
+                <div key={l.id} style={{ background:DS.bg, border:`1px solid ${DS.green}33`, borderRadius:DS.r.md, padding:"12px 14px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div>
+                      <div style={{ color:DS.text, fontWeight:DS.fw.bold, fontSize:DS.fs.md }}>{l.name}</div>
+                      <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginTop:2 }}>{l.address} · {l.submarket}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ color:DS.accent, fontWeight:DS.fw.black, fontSize:DS.fs.md }}>{l.dealType==="Sale"?fmt(l.askingPrice):fmt(l.monthlyRent)+"/mo"}</div>
+                      <div style={{ color:DS.textFaint, fontSize:10 }}>{l.sqft?.toLocaleString()} SF</div>
+                    </div>
+                  </div>
+                  <div style={{ display:"flex", gap:5, marginTop:8, flexWrap:"wrap" }}>
+                    <span style={{ background:DS.borderHi, color:DS.textMute, fontSize:9, padding:"1px 7px", borderRadius:8 }}>{l.subtype}</span>
+                    {l.dealType==="Lease"&&l.askingPsfLease>0 && <span style={{ background:DS.accent+"11", color:DS.accent, fontSize:9, padding:"1px 7px", borderRadius:8 }}>${l.askingPsfLease}/SF/mo</span>}
+                    {l.dealType==="Sale"&&l.askingPsfSale>0 && <span style={{ background:DS.accent+"11", color:DS.accent, fontSize:9, padding:"1px 7px", borderRadius:8 }}>${l.askingPsfSale}/SF</span>}
+                    {l.marketingNotes && <span style={{ color:DS.textFaint, fontSize:9, fontStyle:"italic" }}>{l.marketingNotes.substring(0,50)}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3537,7 +6497,7 @@ function TasksTab({ tasks, setTasks, deals }) {
                     <button onClick={()=>setConfirmDeleteId(null)} style={{ background:"none", border:"1px solid #334155", color:"#64748b", cursor:"pointer", fontSize:10, padding:"2px 7px", borderRadius:4 }}>No</button>
                   </span>
                 ) : (
-                  <button onClick={()=>setConfirmDeleteId(t.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}>🗑</button>
+                  <button onClick={()=>setConfirmDeleteId(t.id)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", padding:"2px 4px", display:"flex", alignItems:"center" }}><IcTrash /></button>
                 )}
               </div>
             </div>
@@ -3554,6 +6514,11 @@ function TasksTab({ tasks, setTasks, deals }) {
 function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
   const [modal, setModal] = useState(null);
   const [filterYear, setFilterYear] = useState(String(thisYear));
+  const [budgets, setBudgets] = useState(() => {
+    try { const s = localStorage.getItem("cre-expense-budgets-v1"); return s ? JSON.parse(s) : {}; } catch { return {}; }
+  });
+  const [editBudget, setEditBudget] = useState(null);
+  useEffect(() => { try { localStorage.setItem("cre-expense-budgets-v1", JSON.stringify(budgets)); } catch {} }, [budgets]);
 
   const saveExpense = (form) => {
     const d = { ...form, amount: parseFloat(form.amount)||0 };
@@ -3565,9 +6530,13 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
   const yearExpenses = expenses.filter(e => e.date?.startsWith(filterYear));
   const totalExpenses = yearExpenses.reduce((s,e)=>s+(e.amount||0),0);
   const netIncome = closedYTD - totalExpenses;
-  const byCategory = EXPENSE_CATEGORIES.map(cat => ({
-    cat, total: yearExpenses.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0), count: yearExpenses.filter(e=>e.category===cat).length
-  })).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
+  const byCategory = EXPENSE_CATEGORIES.map(cat => {
+    const total = yearExpenses.filter(e=>e.category===cat).reduce((s,e)=>s+e.amount,0);
+    const budget = budgets[cat] || 0;
+    const pct = budget > 0 ? Math.min(total/budget*100, 100) : (totalExpenses > 0 ? total/totalExpenses*100 : 0);
+    const over = budget > 0 && total > budget;
+    return { cat, total, count: yearExpenses.filter(e=>e.category===cat).length, budget, pct, over };
+  }).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
 
   const years = [...new Set(expenses.map(e=>e.date?.substring(0,4)).filter(Boolean))].sort().reverse();
   if (!years.includes(String(thisYear))) years.unshift(String(thisYear));
@@ -3632,19 +6601,35 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
       <div style={{ display:"grid", gridTemplateColumns:"1fr 2fr", gap:12 }}>
         {/* By category */}
         <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"14px 18px" }}>
-          <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:13, marginBottom:12 }}>By Category</div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12 }}>
+            <div style={{ color:"#f1f5f9", fontWeight:700, fontSize:13 }}>By Category</div>
+            <span style={{ color:DS.textMute, fontSize:10 }}>click to set budget</span>
+          </div>
           {byCategory.length === 0 && <div style={{ color:"#475569", fontSize:12 }}>No expenses logged yet.</div>}
           {byCategory.map(c=>(
-            <div key={c.cat} style={{ marginBottom:10 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
-                <span style={{ color:"#94a3b8", fontSize:11 }}>{c.cat}</span>
-                <span style={{ color:"#f59e0b", fontSize:11, fontWeight:700 }}>{fmt(c.total)}</span>
+            <div key={c.cat} style={{ marginBottom:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:3 }}>
+                <button onClick={()=>setEditBudget(c.cat)} style={{ background:"none", border:"none", color:"#94a3b8", fontSize:11, cursor:"pointer", padding:0, textAlign:"left" }}>{c.cat}</button>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  {c.over && <span style={{ color:DS.red, fontSize:9, fontWeight:800, background:DS.redSoft, padding:"1px 6px", borderRadius:10 }}>OVER</span>}
+                  <span style={{ color: c.over ? DS.red : "#f59e0b", fontSize:11, fontWeight:700 }}>{fmt(c.total)}{c.budget>0?` / ${fmt(c.budget)}`:""}</span>
+                </div>
               </div>
-              <div style={{ background:"#0f1e2e", borderRadius:999, height:4, overflow:"hidden" }}>
-                <div style={{ width:`${totalExpenses>0?(c.total/totalExpenses*100):0}%`, height:"100%", background:"#ef4444", borderRadius:999 }}/>
+              <div style={{ background:"#0f1e2e", borderRadius:999, height:5, overflow:"hidden" }}>
+                <div style={{ width:`${c.pct}%`, height:"100%", background: c.over ? DS.red : c.pct > 80 ? DS.accent : "#ef4444", borderRadius:999, transition:"width 0.3s" }}/>
               </div>
             </div>
           ))}
+          {editBudget && (
+            <div style={{ marginTop:12, background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:8, padding:"10px 12px" }}>
+              <div style={{ color:DS.textSub, fontSize:11, marginBottom:6 }}>Annual budget for <strong style={{color:DS.text}}>{editBudget}</strong></div>
+              <div style={{ display:"flex", gap:8 }}>
+                <input type="number" defaultValue={budgets[editBudget]||""} id="budgetInput" placeholder="0" style={{ flex:1, background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:7, color:DS.text, padding:"6px 10px", fontSize:13, outline:"none" }} />
+                <button onClick={()=>{ const v=parseFloat(document.getElementById("budgetInput").value)||0; setBudgets(p=>({...p,[editBudget]:v})); setEditBudget(null); }} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"6px 14px", borderRadius:7, cursor:"pointer", fontSize:12, fontWeight:800 }}>Set</button>
+                <button onClick={()=>setEditBudget(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"6px 10px", borderRadius:7, cursor:"pointer", fontSize:12 }}>Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
         {/* Expense list */}
         <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, padding:"14px 18px", overflowY:"auto", maxHeight:400 }}>
@@ -3670,52 +6655,2040 @@ function ExpenseTab({ expenses, setExpenses, closedYTD, gciGoal }) {
   );
 }
 
-function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
-  const smList = submarketList || DEFAULT_SUBMARKETS;
-  const [modal, setModal] = useState(null);
+// ── Tenant Health Radar ──────────────────────────────────────────
+function TenantRadarTab({ deals, contacts, leaseRadar, onNavigate }) {
+  const enriched = useMemo(() => {
+    const signals = [];
+
+    // 1. Leases expiring within 18 months
+    const cutoff18 = new Date(); cutoff18.setMonth(cutoff18.getMonth() + 18);
+    const cutoff6  = new Date(); cutoff6.setMonth(cutoff6.getMonth() + 6);
+    leaseRadar.forEach(lease => {
+      if (!lease.leaseExpiry) return;
+      const exp = new Date(lease.leaseExpiry);
+      if (isNaN(exp)) return;
+      const daysOut = Math.round((exp - new Date()) / 86400000);
+      if (daysOut > 540 || daysOut < 0) return;
+      const urgency = daysOut <= 180 ? "critical" : daysOut <= 365 ? "high" : "medium";
+      const contact = contacts.find(c => c.id === lease.contactId || c.name === lease.tenantName);
+      signals.push({
+        id: `lease-${lease.id}`,
+        type: "lease-expiry",
+        urgency,
+        title: lease.tenantName || "Unknown Tenant",
+        detail: `Lease expires ${new Date(lease.leaseExpiry).toLocaleDateString("en-US",{month:"short",year:"numeric"})} — ${daysOut} days out`,
+        action: "Schedule renewal conversation",
+        tab: "lease-radar",
+        contact,
+        score: urgency === "critical" ? 95 : urgency === "high" ? 75 : 55,
+      });
+    });
+
+    // 2. Contacts gone cold (no activity 60+ days, active relationship)
+    contacts.forEach(c => {
+      if (!["Warm","Active","Key Relationship"].includes(c.relationshipLevel)) return;
+      if (!c.lastContact) return;
+      const days = Math.round((new Date() - new Date(c.lastContact)) / 86400000);
+      if (days < 60) return;
+      const urgency = days > 180 ? "critical" : days > 90 ? "high" : "medium";
+      signals.push({
+        id: `cold-${c.id}`,
+        type: "gone-cold",
+        urgency,
+        title: c.name,
+        detail: `${c.relationshipLevel} contact — ${days} days since last contact${c.company ? ` at ${c.company}` : ""}`,
+        action: "Re-engage before relationship decays further",
+        tab: "contacts",
+        contact: c,
+        score: urgency === "critical" ? 88 : urgency === "high" ? 68 : 48,
+      });
+    });
+
+    // 3. Contacts with active requirements but no matched deal
+    contacts.forEach(c => {
+      const activeReqs = (c.requirements || []).filter(r => r.active);
+      if (!activeReqs.length) return;
+      const hasActiveDeal = deals.some(d =>
+        d.client === c.name || (d.contactId === c.id) || (c.linkedDeals || []).includes(d.id)
+      );
+      if (hasActiveDeal) return;
+      signals.push({
+        id: `req-${c.id}`,
+        type: "unmatched-requirement",
+        urgency: "medium",
+        title: c.name,
+        detail: `Has ${activeReqs.length} active requirement${activeReqs.length > 1 ? "s" : ""} — ${activeReqs.map(r => `${r.minSF?.toLocaleString()}–${r.maxSF?.toLocaleString()} SF`).join(", ")} — no active deal`,
+        action: "Check Deal Matches to find spaces",
+        tab: "matches",
+        contact: c,
+        score: 72,
+      });
+    });
+
+    // 4. Deals stalled 45+ days in same stage
+    deals.filter(d => !["Closed","Lost"].includes(d.stage)).forEach(d => {
+      const da = d.daysInStage || 0;
+      if (da < 45) return;
+      const urgency = da > 90 ? "critical" : da > 60 ? "high" : "medium";
+      const contact = contacts.find(c => c.name === d.client || (c.linkedDeals||[]).includes(d.id));
+      signals.push({
+        id: `stall-${d.id}`,
+        type: "stalled-deal",
+        urgency,
+        title: d.name,
+        detail: `Stuck in ${d.stage} for ${da} days${d.client ? ` — ${d.client}` : ""}`,
+        action: "Log an activity or reassess the deal",
+        tab: "pipeline",
+        contact,
+        score: urgency === "critical" ? 90 : urgency === "high" ? 70 : 50,
+      });
+    });
+
+    // 5. Contacts with no follow-up scheduled (active/key, no deal follow-up)
+    contacts.forEach(c => {
+      if (!["Active","Key Relationship"].includes(c.relationshipLevel)) return;
+      const linkedDealHasFollowUp = deals.some(d =>
+        ((c.linkedDeals||[]).includes(d.id) || d.client === c.name) && d.followUpDate
+      );
+      if (linkedDealHasFollowUp) return;
+      const days = c.lastContact ? Math.round((new Date() - new Date(c.lastContact)) / 86400000) : 999;
+      if (days < 30) return;
+      signals.push({
+        id: `nofup-${c.id}`,
+        type: "no-followup",
+        urgency: days > 90 ? "high" : "medium",
+        title: c.name,
+        detail: `${c.relationshipLevel} — no follow-up scheduled, ${days < 999 ? `last contact ${days}d ago` : "never contacted"}`,
+        action: "Schedule a touchpoint",
+        tab: "contacts",
+        contact: c,
+        score: days > 90 ? 62 : 45,
+      });
+    });
+
+    return signals.sort((a, b) => b.score - a.score);
+  }, [deals, contacts, leaseRadar]);
+
+  const urgencyColor = { critical: DS.red, high: "#f97316", medium: DS.accent };
+  const typeLabel = { "lease-expiry": "Lease Expiry", "gone-cold": "Gone Cold", "stalled-deal": "Stalled Deal", "unmatched-requirement": "Unmatched Req", "no-followup": "No Follow-up" };
+
+  const [filterType, setFilterType] = useState("all");
+  const visible = filterType === "all" ? enriched : enriched.filter(s => s.type === filterType);
+  const counts = { all: enriched.length };
+  ["lease-expiry","gone-cold","stalled-deal","unmatched-requirement","no-followup"].forEach(t => {
+    counts[t] = enriched.filter(s => s.type === t).length;
+  });
+
+  const critCount = enriched.filter(s => s.urgency === "critical").length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.4px" }}>Tenant Health Radar</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Proactive signals — know who needs attention before they go dark</div>
+        </div>
+        {critCount > 0 && (
+          <div style={{ background: DS.red + "18", border: `1px solid ${DS.red}44`, borderRadius: DS.r.sm, padding: "8px 14px", color: DS.red, fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>
+            {critCount} critical signal{critCount > 1 ? "s" : ""} require immediate attention
+          </div>
+        )}
+      </div>
+
+      {/* Filter pills */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {[["all","All Signals"],["lease-expiry","Lease Expiry"],["gone-cold","Gone Cold"],["stalled-deal","Stalled Deals"],["unmatched-requirement","Unmatched Req"],["no-followup","No Follow-up"]].map(([val, lbl]) => (
+          <button key={val} onClick={() => setFilterType(val)}
+            style={{ background: filterType === val ? DS.accent : DS.panel, border: `1px solid ${filterType === val ? DS.accent : DS.border}`, color: filterType === val ? "#0a0f1a" : DS.textSub, padding: "5px 12px", borderRadius: DS.r.full, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, cursor: "pointer" }}>
+            {lbl} {counts[val] > 0 ? `(${counts[val]})` : ""}
+          </button>
+        ))}
+      </div>
+
+      {/* Signals list */}
+      {visible.length === 0 ? (
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "48px 24px", textAlign: "center" }}>
+          <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.h3, marginBottom: 8 }}>All clear</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>No signals in this category. Stay proactive and this is where you want to be.</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {visible.map(sig => (
+            <div key={sig.id} className="card-hover" style={{ background: DS.panel, border: `1px solid ${sig.urgency === "critical" ? DS.red + "44" : DS.border}`, borderLeft: `3px solid ${urgencyColor[sig.urgency]}`, borderRadius: DS.r.lg, padding: "14px 18px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer" }}
+              onClick={() => onNavigate(sig.tab)}>
+              {/* Score ring */}
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: urgencyColor[sig.urgency] + "18", border: `2px solid ${urgencyColor[sig.urgency]}44`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <span style={{ color: urgencyColor[sig.urgency], fontSize: DS.fs.md, fontWeight: DS.fw.black }}>{sig.score}</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                  <span style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.lg }}>{sig.title}</span>
+                  <span style={{ background: urgencyColor[sig.urgency] + "22", color: urgencyColor[sig.urgency], border: `1px solid ${urgencyColor[sig.urgency]}44`, borderRadius: DS.r.full, fontSize: 9, padding: "2px 8px", fontWeight: DS.fw.black, textTransform: "uppercase" }}>{sig.urgency}</span>
+                  <span style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.full, fontSize: 9, padding: "2px 8px", color: DS.textMute, fontWeight: DS.fw.bold }}>{typeLabel[sig.type]}</span>
+                </div>
+                <div style={{ color: DS.textSub, fontSize: DS.fs.sm, marginBottom: 4 }}>{sig.detail}</div>
+                <div style={{ color: DS.accent, fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>Action: {sig.action}</div>
+              </div>
+              <div style={{ color: DS.textFaint, fontSize: DS.fs.sm, flexShrink: 0 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Deal Room (Client Intelligence Portal) ───────────────────────
+function DealRoomTab({ deals, contacts, onNavigate, setDeals }) {
+  const [selectedDeal, setSelectedDeal] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const calcedDeals = useMemo(() => deals.map(calcDeal).filter(d => !["Lost"].includes(d.stage)), [deals]);
+
+  const stageOrder = ["Prospect","Proposal","LOI","Under Contract","Closed"];
+  const stageProgress = (stage) => {
+    const idx = stageOrder.indexOf(stage);
+    return idx === -1 ? 0 : Math.round((idx / (stageOrder.length - 1)) * 100);
+  };
+
+  const deal = selectedDeal ? calcedDeals.find(d => d.id === selectedDeal) || calcedDeals[0] : calcedDeals[0];
+
+  const generateShareLink = (d) => {
+    if (!d) return "";
+    const data = {
+      name: d.name,
+      client: d.client,
+      stage: d.stage,
+      progress: stageProgress(d.stage),
+      submarket: d.submarket,
+      sqft: d.sqft,
+      dealType: d.dealType,
+      expectedClose: d.expectedClose,
+      stageHistory: (d.stageHistory || []).map(s => ({ stage: s.stage, date: s.enteredDate })),
+      activities: (d.activities || []).filter(a => a.type !== "System").slice(-5).map(a => ({ date: a.date, note: a.note })),
+      health: calcDealHealth(d).label,
+    };
+    const encoded = btoa(JSON.stringify(data));
+    return `${window.location.origin}${window.location.pathname}?dealroom=${encoded}`;
+  };
+
+  const copyLink = () => {
+    if (!deal) return;
+    const link = generateShareLink(deal);
+    navigator.clipboard.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
+
+  const printClientView = () => {
+    if (!deal) return;
+    const win = window.open("", "_blank");
+    const health = calcDealHealth(deal);
+    const prog = stageProgress(deal.stage);
+    const history = (deal.stageHistory || []).map(s =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #e2e8f0"><span style="color:#64748b;font-size:11px;min-width:120px">${new Date(s.enteredDate).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span><span style="font-weight:600">${s.stage}</span></div>`
+    ).join("");
+    win.document.write(`<!DOCTYPE html><html><head><title>Deal Status — ${deal.name}</title>
+    <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Helvetica Neue',Arial,sans-serif;color:#1e293b;background:#fff;padding:40px;font-size:13px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;padding-bottom:20px;border-bottom:3px solid #f59e0b}
+    .logo{background:#f59e0b;color:#0d1826;padding:8px 14px;border-radius:6px;font-weight:900;font-size:13px;letter-spacing:1px}
+    h1{font-size:24px;font-weight:900;color:#0f172a;margin-bottom:4px}
+    .subtitle{color:#64748b;font-size:12px}
+    .progress-bar{background:#e2e8f0;border-radius:999px;height:10px;margin:16px 0;overflow:hidden}
+    .progress-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#f59e0b,#10b981)}
+    .stage-row{display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;margin-bottom:20px}
+    .stage-active{color:#f59e0b;font-weight:700}
+    .kpi-row{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+    .kpi{flex:1;min-width:120px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px}
+    .kpi-label{font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+    .kpi-value{font-size:18px;font-weight:900;color:#0f172a}
+    .section{margin-top:20px}.section-title{font-size:12px;font-weight:800;color:#0f172a;border-left:3px solid #f59e0b;padding-left:8px;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px}
+    .footer{margin-top:32px;padding-top:12px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:10px;display:flex;justify-content:space-between}
+    @media print{button{display:none}}</style></head><body>
+    <div class="header"><div><div class="logo">CRE OS</div><br/><h1>${deal.name}</h1><div class="subtitle">Deal Status Report · ${new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div></div>
+    <div style="text-align:right;color:#64748b;font-size:11px">Prepared for: <strong style="color:#0f172a">${deal.client}</strong></div></div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:8px;font-weight:600">TRANSACTION PROGRESS</div>
+    <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+    <div class="stage-row">${stageOrder.map(s=>`<span class="${s===deal.stage?"stage-active":""}">${s}</span>`).join("")}</div>
+    <div class="kpi-row">
+      <div class="kpi"><div class="kpi-label">Current Stage</div><div class="kpi-value">${deal.stage}</div></div>
+      <div class="kpi"><div class="kpi-label">Deal Status</div><div class="kpi-value">${health.label}</div></div>
+      ${deal.submarket ? `<div class="kpi"><div class="kpi-label">Submarket</div><div class="kpi-value">${deal.submarket}</div></div>` : ""}
+      ${deal.sqft ? `<div class="kpi"><div class="kpi-label">Size</div><div class="kpi-value">${Number(deal.sqft).toLocaleString()} SF</div></div>` : ""}
+      ${deal.expectedClose ? `<div class="kpi"><div class="kpi-label">Target Close</div><div class="kpi-value">${deal.expectedClose}</div></div>` : ""}
+    </div>
+    ${history ? `<div class="section"><div class="section-title">Timeline</div>${history}</div>` : ""}
+    <div class="footer"><span>CRE OS · Confidential</span><span>Generated ${new Date().toLocaleDateString()}</span></div>
+    <br/><button onclick="window.print()" style="background:#f59e0b;border:none;padding:10px 24px;border-radius:8px;font-weight:800;font-size:14px;cursor:pointer">Print / Save as PDF</button>
+    </body></html>`);
+    win.document.close();
+  };
+
+  if (calcedDeals.length === 0) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div><div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.4px" }}>Deal Room</div><div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Client-facing deal status — shareable progress view for any deal</div></div>
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "48px 24px", textAlign: "center" }}>
+          <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.h3, marginBottom: 8 }}>No active deals yet</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginBottom: 16 }}>Create a deal in the Pipeline to generate a shareable status page.</div>
+          <button onClick={() => onNavigate("pipeline")} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>Go to Pipeline</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.4px" }}>Deal Room</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Client-facing status page — print or share progress on any deal</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={copyLink} style={{ background: copied ? DS.green + "22" : DS.panel, border: `1px solid ${copied ? DS.green : DS.border}`, color: copied ? DS.green : DS.textSub, padding: "7px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>
+            {copied ? "Link Copied!" : "Copy Share Link"}
+          </button>
+          <button onClick={printClientView} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "7px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>
+            Print Client View
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 16, alignItems: "start" }}>
+        {/* Deal selector */}
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "12px 0", display: "flex", flexDirection: "column", gap: 2 }}>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", padding: "0 14px 8px" }}>SELECT DEAL</div>
+          {calcedDeals.map(d => {
+            const h = calcDealHealth(d);
+            const isActive = deal?.id === d.id;
+            return (
+              <button key={d.id} onClick={() => setSelectedDeal(d.id)}
+                style={{ background: isActive ? DS.accent + "14" : "none", borderLeft: isActive ? `2px solid ${DS.accent}` : "2px solid transparent", border: "none", borderTop: "none", borderRight: "none", borderBottom: "none", padding: "9px 14px", cursor: "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ color: isActive ? DS.accent : DS.textSub, fontSize: DS.fs.sm, fontWeight: DS.fw.semi, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{d.name}</span>
+                <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{d.stage} · {h.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Deal preview */}
+        {deal && (() => {
+          const health = calcDealHealth(deal);
+          const prog = stageProgress(deal.stage);
+          const contact = contacts.find(c => c.name === deal.client || (c.linkedDeals||[]).includes(deal.id));
+          const recentActs = (deal.activities || []).filter(a => a.type !== "System").slice(-4).reverse();
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Progress card */}
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "20px 22px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                  <div>
+                    <div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, marginBottom: 4 }}>{deal.name}</div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Prepared for: <span style={{ color: DS.textSub, fontWeight: DS.fw.semi }}>{deal.client}</span></div>
+                  </div>
+                  <div style={{ background: health.color + "22", border: `1px solid ${health.color}44`, borderRadius: DS.r.sm, padding: "5px 12px", color: health.color, fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>{health.label}</div>
+                </div>
+                {/* Progress bar */}
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ background: DS.border, borderRadius: 999, height: 8, overflow: "hidden", marginBottom: 8 }}>
+                    <div style={{ width: `${prog}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${DS.accent}, ${DS.green})`, transition: "width 0.6s" }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    {stageOrder.map(s => (
+                      <span key={s} style={{ fontSize: DS.fs.xs, fontWeight: s === deal.stage ? DS.fw.black : DS.fw.normal, color: s === deal.stage ? DS.accent : DS.textFaint }}>{s}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* KPI row */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+                {[
+                  { label: "Current Stage", value: deal.stage },
+                  deal.submarket && { label: "Submarket", value: deal.submarket },
+                  deal.sqft && { label: "Size", value: `${Number(deal.sqft).toLocaleString()} SF` },
+                  deal.dealType && { label: "Type", value: deal.dealType },
+                  deal.expectedClose && { label: "Target Close", value: deal.expectedClose },
+                  { label: "Days in Stage", value: `${deal.daysInStage}d` },
+                ].filter(Boolean).map((kpi, i) => (
+                  <div key={i} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "12px 14px" }}>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.5px" }}>{kpi.label}</div>
+                    <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.lg }}>{kpi.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Timeline */}
+              {(deal.stageHistory || []).length > 0 && (
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>Stage Timeline</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {(deal.stageHistory || []).map((s, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: i === (deal.stageHistory.length - 1) ? DS.accent : DS.border, flexShrink: 0 }} />
+                        <span style={{ color: DS.textMute, fontSize: DS.fs.xs, minWidth: 90 }}>{s.enteredDate}</span>
+                        <span style={{ color: i === (deal.stageHistory.length - 1) ? DS.accent : DS.textSub, fontSize: DS.fs.sm, fontWeight: i === (deal.stageHistory.length - 1) ? DS.fw.bold : DS.fw.normal }}>{s.stage}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent activity */}
+              {recentActs.length > 0 && (
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>Recent Activity</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {recentActs.map((a, i) => (
+                      <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                        <span style={{ color: DS.textFaint, fontSize: DS.fs.xs, minWidth: 80, flexShrink: 0 }}>{a.date}</span>
+                        <span style={{ color: DS.textSub, fontSize: DS.fs.sm, lineHeight: 1.4 }}>{a.note}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
+// ── Living Property Record ───────────────────────────────────────
+function LivingPropertyTab({ properties, setProperties, deals, contacts, comps, leaseRadar, submarketList, onNavigate }) {
+  const [selectedId, setSelectedId] = useState(null);
   const [search, setSearch] = useState("");
 
+  const filtered = properties.filter(p =>
+    !search || [p.name, p.address, p.submarket, p.owner].filter(Boolean).some(v => v.toLowerCase().includes(search.toLowerCase()))
+  );
+  const selected = selectedId ? properties.find(p => p.id === selectedId) || filtered[0] : filtered[0];
+
+  const propertyDeals = useMemo(() => {
+    if (!selected) return [];
+    return deals.filter(d =>
+      d.name?.toLowerCase().includes(selected.name?.toLowerCase()) ||
+      d.submarket === selected.submarket ||
+      (selected.address && d.name?.toLowerCase().includes(selected.address?.toLowerCase().split(" ")[0]))
+    );
+  }, [selected, deals]);
+
+  const propertyComps = useMemo(() => {
+    if (!selected) return [];
+    return (comps || []).filter(c =>
+      (c.address && selected.address && c.address.toLowerCase().includes(selected.address.toLowerCase().split(" ")[1] || "")) ||
+      c.submarket === selected.submarket
+    ).slice(0, 8);
+  }, [selected, comps]);
+
+  const propertyLeases = useMemo(() => {
+    if (!selected) return [];
+    return (leaseRadar || []).filter(l =>
+      l.propertyId === selected.id ||
+      (selected.address && l.tenantName && propertyDeals.some(d => d.client === l.tenantName))
+    );
+  }, [selected, leaseRadar, propertyDeals]);
+
+  const relatedContacts = useMemo(() => {
+    if (!selected) return [];
+    const found = new Set();
+    propertyDeals.forEach(d => {
+      const c = contacts.find(c => c.name === d.client);
+      if (c) found.add(c);
+    });
+    contacts.forEach(c => { if (c.name === selected.owner) found.add(c); });
+    return [...found].slice(0, 6);
+  }, [selected, propertyDeals, contacts]);
+
+  const totalDealValue = propertyDeals.reduce((s, d) => s + (d.netCommission || 0), 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.4px" }}>Living Property Record</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Every deal, comp, contact, and lease tied to each property — auto-assembled</div>
+        </div>
+        <button onClick={() => onNavigate("properties")} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "7px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>Manage Properties</button>
+      </div>
+
+      {properties.length === 0 ? (
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "48px 24px", textAlign: "center" }}>
+          <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.h3, marginBottom: 8 }}>No properties yet</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginBottom: 16 }}>Add properties in the Properties tab to start building living records.</div>
+          <button onClick={() => onNavigate("properties")} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>Go to Properties</button>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 16, alignItems: "start" }}>
+          {/* Property list */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+            <div style={{ padding: "10px 12px", borderBottom: `1px solid ${DS.border}` }}>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search properties..." style={{ width: "100%", background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, padding: "6px 10px", color: DS.text, fontSize: DS.fs.sm }} />
+            </div>
+            <div style={{ maxHeight: 480, overflowY: "auto" }}>
+              {filtered.map(p => {
+                const pDeals = deals.filter(d => d.name?.toLowerCase().includes(p.name?.toLowerCase()) || d.submarket === p.submarket).length;
+                const isActive = selected?.id === p.id;
+                return (
+                  <button key={p.id} onClick={() => setSelectedId(p.id)}
+                    style={{ width: "100%", background: isActive ? DS.accent + "14" : "none", borderLeft: isActive ? `2px solid ${DS.accent}` : "2px solid transparent", border: "none", borderTop: "none", borderRight: "none", borderBottom: `1px solid ${DS.border}`, padding: "10px 14px", cursor: "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 3 }}>
+                    <span style={{ color: isActive ? DS.accent : DS.text, fontSize: DS.fs.sm, fontWeight: DS.fw.semi, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200 }}>{p.name}</span>
+                    <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{p.submarket} · {p.subtype}</span>
+                    {pDeals > 0 && <span style={{ color: DS.blue, fontSize: 9, fontWeight: DS.fw.bold }}>{pDeals} deal{pDeals !== 1 ? "s" : ""}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Property record */}
+          {selected && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Property header */}
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "18px 22px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                  <div>
+                    <div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, marginBottom: 4 }}>{selected.name}</div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>{selected.address && `${selected.address} · `}{selected.submarket} · {selected.subtype}</div>
+                  </div>
+                  {selected.owner && <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Owner: <span style={{ color: DS.textSub, fontWeight: DS.fw.semi }}>{selected.owner}</span></div>}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: 10 }}>
+                  {[
+                    selected.sqft && { label: "Building SF", value: Number(selected.sqft).toLocaleString() + " SF" },
+                    { label: "Deals", value: propertyDeals.length },
+                    { label: "Comps", value: propertyComps.length },
+                    { label: "Leases Tracked", value: propertyLeases.length },
+                    totalDealValue > 0 && { label: "Total Commission", value: fmt(totalDealValue) },
+                    relatedContacts.length > 0 && { label: "Contacts", value: relatedContacts.length },
+                  ].filter(Boolean).map((kpi, i) => (
+                    <div key={i} style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "10px 12px" }}>
+                      <div style={{ color: DS.textMute, fontSize: 9, fontWeight: DS.fw.black, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.5px" }}>{kpi.label}</div>
+                      <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.lg }}>{kpi.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Deals */}
+              {propertyDeals.length > 0 && (
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>Deal History ({propertyDeals.length})</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {propertyDeals.map(d => {
+                      const sc = STAGE_COLORS[d.stage] || {};
+                      return (
+                        <div key={d.id} onClick={() => onNavigate("pipeline")} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: DS.surface, borderRadius: DS.r.sm, cursor: "pointer" }}>
+                          <span style={{ background: sc.bg, color: sc.text, border: `1px solid ${sc.border}`, borderRadius: DS.r.full, fontSize: 9, padding: "2px 8px", fontWeight: DS.fw.bold, flexShrink: 0 }}>{d.stage}</span>
+                          <span style={{ color: DS.textSub, fontSize: DS.fs.sm, flex: 1 }}>{d.name}</span>
+                          <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{d.client}</span>
+                          {d.netCommission > 0 && <span style={{ color: DS.green, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>{fmt(d.netCommission)}</span>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Contacts */}
+              {relatedContacts.length > 0 && (
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>Related Contacts ({relatedContacts.length})</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {relatedContacts.map(c => (
+                      <div key={c.id} onClick={() => onNavigate("contacts")} style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "8px 12px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }}>
+                        <span style={{ color: DS.textSub, fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>{c.name}</span>
+                        <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{c.type} · {c.relationshipLevel}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Comps */}
+              {propertyComps.length > 0 && (
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 20px" }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12, textTransform: "uppercase", letterSpacing: "1px" }}>Nearby Comps ({propertyComps.length})</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {propertyComps.map(c => (
+                      <div key={c.id} style={{ display: "flex", gap: 10, padding: "7px 10px", background: DS.surface, borderRadius: DS.r.sm, alignItems: "center" }}>
+                        <span style={{ color: DS.textMute, fontSize: DS.fs.xs, minWidth: 36, fontWeight: DS.fw.bold }}>{c.compType}</span>
+                        <span style={{ color: DS.textSub, fontSize: DS.fs.sm, flex: 1 }}>{c.name || c.address}</span>
+                        {c.closeDate && <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{c.closeDate}</span>}
+                        {c.psfSale && <span style={{ color: DS.green, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>${c.psfSale}/SF</span>}
+                        {c.psfLease && <span style={{ color: DS.blue, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>${c.psfLease}/mo·SF</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty intel state */}
+              {propertyDeals.length === 0 && relatedContacts.length === 0 && propertyComps.length === 0 && (
+                <div style={{ background: DS.panel, border: `1px dashed ${DS.border}`, borderRadius: DS.r.lg, padding: "32px 24px", textAlign: "center" }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>No linked deals, contacts, or comps found yet. As you close deals and log comps in this submarket, they'll appear here automatically.</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Help / Feature Guide ─────────────────────────────────────────
+function HelpTab() {
+  const [activeSection, setActiveSection] = useState("overview");
+
+  const features = [
+    {
+      id: "pipeline",
+      category: "Core",
+      name: "Pipeline",
+      tagline: "Your deal command center",
+      description: "Track every active deal from first contact to close. Expandable rows show deal health scores, days in stage, follow-up dates, and weighted commission values. Toggle between list and timeline views.",
+      tips: ["Use Quick Add for fast deal entry", "Deal health score (0-100) flags at-risk deals automatically", "Set follow-up dates to keep deals off the 'Gone Cold' list", "Timeline view shows every deal on a Gantt-style chart"],
+    },
+    {
+      id: "analytics",
+      category: "Core",
+      name: "Analytics",
+      tagline: "Deep intelligence on your business",
+      description: "Four sub-views: Overview (pipeline breakdowns), Intelligence (health analysis, contact scoring), GCI Forecast (Monte Carlo simulation), and Commissions (payout tracking).",
+      tips: ["GCI Forecast runs 5,000 simulations to show your probability of hitting goal", "Intelligence view surfaces deals and contacts that need attention", "Commissions view tracks expected payouts by deal"],
+    },
+    {
+      id: "home",
+      category: "Core",
+      name: "Home / Morning Brief",
+      tagline: "Start every day ready",
+      description: "Your ranked daily action list — top 5 moves prioritized by score. Follow-up alerts, stalled deal warnings, goal pace, and GCI tracker all at a glance.",
+      tips: ["Top Moves Today ranks actions by urgency × opportunity size", "Click any move to jump directly to that tab", "Goal Pace bar shows where you are vs. your annual GCI target"],
+    },
+    {
+      id: "autopilot",
+      category: "Intelligence",
+      name: "Deal Autopilot",
+      tagline: "A senior broker coach watching every deal 24/7",
+      description: "Analyzes every active deal in real time and surfaces up to 3 ranked next-action recommendations per deal. Rules engine covers: activity gap detection, stage-specific timing thresholds, velocity vs. your historical pattern, health score triggers, follow-up status, and contextual signals from tags and notes.",
+      tips: ["High Priority actions need attention today — treat them like a coach calling a timeout", "Recommendations auto-disappear when dismissed — use Dismiss to clear noise", "Autopilot Feed on the Home tab shows your top 5 urgent actions at a glance", "Expanded pipeline rows show inline Autopilot cards so you never have to leave your workflow", "The velocity engine compares your current deal to your actual closed-deal history — it gets smarter as you close more deals"],
+    },
+    {
+      id: "radar",
+      category: "Intelligence",
+      name: "Tenant Health Radar",
+      tagline: "Know who needs attention before they go dark",
+      description: "Proactive signal engine that surfaces lease expirations, gone-cold contacts, stalled deals, unmatched requirements, and contacts with no follow-up scheduled — all ranked by urgency score.",
+      tips: ["Critical signals = act today. High = act this week.", "Click any signal to jump to the relevant tab", "Filter by signal type to work through specific categories"],
+    },
+    {
+      id: "deal-room",
+      category: "Intelligence",
+      name: "Deal Room",
+      tagline: "Client-facing status pages in seconds",
+      description: "Generate a clean, professional deal status report for any active deal. Shows progress bar, stage timeline, key deal facts, and recent activity. Print as PDF or copy a shareable link for your client.",
+      tips: ["Use 'Print Client View' to generate a branded PDF to email or present", "The progress bar shows exactly where the deal sits across all stages", "Stage Timeline shows the full history of how the deal moved"],
+    },
+    {
+      id: "living-property",
+      category: "Intelligence",
+      name: "Living Property Record",
+      tagline: "Every property tells its full story",
+      description: "Select any property and instantly see every deal, comp, contact, and lease ever associated with it — auto-assembled from across the platform. No manual linking required.",
+      tips: ["Deals are matched by name and submarket automatically", "Related contacts include both deal clients and known property owners", "Nearby comps are pulled from your Comps database by submarket"],
+    },
+    {
+      id: "matches",
+      category: "Intelligence",
+      name: "Deal Match Engine",
+      tagline: "Your requirements-to-listings matchmaker",
+      description: "Automatically scores every active contact requirement against your listings and off-market properties. Match score (0-100) across deal type, submarket, subtype, SF range, and budget. One click to create a deal.",
+      tips: ["Raise the minimum score threshold to see only tight matches", "Off-market properties score slightly lower since details are sparse", "Double commission flag appears when you rep both sides"],
+    },
+    {
+      id: "lease-radar",
+      category: "Transactions",
+      name: "Lease Radar",
+      tagline: "Never miss a renewal window",
+      description: "Track every tenant lease you manage or monitor. Automatic alerts when leases enter their renewal window (12 months out by default). Log renewal conversations directly from the radar.",
+      tips: ["Leases closed in the Pipeline with a lease term auto-populate here", "Manually add any tenant lease you want to watch", "Renewal window alerts also appear on the Home tab"],
+    },
+    {
+      id: "proposal",
+      category: "Transactions",
+      name: "One-Tap Proposal",
+      tagline: "Professional documents from deal data in under 60 seconds",
+      description: "Select any deal and generate three document types: Deal Proposal (executive summary with comps), Tour Book (active listings + market comps for a client tour), or LOI Summary (business terms outline with signature blocks). Every field auto-fills from your deal data.",
+      tips: ["Deal Proposal pulls comps from your submarket automatically", "Tour Book includes every active listing in the submarket as formatted property cards", "LOI Summary includes signature blocks and a disclaimer — ready for counterparty review", "All fields are editable before printing — adjust anything without changing your deal record"],
+    },
+    {
+      id: "bov",
+      category: "Transactions",
+      name: "BOV Generator",
+      tagline: "Professional BOV reports in minutes",
+      description: "Build complete Broker Opinion of Value reports with sale comps, lease comps, and income approach valuation. Auto-fill comps from your database. Print a polished PDF with your branding.",
+      tips: ["Auto-fill from DB pulls matching comps by submarket automatically", "Income approach calculates cap rate, NOI, and value from inputs", "All three approaches (sales, income, lease) included in the printed report"],
+    },
+    {
+      id: "analytics-dna",
+      category: "Intelligence",
+      name: "Deal DNA + Performance Mirror",
+      tagline: "Learn from your own deal history",
+      description: "Deal DNA analyzes your closed deals to find your personal win pattern — avg days per stage, best lead sources, bottleneck stages. Performance Mirror scores every active deal against that pattern.",
+      tips: ["Requires at least 2 closed deals to generate a pattern", "Deals flagged 'Off Pattern' or 'At Risk' need attention", "Your bottleneck stage is where you lose time — push harder there"],
+    },
+    {
+      id: "voice",
+      category: "Tools",
+      name: "Voice Deal Notes",
+      tagline: "Talk. It listens. Your CRM updates.",
+      description: "Press ⌘J (or the floating mic button) to capture deal notes by voice. CRE OS extracts follow-up dates, matched contacts, deal names, stage changes, and lease expiry — then auto-creates a task and calendar entry for any follow-up mentioned. Also creates new contacts and properties from speech: say 'Add contact Sarah Jones at Prologis, phone 614-555-1234' or 'New property at 800 Commerce Drive, 50,000 square feet' to get an editable review card before saving.",
+      tips: ["Say 'follow up with Acme next Monday' — date is parsed automatically and a task + calendar entry are created", "Say 'move to LOI' to trigger a stage change suggestion", "Say 'Add contact [name] at [company]' to create a new contact without leaving the voice modal", "Say 'New property at [address], [sqft] square feet' to draft a new property record by voice", "Review and toggle each extracted item individually before saving — nothing saves without your confirmation"],
+    },
+    {
+      id: "contacts",
+      category: "Relationships",
+      name: "Contacts + Relationship Scores",
+      tagline: "Your network, scored and ranked",
+      description: "Every contact has a relationship health score (0-100) based on last contact date, deal activity, and relationship level. Requirements system lets you track what each contact is looking for.",
+      tips: ["Add requirements to contacts to power the Deal Match Engine", "Relationship score decays automatically if you don't log contact", "Convert contacts directly to deals with the 'Create Deal' button"],
+    },
+    {
+      id: "comps",
+      category: "Transactions",
+      name: "Market Comps",
+      tagline: "Build your own comp database",
+      description: "Log sale and lease comps with full details. Filter by submarket, type, and date. Comps auto-populate BOV reports and are available for the Living Property Record.",
+      tips: ["Comps feed directly into the BOV auto-fill function", "Add comps from your own deals when they close", "Filter by submarket to see local market data at a glance"],
+    },
+    {
+      id: "forecast",
+      category: "Core",
+      name: "GCI Scenario Planner",
+      tagline: "Monte Carlo simulation for your income",
+      description: "Runs 5,000 simulations of your pipeline closing to show probability distributions. Override deal probabilities, analyze deal impact (what does closing this one deal do to your hit probability?), and save scenarios.",
+      tips: ["P50 is your most likely outcome — P90 is your upside scenario", "Deal Impact shows which deals matter most to your goal", "Save scenarios to compare your base case vs. aggressive case"],
+    },
+    {
+      id: "underwriting",
+      category: "Transactions",
+      name: "Underwriting",
+      tagline: "Quick investment analysis on any deal",
+      description: "Run income approach underwriting with cap rate, NOI, loan sizing, and DSCR analysis. Built for quick deal qualification, not full investment banking.",
+      tips: ["DSCR below 1.25x triggers a lender warning automatically", "Adjust cap rate, vacancy, and expenses to stress-test deals", "Results feed into the BOV income approach"],
+    },
+    {
+      id: "calendar",
+      category: "Transactions",
+      name: "Calendar",
+      tagline: "All your deal dates in one view",
+      description: "Monthly calendar view of all follow-up dates, deal milestones, task due dates, and lease expiry windows. Click any day to see what's due.",
+      tips: ["Deal follow-up dates appear in green", "Task due dates appear in amber", "Lease expiry windows appear as date ranges"],
+    },
+    {
+      id: "tasks",
+      category: "Operations",
+      name: "Tasks",
+      tagline: "Deal-linked task management",
+      description: "Create tasks with priorities, due dates, recurrence, and deal/contact links. Overdue tasks surface on the Home tab and top bar.",
+      tips: ["Link tasks to deals so they appear in deal activity logs", "Recurring tasks auto-generate on completion", "Urgent tasks always appear at the top of the list"],
+    },
+    {
+      id: "expenses",
+      category: "Operations",
+      name: "Expenses",
+      tagline: "Track your business costs against GCI",
+      description: "Log business expenses by category. See your net income after expenses vs. GCI goal. Useful for tax planning and understanding your real take-home.",
+      tips: ["Categories match common broker business expenses", "Net income view shows GCI minus expenses", "Export to CSV for your accountant"],
+    },
+    {
+      id: "submarkets",
+      category: "Operations",
+      name: "Submarkets",
+      tagline: "Manage your territory definitions",
+      description: "Define and customize your submarket list. Submarkets drive filtering across Pipeline, Contacts, Listings, Properties, and Comps.",
+      tips: ["Add submarkets that match your specific market geography", "Submarket data feeds the analytics charts automatically"],
+    },
+    {
+      id: "properties",
+      category: "Relationships",
+      name: "Properties",
+      tagline: "Your full property intelligence platform",
+      description: "Track every building in your market with full specs, owner details, photos, documents, activity logs, and linked deals. Rich tabbed modal covers: Basic Info, Owner/Landlord, Building Specs, Photos & Docs, Activity Timeline, and Linked Deals. Sortable table with thumbnail previews and status badges.",
+      tips: ["Upload property photos — the primary photo appears as a thumbnail in the table and powers the Property Flyer", "Owner tab links to your Contacts database for one-click relationship context", "Activity tab gives each property its own note timeline — tours, calls, status changes", "Last Activity column color-codes: green = recent, amber = 14+ days, red = 30+ days", "Export CSV to share your property list with clients or partners"],
+    },
+    {
+      id: "property-flyer",
+      category: "Transactions",
+      name: "Property Flyer",
+      tagline: "Professional one-page flyers in seconds",
+      description: "Generate a polished, print-ready property flyer from your property records. Auto-populates the primary photo, address, key specs (size, price/SF, year built, loading, power), property highlights, and your broker contact card. Open any property, click 'Generate Flyer' in the modal header to produce a print-ready flyer.",
+      tips: ["Upload a primary photo in the Properties tab to make the flyer stand out", "All six highlight boxes auto-fill from your property spec fields", "Flyer uses your broker name, firm, and phone from Settings", "Print or save as PDF directly from the browser"],
+    },
+    {
+      id: "comp-quick-add",
+      category: "Transactions",
+      name: "Comp Quick Add",
+      tagline: "Log comps fast, no context switching",
+      description: "Streamlined comp entry with just the essential fields: address, type, size, price, date, and submarket. Save & Add Another button keeps the form open for rapid batch entry. All auto-calculations ($/SF) run live as you type.",
+      tips: ["Use Quick Add when you're in the field or on a call — enter comps fast", "Save & Add Another keeps submarket and type pre-filled from your last entry", "Full comp details (parties, brokers, notes) can be added later via the Edit button"],
+    },
+  ];
+
+  const categories = ["Core", "Intelligence", "Transactions", "Relationships", "Tools", "Operations"];
+  const [activeCategory, setActiveCategory] = useState("All");
+
+  const filtered = activeCategory === "All" ? features : features.filter(f => f.category === activeCategory);
+
+  const shortcuts = [
+    { key: "⌘K", action: "Global search — find any deal, contact, property, or comp" },
+    { key: "⌘J", action: "Open Voice Deal Notes — capture notes by speaking" },
+    { key: "Esc", action: "Close any open modal or dialog" },
+    { key: "↑↓", action: "Navigate search results (when search is open)" },
+    { key: "Enter", action: "Open selected search result" },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {/* Header */}
+      <div style={{ background: `linear-gradient(135deg, ${DS.panel} 0%, #0d1e30 100%)`, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "24px 28px" }}>
+        <div style={{ fontSize: DS.fs.h1, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.5px", marginBottom: 6 }}>CRE OS — Feature Guide</div>
+        <div style={{ color: DS.textMute, fontSize: DS.fs.md, lineHeight: 1.6, maxWidth: 640 }}>
+          Built for industrial commercial real estate brokers. Every feature is designed to eliminate administrative work, surface opportunities you'd otherwise miss, and help you close more deals.
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+          {[["20", "Features"], ["0", "Backend required"], ["100%", "Local data"], ["1", "File"]].map(([val, lbl]) => (
+            <div key={lbl} style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "8px 14px", textAlign: "center" }}>
+              <div style={{ color: DS.accent, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>{val}</div>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{lbl}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab selector */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {["All", ...categories].map(cat => (
+          <button key={cat} onClick={() => setActiveCategory(cat)}
+            style={{ background: activeCategory === cat ? DS.accent : DS.panel, border: `1px solid ${activeCategory === cat ? DS.accent : DS.border}`, color: activeCategory === cat ? "#0a0f1a" : DS.textSub, padding: "5px 14px", borderRadius: DS.r.full, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, cursor: "pointer" }}>
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      {/* Feature grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
+        {filtered.map(f => (
+          <div key={f.id} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.xl, marginBottom: 2 }}>{f.name}</div>
+                <div style={{ color: DS.accent, fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>{f.tagline}</div>
+              </div>
+              <span style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.full, fontSize: 9, padding: "3px 9px", color: DS.textFaint, fontWeight: DS.fw.bold, flexShrink: 0 }}>{f.category}</span>
+            </div>
+            <div style={{ color: DS.textSub, fontSize: DS.fs.sm, lineHeight: 1.6 }}>{f.description}</div>
+            <div style={{ borderTop: `1px solid ${DS.border}`, paddingTop: 10 }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 7, letterSpacing: "0.5px" }}>PRO TIPS</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {f.tips.map((tip, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <div style={{ width: 3, height: 3, borderRadius: "50%", background: DS.accent, flexShrink: 0, marginTop: 6 }} />
+                    <span style={{ color: DS.textMute, fontSize: DS.fs.xs, lineHeight: 1.5 }}>{tip}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Keyboard shortcuts */}
+      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "18px 22px" }}>
+        <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 14, textTransform: "uppercase", letterSpacing: "1px" }}>Keyboard Shortcuts</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {shortcuts.map((s, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <kbd style={{ background: DS.surface, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.sm, padding: "4px 10px", fontSize: DS.fs.xs, fontWeight: DS.fw.bold, color: DS.accent, fontFamily: "'DM Mono', monospace", flexShrink: 0, minWidth: 48, textAlign: "center" }}>{s.key}</kbd>
+              <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{s.action}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Data note */}
+      <div style={{ background: DS.accentSoft, border: `1px solid ${DS.accent}33`, borderRadius: DS.r.lg, padding: "14px 18px" }}>
+        <div style={{ color: DS.accent, fontWeight: DS.fw.bold, fontSize: DS.fs.sm, marginBottom: 4 }}>Your data stays with you</div>
+        <div style={{ color: DS.textMute, fontSize: DS.fs.xs, lineHeight: 1.6 }}>Everything in CRE OS is stored in your browser's localStorage. No cloud sync, no server, no third-party access. Export a backup regularly from Settings to avoid data loss when clearing your browser cache.</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Deal Autopilot ───────────────────────────────────────────────
+function AutopilotTab({ deals, contacts, setDeals, setTasks, onNavigate }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cre-autopilot-dismissed") || "{}"); } catch { return {}; }
+  });
+  const [completionLog, setCompletionLog] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cre-autopilot-log") || "[]"); } catch { return []; }
+  });
+  const [firstSeen, setFirstSeen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cre-autopilot-seen") || "{}"); } catch { return {}; }
+  });
+  const [expandedDeal, setExpandedDeal] = useState(null);
+  const [notifPerm, setNotifPerm] = useState(() => typeof Notification !== "undefined" ? Notification.permission : "denied");
+  const [activeView, setActiveView] = useState("feed"); // "feed" | "insights"
+
+  useEffect(() => { localStorage.setItem("cre-autopilot-dismissed", JSON.stringify(dismissed)); }, [dismissed]);
+  useEffect(() => { localStorage.setItem("cre-autopilot-log", JSON.stringify(completionLog)); }, [completionLog]);
+  useEffect(() => { localStorage.setItem("cre-autopilot-seen", JSON.stringify(firstSeen)); }, [firstSeen]);
+
+  const enriched = useMemo(() => deals.map(calcDeal), [deals]);
+
+  const feedItems = useMemo(() => {
+    const now = new Date().toISOString();
+    const newSeen = { ...firstSeen };
+    const result = calcAllAutopilotActions(enriched, contacts)
+      .map(({ deal, actions }) => ({
+        deal,
+        actions: actions.filter(a => {
+          const key = `${deal.id}-${a.id}`;
+          if (!newSeen[key]) newSeen[key] = now;
+          return !dismissed[key];
+        }),
+      }))
+      .filter(x => x.actions.length > 0)
+      .sort((a, b) => b.actions[0].score - a.actions[0].score);
+    // Persist new firstSeen keys without triggering re-render loop
+    const hasNew = Object.keys(newSeen).some(k => !firstSeen[k]);
+    if (hasNew) setTimeout(() => setFirstSeen(newSeen), 0);
+    return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enriched, contacts, dismissed]);
+
+  // Browser notification on mount for high-priority items
+  useEffect(() => {
+    if (typeof Notification === "undefined") return;
+    const lastNotif = localStorage.getItem("cre-autopilot-last-notif");
+    const fourHoursAgo = Date.now() - 4 * 60 * 60 * 1000;
+    if (lastNotif && parseInt(lastNotif) > fourHoursAgo) return;
+    const urgent = feedItems.filter(x => x.actions[0]?.priority === "high");
+    if (urgent.length === 0) return;
+    if (Notification.permission === "granted") {
+      new Notification("CRE OS — Autopilot Alert", {
+        body: `${urgent.length} deal${urgent.length > 1 ? "s" : ""} need immediate attention: ${urgent.slice(0,2).map(x => x.deal.name).join(", ")}`,
+        icon: "/favicon.ico",
+      });
+      localStorage.setItem("cre-autopilot-last-notif", Date.now().toString());
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const requestNotifPermission = async () => {
+    if (typeof Notification === "undefined") return;
+    const perm = await Notification.requestPermission();
+    setNotifPerm(perm);
+    if (perm === "granted") toast("Browser notifications enabled", "success");
+  };
+
+  const dismiss = (dealId, actionId) => setDismissed(prev => ({ ...prev, [`${dealId}-${actionId}`]: true }));
+
+  const logCompletion = (deal, action, method) => {
+    const entry = {
+      id: Date.now(),
+      dealId: deal.id,
+      dealName: deal.name,
+      dealStage: deal.stage,
+      actionId: action.id,
+      actionTitle: action.title,
+      priority: action.priority,
+      takenAt: new Date().toISOString(),
+      seenAt: firstSeen[`${deal.id}-${action.id}`] || new Date().toISOString(),
+      method,
+    };
+    setCompletionLog(prev => [entry, ...prev].slice(0, 500));
+    dismiss(deal.id, action.id);
+  };
+
+  const handleAction = (deal, action) => {
+    const contact = contacts.find(c => c.name === deal.client || (c.linkedDeals||[]).includes(deal.id));
+    const ac = action;
+
+    // Call client
+    if (ac.id.startsWith("activity-gap") || ac.id === "no-activity" || ac.id === "overdue-followup" || ac.id === "proposal-followup" || ac.id === "loi-check" || ac.id === "uc-confirm-close") {
+      if (contact?.phone) {
+        window.open(`tel:${contact.phone.replace(/\D/g, "")}`);
+        // Also create a call task
+        setTasks && setTasks(prev => [...prev, {
+          id: Date.now(),
+          title: `Call ${deal.client || "client"} — ${ac.title.slice(0, 50)}`,
+          category: "Follow-up",
+          priority: ac.priority === "high" ? "High" : "Medium",
+          dueDate: today,
+          notes: ac.detail,
+          linkedDealId: deal.id,
+          done: false,
+          recurrence: "None",
+        }]);
+        toast(`Calling ${contact.phone} — task logged`, "success");
+      } else {
+        // No phone on record — create a call task
+        setTasks && setTasks(prev => [...prev, {
+          id: Date.now(),
+          title: `Call ${deal.client || "client"} — ${ac.title.slice(0, 50)}`,
+          category: "Follow-up",
+          priority: ac.priority === "high" ? "High" : "Medium",
+          dueDate: today,
+          notes: ac.detail,
+          linkedDealId: deal.id,
+          done: false,
+          recurrence: "None",
+        }]);
+        toast("Call task created — add phone number in Contacts for one-tap dialing", "success");
+      }
+      logCompletion(deal, ac, "call");
+      return;
+    }
+
+    // Send comps → Proposals tab
+    if (ac.id === "velocity-slow" || ac.id === "push-loi" || ac.id === "push-uc") {
+      logCompletion(deal, ac, "navigate");
+      onNavigate("proposal");
+      return;
+    }
+
+    // Schedule tour → create task + calendar
+    if (ac.id === "prospect-stalling") {
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      const tDate = tomorrow.toISOString().split("T")[0];
+      setTasks && setTasks(prev => [...prev, {
+        id: Date.now(),
+        title: `Send proposal to ${deal.client || "client"}`,
+        category: "Follow-up",
+        priority: "High",
+        dueDate: tDate,
+        notes: ac.detail,
+        linkedDealId: deal.id,
+        done: false,
+        recurrence: "None",
+      }]);
+      toast("Task created — appears in Calendar", "success");
+      logCompletion(deal, ac, "task");
+      return;
+    }
+
+    // Generic create-task
+    if (ac.actionType === "create-task") {
+      setTasks && setTasks(prev => [...prev, {
+        id: Date.now(),
+        title: ac.title.slice(0, 70),
+        category: "Follow-up",
+        priority: ac.priority === "high" ? "High" : ac.priority === "medium" ? "Medium" : "Low",
+        dueDate: today,
+        notes: ac.detail,
+        linkedDealId: deal.id,
+        done: false,
+        recurrence: "None",
+      }]);
+      toast("Task created", "success");
+      logCompletion(deal, ac, "task");
+      return;
+    }
+
+    // Navigate actions
+    logCompletion(deal, ac, "navigate");
+    onNavigate(ac.actionType === "set-followup" ? "pipeline" : "pipeline");
+  };
+
+  // ── Insights calculations ────────────────────────────────────
+  const now = new Date();
+  const weekAgo = new Date(now - 7 * 86400000);
+  const actionsThisWeek = completionLog.filter(e => new Date(e.takenAt) >= weekAgo).length;
+
+  const closedDealIds = new Set(deals.filter(d => d.stage === "Closed").map(d => d.id));
+  const lostDealIds   = new Set(deals.filter(d => d.stage === "Lost").map(d => d.id));
+  const dealsWithActions = new Set(completionLog.map(e => e.dealId));
+  const closedWithAutopilot  = completionLog.filter(e => closedDealIds.has(e.dealId)).map(e => e.dealId);
+  const uniqueClosedWithAP   = new Set(closedWithAutopilot).size;
+  const uniqueDealsWithAP    = dealsWithActions.size;
+  const autopilotCloseRate   = uniqueDealsWithAP > 0 ? Math.round((uniqueClosedWithAP / uniqueDealsWithAP) * 100) : null;
+
+  const dealsWithoutAutopilot = deals.filter(d => d.stage === "Closed" && !dealsWithActions.has(d.id)).length;
+  const allClosedCount = closedDealIds.size;
+  const nonApCloseRate = (allClosedCount - uniqueClosedWithAP + dealsWithoutAutopilot) > 0
+    ? Math.round(dealsWithoutAutopilot / (dealsWithoutAutopilot + lostDealIds.size) * 100)
+    : null;
+
+  const responseTimes = completionLog
+    .filter(e => e.seenAt && e.takenAt)
+    .map(e => (new Date(e.takenAt) - new Date(e.seenAt)) / 3600000)
+    .filter(h => h >= 0 && h < 72);
+  const avgResponseHours = responseTimes.length > 0 ? (responseTimes.reduce((a,b)=>a+b,0) / responseTimes.length).toFixed(1) : null;
+
+  const actionCounts = {};
+  completionLog.forEach(e => { actionCounts[e.actionId] = (actionCounts[e.actionId] || 0) + 1; });
+  const topActionType = Object.entries(actionCounts).sort((a,b)=>b[1]-a[1])[0];
+
+  const urgentCount  = feedItems.filter(x => x.actions[0]?.priority === "high").length;
+  const onTrackCount = enriched.filter(d => !["Closed","Lost"].includes(d.stage) && (d.health?.score||0) >= 70).length;
+  const atRiskCount  = enriched.filter(d => !["Closed","Lost"].includes(d.stage) && (d.health?.score||0) < 50).length;
+  const priorityColor = { high: DS.red, medium: DS.accent, low: DS.green };
+  const priorityLabel = { high: "High Priority", medium: "Medium", low: "Suggested" };
+
+  // Action button label by action id
+  const actionButtonLabel = (action) => {
+    if (action.id.startsWith("activity-gap") || action.id === "no-activity" || action.id === "overdue-followup" || action.id === "proposal-followup" || action.id === "loi-check" || action.id === "uc-confirm-close") {
+      const contact = contacts.find(c => c.name === action._dealClient);
+      return contact?.phone ? `Call ${action._dealClient || "Client"}` : "Create Call Task";
+    }
+    if (action.id === "prospect-stalling") return "Create Proposal Task";
+    if (action.id === "push-loi" || action.id === "push-uc" || action.id === "velocity-slow") return "Open Proposals";
+    if (action.actionType === "set-followup" || action.id === "no-followup") return "Set Follow-up";
+    if (action.actionType === "create-task") return "Create Task";
+    return "Take Action";
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.4px" }}>Deal Autopilot</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Intelligent next-action recommendations — updated in real time</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {notifPerm !== "granted" && (
+            <button onClick={requestNotifPermission}
+              style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>
+              Enable Browser Alerts
+            </button>
+          )}
+          {notifPerm === "granted" && (
+            <span style={{ background: DS.green + "18", border: `1px solid ${DS.green}33`, color: DS.green, padding: "4px 12px", borderRadius: DS.r.sm, fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>
+              Alerts on
+            </span>
+          )}
+          <div style={{ display: "flex", background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, overflow: "hidden" }}>
+            {[["feed","Feed"],["insights","Insights"]].map(([v,l]) => (
+              <button key={v} onClick={() => setActiveView(v)}
+                style={{ padding: "5px 14px", background: activeView === v ? DS.borderHi : "none", border: "none", color: activeView === v ? DS.text : DS.textMute, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: activeView === v ? DS.fw.semi : DS.fw.normal }}>
+                {l}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Summary bar */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+        {[
+          { label: "Urgent Actions", value: urgentCount, color: DS.red, sub: "need attention today" },
+          { label: "Deals Monitored", value: feedItems.length, color: DS.accent, sub: "have recommendations" },
+          { label: "On Track", value: onTrackCount, color: DS.green, sub: "health score 70+" },
+          { label: "Completed This Week", value: actionsThisWeek, color: DS.blue, sub: "autopilot actions taken" },
+        ].map(s => (
+          <div key={s.label} style={{ background: DS.panel, border: `1px solid ${s.value > 0 && s.color !== DS.green ? s.color + "33" : DS.border}`, borderRadius: DS.r.lg, padding: "14px 16px" }}>
+            <div style={{ color: s.color, fontSize: DS.fs.h2, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace" }}>{s.value}</div>
+            <div style={{ color: DS.textSub, fontSize: DS.fs.sm, fontWeight: DS.fw.semi, marginTop: 2 }}>{s.label}</div>
+            <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 1 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── INSIGHTS VIEW ── */}
+      {activeView === "insights" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+          {/* Close rate comparison */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "20px 22px" }}>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", marginBottom: 16, textTransform: "uppercase" }}>Autopilot Impact on Close Rate</div>
+            {completionLog.length < 3 ? (
+              <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Complete at least 3 Autopilot actions to see your close rate comparison. Data builds automatically as you use the system.</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14 }}>
+                {[
+                  { label: "Autopilot Followed", value: autopilotCloseRate !== null ? autopilotCloseRate + "%" : "—", sub: `${uniqueClosedWithAP} of ${uniqueDealsWithAP} deals closed`, color: DS.green },
+                  { label: "Without Autopilot", value: nonApCloseRate !== null ? nonApCloseRate + "%" : "—", sub: "deals with no actions taken", color: DS.textSub },
+                  { label: "Avg Response Time", value: avgResponseHours ? avgResponseHours + "h" : "—", sub: "from alert to action taken", color: DS.blue },
+                ].map(stat => (
+                  <div key={stat.label} style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: "14px 16px" }}>
+                    <div style={{ color: stat.color, fontSize: 26, fontWeight: DS.fw.black, fontFamily: "'DM Mono', monospace", marginBottom: 4 }}>{stat.value}</div>
+                    <div style={{ color: DS.textSub, fontSize: DS.fs.sm, fontWeight: DS.fw.semi, marginBottom: 2 }}>{stat.label}</div>
+                    <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{stat.sub}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Pattern insights */}
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "20px 22px" }}>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", marginBottom: 14, textTransform: "uppercase" }}>Your Autopilot Patterns</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                actionsThisWeek > 0 && { text: `You've completed ${actionsThisWeek} Autopilot action${actionsThisWeek !== 1 ? "s" : ""} this week`, color: DS.green },
+                completionLog.length > 0 && { text: `${completionLog.length} total Autopilot actions logged since you started`, color: DS.blue },
+                topActionType && { text: `Your most frequent action: "${topActionType[0].replace(/-/g," ")}" (${topActionType[1]} time${topActionType[1] !== 1 ? "s" : ""})`, color: DS.accent },
+                avgResponseHours && parseFloat(avgResponseHours) < 4 && { text: `Strong response time — you act on alerts within ${avgResponseHours} hours on average`, color: DS.green },
+                avgResponseHours && parseFloat(avgResponseHours) >= 8 && { text: `Avg response of ${avgResponseHours}h — consider checking Autopilot first thing each morning`, color: "#f97316" },
+                atRiskCount > 0 && { text: `${atRiskCount} deal${atRiskCount !== 1 ? "s" : ""} currently at risk — focus here before working new leads`, color: DS.red },
+              ].filter(Boolean).map((ins, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <div style={{ width: 4, height: 4, borderRadius: "50%", background: ins.color, flexShrink: 0, marginTop: 6 }} />
+                  <span style={{ color: ins.color, fontSize: DS.fs.sm, lineHeight: 1.5 }}>{ins.text}</span>
+                </div>
+              ))}
+              {completionLog.length === 0 && <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Start taking Autopilot actions and your patterns will appear here.</div>}
+            </div>
+          </div>
+
+          {/* Recent activity log */}
+          {completionLog.length > 0 && (
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "20px 22px" }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", marginBottom: 14, textTransform: "uppercase" }}>Recent Actions Taken</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {completionLog.slice(0, 10).map(entry => {
+                  const pc = { high: DS.red, medium: DS.accent, low: DS.green }[entry.priority] || DS.textMute;
+                  const days = Math.round((now - new Date(entry.takenAt)) / 86400000);
+                  const dealNowClosed = closedDealIds.has(entry.dealId);
+                  const dealNowLost   = lostDealIds.has(entry.dealId);
+                  return (
+                    <div key={entry.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "7px 10px", background: DS.surface, borderRadius: DS.r.sm }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: pc, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ color: DS.textSub, fontSize: DS.fs.sm }}>{entry.dealName} — </span>
+                        <span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{entry.actionTitle.slice(0,60)}</span>
+                      </div>
+                      {dealNowClosed && <span style={{ background: DS.green+"22", color: DS.green, border: `1px solid ${DS.green}33`, borderRadius: DS.r.full, fontSize: 9, padding: "1px 7px", fontWeight: DS.fw.black, flexShrink: 0 }}>Closed</span>}
+                      {dealNowLost   && <span style={{ background: DS.red+"22", color: DS.red, border: `1px solid ${DS.red}33`, borderRadius: DS.r.full, fontSize: 9, padding: "1px 7px", fontWeight: DS.fw.black, flexShrink: 0 }}>Lost</span>}
+                      <span style={{ color: DS.textFaint, fontSize: DS.fs.xs, flexShrink: 0 }}>{days === 0 ? "today" : `${days}d ago`}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── FEED VIEW ── */}
+      {activeView === "feed" && (
+        feedItems.length === 0 ? (
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "48px 24px", textAlign: "center" }}>
+            <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.h3, marginBottom: 8 }}>All deals are on autopilot</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>No recommendations right now. Keep logging activity and the engine will surface signals as deals move.</div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {feedItems.map(({ deal, actions }) => {
+              const topAction = actions[0];
+              const isOpen = expandedDeal === deal.id;
+              const topColor = priorityColor[topAction.priority];
+              return (
+                <div key={deal.id} style={{ background: DS.panel, border: `1px solid ${isOpen ? topColor + "44" : DS.border}`, borderLeft: `3px solid ${topColor}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  {/* Deal header row */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer" }}
+                    onClick={() => setExpandedDeal(isOpen ? null : deal.id)}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.lg }}>{deal.name}</span>
+                        <span style={{ background: topColor + "22", color: topColor, border: `1px solid ${topColor}44`, borderRadius: DS.r.full, fontSize: 9, padding: "2px 8px", fontWeight: DS.fw.black, textTransform: "uppercase" }}>{priorityLabel[topAction.priority]}</span>
+                        {deal.stage && <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{deal.stage} · {deal.daysInStage}d</span>}
+                      </div>
+                      <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{topAction.title}</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                      <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{actions.length} action{actions.length !== 1 ? "s" : ""}</span>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: DS.textFaint, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}><polyline points="9 18 15 12 9 6"/></svg>
+                    </div>
+                  </div>
+
+                  {/* Expanded actions */}
+                  {isOpen && (
+                    <div style={{ borderTop: `1px solid ${DS.border}`, display: "flex", flexDirection: "column" }}>
+                      {actions.map((action, i) => {
+                        const actionWithClient = { ...action, _dealClient: deal.client };
+                        const ac = priorityColor[action.priority];
+                        const btnLabel = actionButtonLabel(actionWithClient);
+                        return (
+                          <div key={action.id} style={{ padding: "14px 18px", borderBottom: i < actions.length - 1 ? `1px solid ${DS.border}` : "none", display: "flex", gap: 14, alignItems: "flex-start" }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: ac, flexShrink: 0, marginTop: 5 }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                                <span style={{ color: DS.text, fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>{action.title}</span>
+                                <span style={{ color: ac, fontSize: 9, fontWeight: DS.fw.black, textTransform: "uppercase" }}>{priorityLabel[action.priority]}</span>
+                              </div>
+                              <div style={{ color: DS.textMute, fontSize: DS.fs.sm, lineHeight: 1.5, marginBottom: 10 }}>{action.detail}</div>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button onClick={() => handleAction(deal, actionWithClient)}
+                                  style={{ background: ac + "22", border: `1px solid ${ac}44`, color: ac, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>
+                                  {btnLabel}
+                                </button>
+                                <button onClick={() => dismiss(deal.id, action.id)}
+                                  style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textFaint, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs }}>
+                                  Dismiss
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ── Deal Match Engine ────────────────────────────────────────────
+function MatchEngineTab({ contacts, listings, properties, deals, setDeals, setContacts, onNavigate }) {
+  const [filterType, setFilterType] = useState("all");
+  const [minScore, setMinScore] = useState(50);
+  const [dismissed, setDismissed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cre-match-dismissed") || "[]"); } catch { return []; }
+  });
+  const [createdFor, setCreatedFor] = useState({});
+
+  const dismiss = (id) => {
+    const next = [...dismissed, id];
+    setDismissed(next);
+    try { localStorage.setItem("cre-match-dismissed", JSON.stringify(next)); } catch {}
+  };
+
+  function scoreMatch(req, target, type) {
+    let score = 0, max = 0;
+    // Deal type — 30pts
+    max += 30;
+    if (!req.dealType) score += 30;
+    else if (type === "listing" && target.dealType === req.dealType) score += 30;
+    else if (type === "property") score += 15; // off-market: flexible
+    // Submarket — 25pts
+    max += 25;
+    if (!req.submarkets?.length) score += 25;
+    else if (target.submarket && req.submarkets.includes(target.submarket)) score += 25;
+    // Subtype — 20pts
+    max += 20;
+    if (!req.subtypes?.length) score += 20;
+    else if (target.subtype && req.subtypes.includes(target.subtype)) score += 20;
+    // Square footage — 15pts
+    max += 15;
+    const sqft = parseFloat(target.sqft) || 0;
+    const sfMin = parseFloat(req.sqftMin) || 0;
+    const sfMax = parseFloat(req.sqftMax) || Infinity;
+    if (!req.sqftMin && !req.sqftMax) score += 15;
+    else if (sqft >= sfMin && sqft <= sfMax) score += 15;
+    else if (sqft >= sfMin * 0.85 && sqft <= sfMax * 1.15) score += 7;
+    // Budget — 10pts
+    max += 10;
+    if (!req.budgetMax) score += 10;
+    else if (type === "listing") {
+      const price = target.dealType === "Sale" ? (target.askingPrice || 0) : (target.monthlyRent || 0);
+      if (price <= parseFloat(req.budgetMax)) score += 10;
+      else if (price <= parseFloat(req.budgetMax) * 1.1) score += 5;
+    } else score += 7;
+    return Math.round((score / max) * 100);
+  }
+
+  function getCriteria(req, target, type) {
+    const sqft = parseFloat(target.sqft) || 0;
+    const sfMin = parseFloat(req.sqftMin) || 0;
+    const sfMax = parseFloat(req.sqftMax) || Infinity;
+    const price = type === "listing" ? (target.dealType === "Sale" ? target.askingPrice : target.monthlyRent) : null;
+    return [
+      { label: "Deal Type", pass: !req.dealType || (type === "listing" && target.dealType === req.dealType) || (type === "property") },
+      { label: "Submarket",  pass: !req.submarkets?.length || (target.submarket && req.submarkets.includes(target.submarket)) },
+      { label: "Subtype",    pass: !req.subtypes?.length || (target.subtype && req.subtypes.includes(target.subtype)) },
+      { label: "SF Range",   pass: (!req.sqftMin && !req.sqftMax) || (sqft >= sfMin && sqft <= sfMax) },
+      { label: "Budget",     pass: !req.budgetMax || type === "property" || (price != null && price <= parseFloat(req.budgetMax)) },
+    ];
+  }
+
+  function estimateComm(req, target, type) {
+    if (type === "listing") {
+      if (target.dealType === "Sale") return (target.askingPrice || 0) * 0.03;
+      return (target.monthlyRent || 0) * 12 * 0.05;
+    }
+    const sqft = parseFloat(target.sqft) || 0;
+    if (req.dealType === "Sale") return sqft * 120 * 0.03;
+    return sqft * 9 * 12 * 0.05;
+  }
+
+  const allMatches = useMemo(() => {
+    const results = [];
+    contacts.forEach(c => {
+      (c.requirements || []).filter(r => r.active).forEach(req => {
+        listings.filter(l => l.status === "Active").forEach(l => {
+          const score = scoreMatch(req, l, "listing");
+          if (score < 40) return;
+          results.push({ id: `${c.id}-r${req.id}-l${l.id}`, type: "listing", buyer: c, req, target: l, score, commEstimate: estimateComm(req, l, "listing") });
+        });
+        properties.forEach(p => {
+          const score = scoreMatch(req, p, "property");
+          if (score < 40) return;
+          results.push({ id: `${c.id}-r${req.id}-p${p.id}`, type: "property", buyer: c, req, target: p, score, commEstimate: estimateComm(req, p, "property") });
+        });
+      });
+    });
+    return results.sort((a, b) => b.score - a.score);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts, listings, properties]);
+
+  const visible = allMatches.filter(m =>
+    !dismissed.includes(m.id) &&
+    m.score >= minScore &&
+    (filterType === "all" || m.type === filterType)
+  );
+  const totalComm = visible.reduce((s, m) => s + m.commEstimate, 0);
+  const scoreColor = (s) => s >= 80 ? "#10b981" : s >= 65 ? "#f59e0b" : "#64748b";
+
+  const createDeal = (match) => {
+    const { buyer, req, target, type } = match;
+    const broker = localStorage.getItem("cre-broker-name") || "Me";
+    const newDeal = {
+      id: Date.now(),
+      name: `${buyer.name} — ${target.name || target.address || "Match"}`,
+      client: buyer.name, counterparty: target.owner || "",
+      stage: "Prospect", dealType: req.dealType || "Lease", repType: "Buyer/Tenant Rep",
+      subtype: target.subtype || req.subtypes?.[0] || "Distribution",
+      sqft: target.sqft || ((parseFloat(req.sqftMin || 0) + parseFloat(req.sqftMax || req.sqftMin || 0)) / 2) || 0,
+      dealTotal: 0, monthlyRent: type === "listing" ? (target.monthlyRent || 0) : 0,
+      leaseTerm: 0, commissionRate: 5, probability: 25, expectedClose: "",
+      notes: `Match Engine: ${buyer.name} matched to ${target.name || target.address}. Score: ${match.score}%.`,
+      broker,
+      activities: [{ id: Date.now() + 1, type: "System", text: `Deal created by Match Engine — score ${match.score}%`, date: new Date().toISOString(), author: broker }],
+      followUpDate: today, leadSource: "Existing Client", coBroker: "", splitPct: 100,
+      won: null, lossReason: "", richNotes: [], submarket: target.submarket || req.submarkets?.[0] || "",
+      tags: ["Match Engine"], documents: [],
+      stageHistory: [{ stage: "Prospect", enteredDate: today, note: "Created by Deal Match Engine" }],
+      commissionPaid: false, commissionPaidDate: "",
+    };
+    setDeals(prev => [...prev, newDeal]);
+    setContacts(prev => prev.map(c => c.id === buyer.id ? { ...c, linkedDeals: [...(c.linkedDeals || []), newDeal.id] } : c));
+    setCreatedFor(prev => ({ ...prev, [match.id]: true }));
+    toast("Deal added to pipeline", "success");
+  };
+
+  const activeReqCount = contacts.flatMap(c => (c.requirements || []).filter(r => r.active)).length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Deal Match Engine</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 3 }}>
+            {activeReqCount} active requirements · {allMatches.length} total matches · {visible.length} shown · <span style={{ color: DS.green }}>~{fmt(totalComm)} potential commission</span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Min score:</span>
+          {[40, 50, 60, 75, 90].map(s => (
+            <button key={s} onClick={() => setMinScore(s)} style={{ padding: "4px 10px", background: minScore === s ? DS.accent : DS.panel, border: `1px solid ${minScore === s ? DS.accent : DS.border}`, color: minScore === s ? "#0a0f1a" : DS.textMute, borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: minScore === s ? DS.fw.black : DS.fw.normal }}>{s}+</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Type filter + stats row */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[["all", "All"], ["listing", "Active Listings"], ["property", "Off-Market"]].map(([v, label]) => {
+            const count = allMatches.filter(m => !dismissed.includes(m.id) && m.score >= minScore && (v === "all" || m.type === v)).length;
+            return (
+              <button key={v} onClick={() => setFilterType(v)} style={{ padding: "6px 14px", background: filterType === v ? DS.accent + "22" : "transparent", border: `1px solid ${filterType === v ? DS.accent : DS.border}`, color: filterType === v ? DS.accent : DS.textMute, borderRadius: DS.r.full, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: filterType === v ? DS.fw.semi : DS.fw.normal, display: "flex", alignItems: "center", gap: 6 }}>
+                {label}
+                <span style={{ background: filterType === v ? DS.accent : DS.borderHi, color: filterType === v ? "#0a0f1a" : DS.textSub, borderRadius: 20, fontSize: 9, padding: "0 5px", fontWeight: DS.fw.black }}>{count}</span>
+              </button>
+            );
+          })}
+          {dismissed.length > 0 && (
+            <button onClick={() => { setDismissed([]); localStorage.removeItem("cre-match-dismissed"); }} style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: DS.fs.sm, marginLeft: 4 }}>
+              Restore {dismissed.length} dismissed
+            </button>
+          )}
+        </div>
+        {visible.length > 0 && (
+          <div style={{ display: "flex", gap: 10 }}>
+            {[
+              { label: "High (80+)", value: visible.filter(m => m.score >= 80).length, color: DS.green },
+              { label: "Good (65+)", value: visible.filter(m => m.score >= 65 && m.score < 80).length, color: DS.accent },
+              { label: "Partial",    value: visible.filter(m => m.score < 65).length, color: DS.textMute },
+            ].map(s => (
+              <div key={s.label} style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, padding: "6px 12px", textAlign: "center" }}>
+                <div style={{ color: s.color, fontWeight: DS.fw.black, fontSize: DS.fs.md }}>{s.value}</div>
+                <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Empty state */}
+      {visible.length === 0 && (
+        <div style={{ textAlign: "center", padding: "56px 24px", background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg }}>
+          <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.h3, marginBottom: 8 }}>
+            {activeReqCount === 0 ? "No active requirements" : "No matches at this score threshold"}
+          </div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginBottom: 16 }}>
+            {activeReqCount === 0
+              ? "Add space requirements to your contacts to start finding matches across listings and off-market properties."
+              : `Try lowering the minimum score, or add more listings and properties to match against.`}
+          </div>
+          {activeReqCount === 0 && (
+            <button onClick={() => onNavigate("contacts")} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "8px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>
+              Add Requirements to Contacts →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Match cards */}
+      {visible.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {visible.map(match => {
+            const { buyer, req, target, score, type, commEstimate } = match;
+            const criteria = getCriteria(req, target, type);
+            const sc = scoreColor(score);
+            const alreadyCreated = !!createdFor[match.id];
+            return (
+              <div key={match.id} style={{ background: DS.panel, border: `1px solid ${sc}44`, borderRadius: DS.r.lg, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                {/* Card header */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: sc + "0e", borderBottom: `1px solid ${sc}22` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: "50%", background: sc + "22", border: `2px solid ${sc}66`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <span style={{ color: sc, fontWeight: DS.fw.black, fontSize: DS.fs.md }}>{score}</span>
+                    </div>
+                    <div>
+                      <div style={{ color: sc, fontWeight: DS.fw.black, fontSize: DS.fs.md }}>
+                        {score >= 80 ? "Strong Match" : score >= 65 ? "Good Match" : "Partial Match"}
+                      </div>
+                      <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>
+                        {type === "listing" ? "Active Listing" : "Off-Market Property"}
+                        {commEstimate > 1000 && <span style={{ color: DS.green }}> · ~{fmt(commEstimate)}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <button onClick={() => dismiss(match.id)} style={{ background: "none", border: "none", color: DS.textFaint, cursor: "pointer", fontSize: 18, padding: "0 4px", lineHeight: 1 }} title="Dismiss">×</button>
+                </div>
+
+                {/* Two-sided layout */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 32px 1fr", alignItems: "start", padding: "12px 14px", gap: 6, flex: 1 }}>
+                  {/* Buyer side */}
+                  <div style={{ background: DS.bg, borderRadius: DS.r.sm, padding: "10px 12px" }}>
+                    <div style={{ color: DS.textMute, fontSize: 9, fontWeight: DS.fw.black, letterSpacing: "0.5px", marginBottom: 5 }}>NEEDS SPACE</div>
+                    <div style={{ color: DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.md }}>{buyer.name}</div>
+                    {buyer.company && <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 6 }}>{buyer.company}</div>}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+                      {req.dealType && <div style={{ color: DS.blue, fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>{req.dealType}</div>}
+                      {(req.sqftMin || req.sqftMax) && <div style={{ color: DS.textSub, fontSize: DS.fs.xs }}>{(parseFloat(req.sqftMin) || 0).toLocaleString()}–{req.sqftMax ? parseFloat(req.sqftMax).toLocaleString() : "∞"} SF</div>}
+                      {req.submarkets?.length > 0 && <div style={{ color: DS.textSub, fontSize: DS.fs.xs }}>{req.submarkets.slice(0, 2).join(", ")}{req.submarkets.length > 2 ? " +" + (req.submarkets.length - 2) : ""}</div>}
+                      {req.subtypes?.length > 0 && <div style={{ color: DS.textSub, fontSize: DS.fs.xs }}>{req.subtypes.slice(0, 2).join(", ")}</div>}
+                      {req.timeline && <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>⏱ {req.timeline}</div>}
+                      {req.budgetMax && <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Max: {fmt(parseFloat(req.budgetMax))}</div>}
+                    </div>
+                  </div>
+                  {/* Arrow */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", paddingTop: 20 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: "50%", background: sc + "22", border: `1.5px solid ${sc}55`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <span style={{ color: sc, fontSize: 11 }}>→</span>
+                    </div>
+                  </div>
+                  {/* Target side */}
+                  <div style={{ background: DS.bg, borderRadius: DS.r.sm, padding: "10px 12px" }}>
+                    <div style={{ color: DS.textMute, fontSize: 9, fontWeight: DS.fw.black, letterSpacing: "0.5px", marginBottom: 5 }}>{type === "listing" ? "ACTIVE LISTING" : "OFF-MARKET"}</div>
+                    <div style={{ color: DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{target.name || target.address}</div>
+                    {target.address && target.name && <div style={{ color: DS.textMute, fontSize: DS.fs.xs, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 6 }}>{target.address}</div>}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 4 }}>
+                      {target.sqft > 0 && <div style={{ color: DS.textSub, fontSize: DS.fs.xs }}>{parseFloat(target.sqft).toLocaleString()} SF</div>}
+                      {target.subtype && <div style={{ color: DS.textSub, fontSize: DS.fs.xs }}>{target.subtype}</div>}
+                      {target.submarket && <div style={{ color: DS.textSub, fontSize: DS.fs.xs }}>{target.submarket}</div>}
+                      {type === "listing" && target.dealType === "Lease" && target.monthlyRent > 0 && <div style={{ color: DS.accent, fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>{fmt(target.monthlyRent)}/mo</div>}
+                      {type === "listing" && target.dealType === "Sale" && target.askingPrice > 0 && <div style={{ color: DS.accent, fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>{fmt(target.askingPrice)}</div>}
+                      {type === "property" && target.owner && <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Owner: {target.owner}</div>}
+                      {type === "property" && target.ownerContact && <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Contact: {target.ownerContact}</div>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Criteria badges */}
+                <div style={{ display: "flex", gap: 5, padding: "0 14px 10px", flexWrap: "wrap" }}>
+                  {criteria.map(c => (
+                    <span key={c.label} style={{ fontSize: 9, padding: "2px 7px", borderRadius: DS.r.full, fontWeight: DS.fw.black, background: c.pass ? DS.green + "18" : DS.border, color: c.pass ? DS.green : DS.textFaint, border: `1px solid ${c.pass ? DS.green + "44" : DS.textFaint + "22"}` }}>
+                      {c.pass ? "✓" : "~"} {c.label}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div style={{ padding: "10px 14px", borderTop: `1px solid ${DS.border}`, display: "flex", gap: 8 }}>
+                  {alreadyCreated ? (
+                    <button onClick={() => onNavigate("pipeline")} style={{ flex: 1, background: DS.green + "18", border: `1px solid ${DS.green}44`, color: DS.green, padding: "7px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>
+                      ✓ Deal Created — View Pipeline
+                    </button>
+                  ) : (
+                    <button onClick={() => createDeal(match)} style={{ flex: 1, background: DS.accent, border: "none", color: "#0a0f1a", padding: "7px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>
+                      + Create Deal
+                    </button>
+                  )}
+                  <button onClick={() => onNavigate("contacts")} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textMute, padding: "7px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>
+                    Contact
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function generatePropertyFlyer(prop) {
+  if (!prop) return;
+  const brokerName  = localStorage.getItem("cre-broker-name") || "Broker";
+  const brokerage   = localStorage.getItem("cre-brokerage")   || "SVN";
+  const brokerPhone = localStorage.getItem("cre-phone")       || "";
+  const brokerEmail = localStorage.getItem("cre-email")       || "";
+  const primaryPhoto = (prop.photos||[]).find(ph=>ph.isPrimary) || (prop.photos||[])[0];
+  const highlights = [
+    prop.sqft > 0 ? `${prop.sqft.toLocaleString()} SF` : null,
+    prop.clearHeight ? `${prop.clearHeight}' Clear Height` : null,
+    prop.dockHighDoors ? `${prop.dockHighDoors} Dock-High Doors` : null,
+    prop.gradeLevelDoors ? `${prop.gradeLevelDoors} Grade-Level Doors` : null,
+    prop.powerAmps ? `${prop.powerAmps}A / ${prop.powerVolts||""}V Power` : null,
+    prop.yearBuilt ? `Built ${prop.yearBuilt}` : null,
+    prop.sprinklered ? "Fully Sprinklered" : null,
+    prop.railServed ? "Rail Served" : null,
+    prop.clearSpan ? "Clear Span" : null,
+    prop.zoning ? `Zoning: ${prop.zoning}` : null,
+    prop.parkingSpaces ? `${prop.parkingSpaces}/1K SF Parking` : null,
+    prop.lotSize ? `${prop.lotSize} Acre Site` : null,
+  ].filter(Boolean).slice(0, 6);
+  const hlLabel = (h) => {
+    if (h.includes(" SF")) return "Building Size";
+    if (h.includes("Clear Height")) return "Clear Height";
+    if (h.includes("Dock-High")) return "Dock-High Doors";
+    if (h.includes("Grade-Level")) return "Grade-Level Doors";
+    if (h.includes("Power")) return "Power";
+    if (h.includes("Built")) return "Year Built";
+    if (h.includes("Sprinkler")) return "Fire Protection";
+    if (h.includes("Rail")) return "Rail Access";
+    if (h.includes("Clear Span")) return "Structure";
+    if (h.includes("Zoning")) return "Zoning";
+    if (h.includes("Parking")) return "Parking";
+    if (h.includes("Acre")) return "Site Size";
+    return "Feature";
+  };
+  const win = window.open("", "_blank");
+  win.document.write(`<!DOCTYPE html><html><head><title>Property Flyer — ${prop.name||prop.address}</title><style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Helvetica Neue',Arial,sans-serif;color:#1e293b;background:#fff;font-size:13px}
+    .page{max-width:850px;margin:0 auto}
+    .hero{width:100%;height:340px;object-fit:cover;display:block}
+    .hero-placeholder{width:100%;height:340px;background:linear-gradient(135deg,#0f172a,#1e3a5f);display:flex;align-items:center;justify-content:center}
+    .hero-placeholder span{color:#94a3b8;font-size:16px}
+    .header-bar{background:#0f172a;padding:18px 32px;display:flex;justify-content:space-between;align-items:center}
+    .logo{background:#f59e0b;color:#0d1826;padding:6px 12px;border-radius:5px;font-weight:900;font-size:12px;letter-spacing:1px}
+    .prop-title{padding:28px 32px 20px;border-bottom:3px solid #f59e0b}
+    h1{font-size:28px;font-weight:900;color:#0f172a;margin-bottom:6px}
+    .address{color:#64748b;font-size:14px}
+    .price-badge{display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:6px 16px;border-radius:20px;font-weight:800;font-size:15px;margin-top:10px}
+    .body{padding:24px 32px;display:grid;grid-template-columns:1.4fr 1fr;gap:28px}
+    .section-label{font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #e2e8f0}
+    .highlight-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+    .highlight{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px}
+    .highlight-val{font-size:16px;font-weight:800;color:#0f172a;margin-bottom:2px}
+    .highlight-lbl{font-size:10px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:0.5px}
+    .spec-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9;font-size:12px}
+    .spec-label{color:#64748b} .spec-val{color:#0f172a;font-weight:600}
+    .broker-card{background:#0f172a;color:#fff;border-radius:10px;padding:18px 20px}
+    .broker-name{font-size:16px;font-weight:800;color:#fff;margin-bottom:4px}
+    .broker-firm{color:#94a3b8;font-size:11px;margin-bottom:10px}
+    .broker-contact{color:#f59e0b;font-size:12px;font-weight:600;line-height:1.8}
+    .footer{background:#f8fafc;border-top:1px solid #e2e8f0;padding:12px 32px;display:flex;justify-content:space-between;color:#94a3b8;font-size:10px}
+    @media print{button{display:none}.page{max-width:100%}}
+  </style></head><body><div class="page">
+    <div class="header-bar">
+      <div class="logo">${brokerage.toUpperCase()}</div>
+      <div style="color:#94a3b8;font-size:11px">${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
+    </div>
+    ${primaryPhoto ? `<img src="${primaryPhoto.url}" class="hero" alt="Property"/>` : `<div class="hero-placeholder"><span>No photo on file</span></div>`}
+    <div class="prop-title">
+      <h1>${prop.name||prop.address||"Property"}</h1>
+      <div class="address">${[prop.address,prop.city,prop.state,prop.zip].filter(Boolean).join(", ")||"Address on file"}</div>
+      ${prop.submarket ? `<div style="color:#64748b;font-size:12px;margin-top:4px">${prop.submarket} Submarket · ${prop.type||"Industrial"}${prop.subtype?` — ${prop.subtype}`:""}</div>` : ""}
+      ${prop.askingPrice > 0 ? `<div class="price-badge">${prop.askingPrice >= 1000000 ? "$"+(prop.askingPrice/1000000).toFixed(2)+"M" : "$"+prop.askingPrice.toLocaleString()}${prop.pricePerSF ? ` · $${prop.pricePerSF}/SF` : ""}</div>` : (prop.status ? `<div class="price-badge">${prop.status}</div>` : "")}
+    </div>
+    <div class="body">
+      <div>
+        ${highlights.length ? `<div class="section-label">Property Highlights</div><div class="highlight-grid">${highlights.map(h=>`<div class="highlight"><div class="highlight-val">${h}</div><div class="highlight-lbl">${hlLabel(h)}</div></div>`).join("")}</div>` : ""}
+        ${[["APN / Parcel",prop.apn],["Lot Dimensions",prop.lotDimensions],["HVAC",prop.hvacType],["Roof",(prop.roofType||"")+(prop.roofAge?" ("+prop.roofAge+")":"")],["Floors",prop.numFloors]].filter(r=>r[1]).length ? `<div class="section-label" style="margin-top:16px">Additional Details</div>${[["APN / Parcel",prop.apn],["Lot Dimensions",prop.lotDimensions],["HVAC",prop.hvacType],["Roof",(prop.roofType||"")+(prop.roofAge?" ("+prop.roofAge+")":"")],["Floors",prop.numFloors]].filter(r=>r[1]).map(r=>`<div class="spec-row"><span class="spec-label">${r[0]}</span><span class="spec-val">${r[1]}</span></div>`).join("")}` : ""}
+        ${prop.notes ? `<div style="margin-top:16px"><div class="section-label">Property Notes</div><div style="color:#334155;font-size:12px;line-height:1.6">${prop.notes}</div></div>` : ""}
+      </div>
+      <div>
+        <div class="section-label">Contact</div>
+        <div class="broker-card">
+          <div class="broker-name">${brokerName}</div>
+          <div class="broker-firm">${brokerage}</div>
+          <div class="broker-contact">${brokerPhone?brokerPhone+"<br/>":""}${brokerEmail?brokerEmail+"<br/>":""}</div>
+        </div>
+        ${prop.status ? `<div style="margin-top:16px"><div class="section-label">Listing Status</div><div style="font-size:16px;font-weight:800;color:${prop.status==="Active"?"#10b981":prop.status==="Under Contract"?"#f59e0b":"#94a3b8"}">${prop.status}</div></div>` : ""}
+        ${prop.ownerName||prop.ownerEntity ? `<div style="margin-top:16px"><div class="section-label">Ownership</div><div style="font-weight:700;color:#0f172a">${prop.ownerName||""}</div>${prop.ownerEntity?`<div style="color:#64748b;font-size:11px">${prop.ownerEntity}</div>`:""}</div>` : ""}
+      </div>
+    </div>
+    <div class="footer">
+      <span>${brokerage} · ${brokerName}${brokerPhone?" · "+brokerPhone:""}</span>
+      <span>All information deemed reliable but not guaranteed · ${new Date().toLocaleDateString()}</span>
+    </div>
+    <div style="text-align:center;padding:12px"><button onclick="window.print()" style="background:#f59e0b;border:none;padding:10px 24px;border-radius:8px;font-weight:800;font-size:14px;cursor:pointer">Print / Save as PDF</button></div>
+  </div></body></html>`);
+  win.document.close();
+}
+
+function PropertyDBTab({ properties, setProperties, submarketList, contacts, deals, setDeals, onNavigate }) {
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
+  const [modal, setModal] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [filterSm, setFilterSm] = useState("All");
+  const [sortBy, setSortBy] = useState("updatedAt");
+  const [sortDir, setSortDir] = useState("desc");
+
+  const iS = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "7px 10px", fontSize: DS.fs.sm, outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl = t => <label style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, display: "block", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px" }}>{t}</label>;
+  const statusColors = { "Active": DS.green, "Under Contract": DS.accent, "Off Market": DS.textMute, "Leased/Sold": DS.blue };
+  const daysSince = (d) => d ? Math.floor((new Date() - new Date(d)) / 86400000) : null;
+
   const saveProperty = (form) => {
-    const d = { ...form, sqft: parseFloat(form.sqft)||0, yearBuilt: parseInt(form.yearBuilt)||0, clearHeight: parseFloat(form.clearHeight)||0, dockDoors: parseInt(form.dockDoors)||0, lastSalePrice: parseFloat(form.lastSalePrice)||0 };
+    const now = new Date().toISOString();
+    const d = { ...form, sqft: parseFloat(form.sqft)||0, lotSize: parseFloat(form.lotSize)||0, yearBuilt: parseInt(form.yearBuilt)||0, clearHeight: parseFloat(form.clearHeight)||0, dockDoors: parseInt(form.dockDoors)||0, dockHighDoors: parseInt(form.dockHighDoors)||0, gradeLevelDoors: parseInt(form.gradeLevelDoors)||0, numFloors: parseInt(form.numFloors)||0, parkingSpaces: parseFloat(form.parkingSpaces)||0, askingPrice: parseFloat(form.askingPrice)||0, purchasePrice: parseFloat(form.purchasePrice)||0, updatedAt: now };
+    if (d.sqft > 0 && d.askingPrice > 0) d.pricePerSF = parseFloat((d.askingPrice / d.sqft).toFixed(2));
     if (form.id) setProperties(prev => prev.map(p => p.id === form.id ? d : p));
-    else setProperties(prev => [...prev, { ...d, id: Date.now() }]);
+    else setProperties(prev => [...prev, { ...d, id: Date.now(), createdAt: now, activities: [], photos: [], documents: [] }]);
     setModal(null);
   };
 
-  const filtered = properties.filter(p =>
-    !search || `${p.name} ${p.address} ${p.owner} ${p.ownerContact} ${p.submarket}`.toLowerCase().includes(search.toLowerCase())
+  const filtered = useMemo(() => {
+    return properties.filter(p => {
+      if (filterType !== "All" && p.type !== filterType) return false;
+      if (filterStatus !== "All" && p.status !== filterStatus) return false;
+      if (filterSm !== "All" && p.submarket !== filterSm) return false;
+      if (search) { const q = search.toLowerCase(); if (!`${p.name} ${p.address} ${p.city} ${p.ownerName} ${p.ownerEntity} ${p.submarket}`.toLowerCase().includes(q)) return false; }
+      return true;
+    }).sort((a, b) => {
+      let av = a[sortBy] ?? "", bv = b[sortBy] ?? "";
+      if (typeof av === "number" && typeof bv === "number") return sortDir === "asc" ? av - bv : bv - av;
+      return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
+    });
+  }, [properties, search, filterType, filterStatus, filterSm, sortBy, sortDir]);
+
+  const exportCSV = () => {
+    const headers = ["Name","Address","City","State","Zip","Type","Subtype","Status","SF","Lot Acres","Year Built","Asking Price","$/SF","Submarket","Owner","Owner Entity","Owner Phone","Owner Email","Clear Height","Dock Doors","Grade-Level Doors","Zoning","APN","Sprinklered","Notes"];
+    const rows = filtered.map(p => [p.name||"",p.address||"",p.city||"",p.state||"",p.zip||"",p.type||"",p.subtype||"",p.status||"",p.sqft||"",p.lotSize||"",p.yearBuilt||"",p.askingPrice||"",p.pricePerSF||"",p.submarket||"",p.ownerName||"",p.ownerEntity||"",p.ownerPhone||"",p.ownerEmail||"",p.clearHeight||"",p.dockDoors||"",p.gradeLevelDoors||"",p.zoning||"",p.apn||"",p.sprinklered?"Yes":"No",p.notes||""]);
+    const csv = [headers,...rows].map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const a = document.createElement("a"); a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv); a.download="properties.csv"; a.click();
+  };
+
+  const SortTh = ({ col, label }) => (
+    <th onClick={() => { if (sortBy === col) setSortDir(d => d === "asc" ? "desc" : "asc"); else { setSortBy(col); setSortDir("asc"); } }}
+      style={{ color: sortBy === col ? DS.accent : DS.textMute, fontSize: 10, fontWeight: 700, textAlign: "left", padding: "10px 12px", whiteSpace: "nowrap", cursor: "pointer", letterSpacing: "0.6px", textTransform: "uppercase", userSelect: "none" }}>
+      {label}{sortBy === col ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+    </th>
   );
 
   function PropertyModal({ property }) {
-    const [form, setForm] = useState(property || { name:"", address:"", submarket:smList[0]||"Northeast", subtype:"Distribution", sqft:"", owner:"", ownerContact:"", yearBuilt:"", clearHeight:"", dockDoors:"", lastSalePrice:"", notes:"", tags:"" });
-    const set = (k,v) => setForm(f=>({...f,[k]:v}));
-    const iStyle = { background:"#0f1e2e", border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 11px", fontSize:13, outline:"none", width:"100%", boxSizing:"border-box" };
-    const lbl = (t) => <label style={{ color:"#94a3b8", fontSize:11, fontWeight:600, display:"block", marginBottom:4 }}>{t}</label>;
+    const [tab, setTab] = useState("basic");
+    const [newActivity, setNewActivity] = useState({ type: "Note", note: "" });
+    const blankForm = {
+      name:"", address:"", city:"", state:"", zip:"", type:"Industrial", subtype:"Distribution",
+      sqft:"", lotSize:"", yearBuilt:"", status:"Active", askingPrice:"", pricePerSF:"", submarket: smList[0]||"",
+      ownerName:"", ownerEntity:"", ownerContactId:"", ownerPhone:"", ownerEmail:"", acquisitionDate:"", purchasePrice:"", ownerNotes:"",
+      numFloors:"", clearHeight:"", parkingSpaces:"", dockDoors:"", dockHighDoors:"", gradeLevelDoors:"",
+      powerAmps:"", powerVolts:"", zoning:"", apn:"", lotDimensions:"", clearSpan:false, railServed:false, hvacType:"", roofType:"", roofAge:"", sprinklered:false,
+      photos:[], documents:[], activities:[], tags:"", notes:"",
+    };
+    const [form, setForm] = useState(property || blankForm);
+    const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+    const computedPsf = form.sqft > 0 && form.askingPrice > 0 ? (parseFloat(form.askingPrice)/parseFloat(form.sqft)).toFixed(2) : "";
+    const TABS_DEF = [{ id:"basic", label:"Basic Info" }, { id:"owner", label:"Owner" }, { id:"details", label:"Specs" }, { id:"media", label:"Photos & Docs" }, { id:"activity", label:"Activity" }, { id:"deals", label:"Linked Deals" }];
+    const linkedDeals = (deals||[]).filter(d => String(d.linkedPropertyId) === String(form.id) || String(d.propertyId) === String(form.id));
+    const ownerContact = (contacts||[]).find(c => c.id === parseInt(form.ownerContactId));
+
+    const handlePhotoUpload = (e) => {
+      Array.from(e.target.files).forEach(file => {
+        if (!file.type.startsWith("image/")) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => { set("photos", [...(form.photos||[]), { id: Date.now()+Math.random(), url: ev.target.result, isPrimary: !(form.photos||[]).length, uploadedDate: today, caption: file.name }]); };
+        reader.readAsDataURL(file);
+      });
+    };
+
+    const handleDocUpload = (dtype) => (e) => {
+      const file = e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => { set("documents", [...(form.documents||[]), { id: Date.now(), name: file.name, type: dtype, url: ev.target.result, uploadedDate: today }]); };
+      reader.readAsDataURL(file);
+    };
+
+    const addActivity = () => {
+      if (!newActivity.note.trim()) return;
+      set("activities", [{ id: Date.now(), date: today, type: newActivity.type, note: newActivity.note, createdAt: new Date().toISOString() }, ...(form.activities||[])]);
+      setNewActivity({ type: "Note", note: "" });
+    };
+
+    const sc = statusColors[form.status] || DS.textMute;
+
     return (
-      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }}>
-        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:16, padding:26, width:620, maxHeight:"90vh", overflowY:"auto" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-            <h2 style={{ color:"#f1f5f9", fontSize:17, fontWeight:800, margin:0 }}>{property?.id?"Edit Property":"Add Property"}</h2>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:"none", color:"#64748b", fontSize:20, cursor:"pointer" }}></button>
+      <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.88)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:16 }}>
+        <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, width:"100%", maxWidth:860, maxHeight:"92vh", display:"flex", flexDirection:"column", overflow:"hidden" }}>
+          {/* Header */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 22px", borderBottom:`1px solid ${DS.border}`, flexShrink:0 }}>
+            <div>
+              <div style={{ color:DS.text, fontSize:DS.fs.h2, fontWeight:DS.fw.black }}>{property?.id ? "Edit Property" : "Add Property"}</div>
+              {property?.id && <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:1 }}>{[property.address, property.city, property.state].filter(Boolean).join(", ")||property.name}</div>}
+            </div>
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              {property?.id && form.status && (
+                <span style={{ background:sc+"18", color:sc, border:`1px solid ${sc}44`, padding:"4px 12px", borderRadius:DS.r.full, fontSize:11, fontWeight:700 }}>{form.status}</span>
+              )}
+              {property?.id && (
+                <button onClick={() => generatePropertyFlyer(form)} style={{ background:DS.surface, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"6px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>Generate Flyer</button>
+              )}
+              <button onClick={() => setModal(null)} style={{ background:"none", border:"none", color:DS.textMute, fontSize:22, cursor:"pointer", lineHeight:1, padding:"2px 6px" }}>×</button>
+            </div>
           </div>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:11, marginBottom:14 }}>
-            <div style={{ gridColumn:"span 2" }}>{lbl("Property Name")}<input value={form.name} onChange={e=>set("name",e.target.value)} style={iStyle}/></div>
-            <div style={{ gridColumn:"span 2" }}>{lbl("Address")}<input value={form.address} onChange={e=>set("address",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Submarket")}<select value={form.submarket} onChange={e=>set("submarket",e.target.value)} style={iStyle}>{smList.map(s=><option key={s}>{s}</option>)}</select></div>
-            <div>{lbl("Subtype")}<select value={form.subtype} onChange={e=>set("subtype",e.target.value)} style={iStyle}>{INDUSTRIAL_SUBTYPES.map(s=><option key={s}>{s}</option>)}</select></div>
-            <div>{lbl("Square Footage")}<input type="number" value={form.sqft} onChange={e=>set("sqft",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Year Built")}<input type="number" value={form.yearBuilt} onChange={e=>set("yearBuilt",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Clear Height (ft)")}<input type="number" value={form.clearHeight} onChange={e=>set("clearHeight",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Dock Doors")}<input type="number" value={form.dockDoors} onChange={e=>set("dockDoors",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Owner / Entity")}<input value={form.owner} onChange={e=>set("owner",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Owner Contact Name")}<input value={form.ownerContact} onChange={e=>set("ownerContact",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Last Sale Price ($)")}<input type="number" value={form.lastSalePrice} onChange={e=>set("lastSalePrice",e.target.value)} style={iStyle}/></div>
-            <div>{lbl("Tags")}<input value={form.tags} onChange={e=>set("tags",e.target.value)} placeholder="Owner Prospect, Value-Add, etc." style={iStyle}/></div>
-            <div style={{ gridColumn:"span 2" }}>{lbl("Notes")}<textarea value={form.notes} onChange={e=>set("notes",e.target.value)} rows={3} style={{...iStyle,resize:"vertical"}} placeholder="Condition, ownership history, opportunities..."/></div>
+          {/* Tabs */}
+          <div style={{ display:"flex", borderBottom:`1px solid ${DS.border}`, flexShrink:0, padding:"0 22px", overflowX:"auto" }}>
+            {TABS_DEF.map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} style={{ background:"none", border:"none", borderBottom: tab===t.id ? `2px solid ${DS.accent}` : "2px solid transparent", color: tab===t.id ? DS.accent : DS.textMute, padding:"10px 14px", cursor:"pointer", fontSize:DS.fs.sm, fontWeight: tab===t.id ? DS.fw.bold : DS.fw.normal, whiteSpace:"nowrap", marginBottom:-1 }}>{t.label}</button>
+            ))}
           </div>
-          <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
-            <button onClick={()=>setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:"#94a3b8", padding:"8px 16px", borderRadius:8, cursor:"pointer", fontSize:13 }}>Cancel</button>
-            <button onClick={()=>saveProperty(form)} style={{ background:"#6366f1", border:"none", color:"#fff", padding:"8px 20px", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:800 }}>Save Property</button>
+          {/* Tab Content */}
+          <div style={{ overflowY:"auto", padding:"18px 22px", flex:1 }}>
+            {/* ── BASIC INFO ── */}
+            {tab === "basic" && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <div style={{ gridColumn:"span 2" }}>{lbl("Property Name / Building")}<input value={form.name} onChange={e=>set("name",e.target.value)} placeholder="e.g. Northgate Distribution Center" style={iS}/></div>
+                <div style={{ gridColumn:"span 2" }}>{lbl("Street Address")}<input value={form.address||""} onChange={e=>set("address",e.target.value)} placeholder="e.g. 800 Commerce Drive" style={iS}/></div>
+                <div>{lbl("City")}<input value={form.city||""} onChange={e=>set("city",e.target.value)} style={iS}/></div>
+                <div style={{ display:"grid", gridTemplateColumns:"2fr 1fr", gap:8 }}>
+                  <div>{lbl("State")}<input value={form.state||""} onChange={e=>set("state",e.target.value)} placeholder="e.g. OH" style={iS}/></div>
+                  <div>{lbl("Zip")}<input value={form.zip||""} onChange={e=>set("zip",e.target.value)} style={iS}/></div>
+                </div>
+                <div>{lbl("Property Type")}<select value={form.type||"Industrial"} onChange={e=>{set("type",e.target.value);set("subtype",(PROP_SUBTYPES[e.target.value]||["Other"])[0]);}} style={iS}>{PROP_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+                <div>{lbl("Subtype")}<select value={form.subtype||""} onChange={e=>set("subtype",e.target.value)} style={iS}>{(PROP_SUBTYPES[form.type||"Industrial"]||INDUSTRIAL_SUBTYPES).map(s=><option key={s}>{s}</option>)}</select></div>
+                <div>{lbl("Status")}<select value={form.status||"Active"} onChange={e=>set("status",e.target.value)} style={iS}>{PROP_STATUSES.map(s=><option key={s}>{s}</option>)}</select></div>
+                <div>{lbl("Submarket")}<select value={form.submarket||""} onChange={e=>set("submarket",e.target.value)} style={iS}><option value="">— Select —</option>{smList.map(s=><option key={s}>{s}</option>)}</select></div>
+                <div>{lbl("Building Size (SF)")}<input type="number" value={form.sqft||""} onChange={e=>set("sqft",e.target.value)} placeholder="0" style={iS}/></div>
+                <div>{lbl("Lot Size (Acres)")}<input type="number" step="0.01" value={form.lotSize||""} onChange={e=>set("lotSize",e.target.value)} placeholder="0.00" style={iS}/></div>
+                <div>{lbl("Year Built")}<input type="number" value={form.yearBuilt||""} onChange={e=>set("yearBuilt",e.target.value)} placeholder="e.g. 1998" style={iS}/></div>
+                <div>
+                  {lbl("Asking / Listing Price ($)")}
+                  <input type="number" value={form.askingPrice||""} onChange={e=>set("askingPrice",e.target.value)} placeholder="0" style={iS}/>
+                  {computedPsf && <div style={{ color:DS.green, fontSize:DS.fs.xs, marginTop:3 }}>${computedPsf}/SF</div>}
+                </div>
+                <div style={{ gridColumn:"span 2" }}>{lbl("Notes")}<textarea value={form.notes||""} onChange={e=>set("notes",e.target.value)} rows={2} style={{...iS, resize:"vertical"}} placeholder="Condition, opportunities, ownership history..."/></div>
+                <div style={{ gridColumn:"span 2" }}>{lbl("Tags (comma separated)")}<input value={form.tags||""} onChange={e=>set("tags",e.target.value)} placeholder="Owner Prospect, Value-Add, Watch List..." style={iS}/></div>
+              </div>
+            )}
+            {/* ── OWNER ── */}
+            {tab === "owner" && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <div>{lbl("Owner Name")}<input value={form.ownerName||""} onChange={e=>set("ownerName",e.target.value)} style={iS}/></div>
+                <div>{lbl("Owner Entity / Company")}<input value={form.ownerEntity||""} onChange={e=>set("ownerEntity",e.target.value)} style={iS}/></div>
+                <div>{lbl("Owner Phone")}<input type="tel" value={form.ownerPhone||""} onChange={e=>set("ownerPhone",e.target.value)} style={iS}/></div>
+                <div>{lbl("Owner Email")}<input type="email" value={form.ownerEmail||""} onChange={e=>set("ownerEmail",e.target.value)} style={iS}/></div>
+                <div>{lbl("Link to Contact Record")}<select value={form.ownerContactId||""} onChange={e=>set("ownerContactId",e.target.value)} style={iS}><option value="">— None —</option>{(contacts||[]).map(c=><option key={c.id} value={c.id}>{c.name}{c.company?` (${c.company})`:""}</option>)}</select></div>
+                <div>{lbl("Acquisition Date")}<input type="date" value={form.acquisitionDate||""} onChange={e=>set("acquisitionDate",e.target.value)} style={iS}/></div>
+                <div>{lbl("Purchase Price ($)")}<input type="number" value={form.purchasePrice||""} onChange={e=>set("purchasePrice",e.target.value)} placeholder="0" style={iS}/></div>
+                <div style={{ gridColumn:"span 2" }}>{lbl("Owner / Relationship Notes")}<textarea value={form.ownerNotes||""} onChange={e=>set("ownerNotes",e.target.value)} rows={3} style={{...iS, resize:"vertical"}} placeholder="Relationship context, preferences, past conversations..."/></div>
+                {ownerContact && (
+                  <div style={{ gridColumn:"span 2", background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, padding:"12px 14px" }}>
+                    <div style={{ color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, marginBottom:6, textTransform:"uppercase", letterSpacing:"0.5px" }}>Linked Contact</div>
+                    <div style={{ color:DS.text, fontWeight:DS.fw.semi, fontSize:DS.fs.md }}>{ownerContact.name}</div>
+                    {ownerContact.company && <div style={{ color:DS.textSub, fontSize:DS.fs.sm }}>{ownerContact.company}</div>}
+                    {ownerContact.phone && <div style={{ color:DS.blue, fontSize:DS.fs.sm, marginTop:2 }}>{ownerContact.phone}</div>}
+                    {ownerContact.email && <div style={{ color:DS.green, fontSize:DS.fs.sm }}>{ownerContact.email}</div>}
+                  </div>
+                )}
+              </div>
+            )}
+            {/* ── SPECS ── */}
+            {tab === "details" && (
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+                <div>{lbl("Floors")}<input type="number" value={form.numFloors||""} onChange={e=>set("numFloors",e.target.value)} style={iS}/></div>
+                <div>{lbl("Clear Height (ft)")}<input type="number" value={form.clearHeight||""} onChange={e=>set("clearHeight",e.target.value)} style={iS}/></div>
+                <div>{lbl("Parking (ratio/1K SF)")}<input type="number" step="0.1" value={form.parkingSpaces||""} onChange={e=>set("parkingSpaces",e.target.value)} style={iS}/></div>
+                <div>{lbl("Dock-High Doors")}<input type="number" value={form.dockHighDoors||""} onChange={e=>set("dockHighDoors",e.target.value)} style={iS}/></div>
+                <div>{lbl("Grade-Level Doors")}<input type="number" value={form.gradeLevelDoors||""} onChange={e=>set("gradeLevelDoors",e.target.value)} style={iS}/></div>
+                <div>{lbl("Total Loading Doors")}<input type="number" value={form.dockDoors||""} onChange={e=>set("dockDoors",e.target.value)} style={iS}/></div>
+                <div>{lbl("Power (Amps)")}<input type="number" value={form.powerAmps||""} onChange={e=>set("powerAmps",e.target.value)} placeholder="e.g. 800" style={iS}/></div>
+                <div>{lbl("Power (Volts)")}<input type="number" value={form.powerVolts||""} onChange={e=>set("powerVolts",e.target.value)} placeholder="e.g. 480" style={iS}/></div>
+                <div>{lbl("Zoning")}<input value={form.zoning||""} onChange={e=>set("zoning",e.target.value)} placeholder="e.g. M-2" style={iS}/></div>
+                <div>{lbl("APN / Parcel")}<input value={form.apn||""} onChange={e=>set("apn",e.target.value)} style={iS}/></div>
+                <div>{lbl("Lot Dimensions")}<input value={form.lotDimensions||""} onChange={e=>set("lotDimensions",e.target.value)} placeholder="e.g. 400' x 600'" style={iS}/></div>
+                <div>{lbl("HVAC Type")}<input value={form.hvacType||""} onChange={e=>set("hvacType",e.target.value)} placeholder="e.g. Gas forced air" style={iS}/></div>
+                <div>{lbl("Roof Type")}<input value={form.roofType||""} onChange={e=>set("roofType",e.target.value)} placeholder="e.g. TPO membrane" style={iS}/></div>
+                <div>{lbl("Roof Age / Year")}<input value={form.roofAge||""} onChange={e=>set("roofAge",e.target.value)} placeholder="e.g. 2018" style={iS}/></div>
+                <div style={{ gridColumn:"span 3", display:"flex", gap:24, flexWrap:"wrap", paddingTop:4 }}>
+                  {[["clearSpan","Clear Span"],["railServed","Rail Served"],["sprinklered","Sprinklered"]].map(([k,label]) => (
+                    <label key={k} style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer" }}>
+                      <input type="checkbox" checked={!!form[k]} onChange={e=>set(k,e.target.checked)} style={{ accentColor:DS.accent, width:14, height:14 }}/>
+                      <span style={{ color:DS.textSub, fontSize:DS.fs.sm }}>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* ── PHOTOS & DOCS ── */}
+            {tab === "media" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
+                <div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                    <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold }}>Photos</div>
+                    <label style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"6px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>
+                      Upload Photos<input type="file" accept="image/*" multiple onChange={handlePhotoUpload} style={{ display:"none" }}/>
+                    </label>
+                  </div>
+                  {!(form.photos||[]).length ? (
+                    <div style={{ background:DS.surface, border:`1px dashed ${DS.border}`, borderRadius:DS.r.md, padding:"32px 20px", textAlign:"center" }}>
+                      <div style={{ color:DS.textMute, fontSize:DS.fs.sm }}>No photos yet. Upload images to display in the property flyer.</div>
+                    </div>
+                  ) : (
+                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(140px, 1fr))", gap:8 }}>
+                      {(form.photos||[]).map((ph, i) => (
+                        <div key={ph.id||i} style={{ position:"relative", borderRadius:DS.r.sm, overflow:"hidden", border:`2px solid ${ph.isPrimary ? DS.accent : DS.border}` }}>
+                          <img src={ph.url} alt={ph.caption||"Property"} style={{ width:"100%", height:100, objectFit:"cover", display:"block" }}/>
+                          <div style={{ position:"absolute", bottom:0, left:0, right:0, background:"rgba(0,0,0,0.75)", padding:"4px 6px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                            {ph.isPrimary ? <span style={{ color:DS.accent, fontSize:DS.fs.xs, fontWeight:DS.fw.bold }}>Primary</span> : <button onClick={() => set("photos",(form.photos||[]).map((p,j)=>({...p,isPrimary:j===i})))} style={{ background:"none", border:"none", color:DS.accent, fontSize:DS.fs.xs, cursor:"pointer", padding:0 }}>Set Primary</button>}
+                            <button onClick={() => set("photos",(form.photos||[]).filter((_,j)=>j!==i))} style={{ background:"none", border:"none", color:DS.red, fontSize:DS.fs.xs, cursor:"pointer", padding:0 }}>Remove</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ color:DS.text, fontSize:DS.fs.md, fontWeight:DS.fw.bold, marginBottom:10 }}>Documents</div>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
+                    {["Floor Plan","Survey","Aerial","Environmental Report","Lease Abstract","Other"].map(dtype => (
+                      <label key={dtype} style={{ background:DS.surface, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"5px 12px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.xs, fontWeight:DS.fw.semi }}>
+                        + {dtype}<input type="file" onChange={handleDocUpload(dtype)} style={{ display:"none" }}/>
+                      </label>
+                    ))}
+                  </div>
+                  {!(form.documents||[]).length ? (
+                    <div style={{ color:DS.textMute, fontSize:DS.fs.sm }}>No documents attached. Click a type above to upload a file.</div>
+                  ) : (
+                    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                      {(form.documents||[]).map((doc, i) => (
+                        <div key={doc.id||i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, padding:"9px 12px" }}>
+                          <div>
+                            <div style={{ color:DS.text, fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>{doc.name}</div>
+                            <div style={{ color:DS.textMute, fontSize:DS.fs.xs }}>{doc.type} · {doc.uploadedDate}</div>
+                          </div>
+                          <div style={{ display:"flex", gap:10 }}>
+                            <a href={doc.url} download={doc.name} style={{ color:DS.blue, fontSize:DS.fs.xs, fontWeight:DS.fw.semi, textDecoration:"none" }}>Download</a>
+                            <button onClick={() => set("documents",(form.documents||[]).filter((_,j)=>j!==i))} style={{ background:"none", border:"none", color:DS.red, fontSize:DS.fs.xs, cursor:"pointer" }}>Remove</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* ── ACTIVITY ── */}
+            {tab === "activity" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                <div style={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, padding:"14px 16px" }}>
+                  <div style={{ color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, marginBottom:10, textTransform:"uppercase", letterSpacing:"0.5px" }}>Add Note</div>
+                  <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+                    <select value={newActivity.type} onChange={e=>setNewActivity(a=>({...a,type:e.target.value}))} style={{...iS, width:"auto", minWidth:130}}>
+                      {["Note","Tour","Proposal Sent","Call","Meeting","Status Change","Other"].map(t=><option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <textarea value={newActivity.note} onChange={e=>setNewActivity(a=>({...a,note:e.target.value}))} placeholder="Add a note about this property..." rows={2} style={{...iS, resize:"vertical", marginBottom:8}}/>
+                  <button onClick={addActivity} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>Add Note</button>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {!(form.activities||[]).length ? (
+                    <div style={{ color:DS.textMute, fontSize:DS.fs.sm, textAlign:"center", padding:"24px 0" }}>No activity recorded yet.</div>
+                  ) : (form.activities||[]).map((act, i) => (
+                    <div key={act.id||i} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                      <div style={{ width:8, height:8, borderRadius:"50%", background:DS.accent, marginTop:5, flexShrink:0 }}/>
+                      <div style={{ flex:1 }}>
+                        <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:2 }}>
+                          <span style={{ color:DS.text, fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>{act.type}</span>
+                          <span style={{ color:DS.textFaint, fontSize:DS.fs.xs }}>{act.date}</span>
+                        </div>
+                        <div style={{ color:DS.textSub, fontSize:DS.fs.sm, lineHeight:1.5 }}>{act.note}</div>
+                      </div>
+                      <button onClick={() => set("activities",(form.activities||[]).filter((_,j)=>j!==i))} style={{ background:"none", border:"none", color:DS.textFaint, cursor:"pointer", fontSize:14 }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {/* ── LINKED DEALS ── */}
+            {tab === "deals" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div style={{ color:DS.textMute, fontSize:DS.fs.sm }}>{linkedDeals.length} deal{linkedDeals.length !== 1 ? "s" : ""} linked to this property</div>
+                  {form.id && onNavigate && (
+                    <button onClick={() => { setModal(null); onNavigate("pipeline"); }} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"6px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.bold }}>Go to Pipeline</button>
+                  )}
+                </div>
+                {!linkedDeals.length ? (
+                  <div style={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, padding:"32px 20px", textAlign:"center" }}>
+                    <div style={{ color:DS.textMute, fontSize:DS.fs.sm }}>No deals linked yet. In the Pipeline, set the Linked Property field to connect deals here.</div>
+                  </div>
+                ) : (
+                  <div style={{ background:DS.surface, border:`1px solid ${DS.border}`, borderRadius:DS.r.md, overflow:"hidden" }}>
+                    <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                      <thead><tr style={{ borderBottom:`1px solid ${DS.border}`, background:DS.bg }}>{["Deal","Client","Stage","Value","Stage Age"].map(h=><th key={h} style={{ color:DS.textMute, fontSize:10, fontWeight:700, textAlign:"left", padding:"9px 12px", textTransform:"uppercase", letterSpacing:"0.5px" }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {linkedDeals.map(d => {
+                          const e = calcDeal(d); const sc2 = STAGE_COLORS[d.stage] || {};
+                          return (
+                            <tr key={d.id} style={{ borderBottom:`1px solid ${DS.border}`, cursor:"pointer" }} onMouseEnter={ev=>ev.currentTarget.style.background=DS.panelHi} onMouseLeave={ev=>ev.currentTarget.style.background="transparent"}>
+                              <td style={{ padding:"10px 12px", color:DS.text, fontWeight:DS.fw.semi, fontSize:DS.fs.sm }}>{d.name}</td>
+                              <td style={{ padding:"10px 12px", color:DS.textSub, fontSize:DS.fs.sm }}>{d.client||"—"}</td>
+                              <td style={{ padding:"10px 12px" }}><span style={{ background:sc2.bg, color:sc2.text, border:`1px solid ${sc2.border||DS.border}`, padding:"2px 8px", borderRadius:DS.r.full, fontSize:10, fontWeight:700 }}>{d.stage}</span></td>
+                              <td style={{ padding:"10px 12px", color:DS.accent, fontWeight:DS.fw.bold, fontSize:DS.fs.sm }}>{e.netCommission > 0 ? fmt(e.netCommission) : "—"}</td>
+                              <td style={{ padding:"10px 12px", color:DS.textFaint, fontSize:DS.fs.xs }}>{e.daysInStage ? `${e.daysInStage}d` : "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {/* Footer */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 22px", borderTop:`1px solid ${DS.border}`, flexShrink:0 }}>
+            <div>
+              {property?.id && (
+                <button onClick={() => { if(window.confirm("Delete this property?")) { setProperties(prev=>prev.filter(p=>p.id!==property.id)); setModal(null); } }} style={{ background:"none", border:`1px solid ${DS.red}44`, color:DS.red, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Delete Property</button>
+              )}
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={() => setModal(null)} style={{ background:"none", border:`1px solid ${DS.border}`, color:DS.textSub, padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm }}>Cancel</button>
+              <button onClick={() => saveProperty(form)} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"7px 20px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.black }}>Save Property</button>
+            </div>
           </div>
         </div>
       </div>
@@ -3724,55 +8697,124 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts }) {
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
         <div>
-          <div style={{ color:"#f1f5f9", fontWeight:800, fontSize:16 }}>Property Database</div>
-          <div style={{ color:"#475569", fontSize:11 }}>Buildings in your market — owners, specs, and opportunity notes</div>
+          <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h2, letterSpacing:"-0.3px" }}>Properties</div>
+          <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:2 }}>{filtered.length} of {properties.length} propert{properties.length !== 1 ? "ies" : "y"}</div>
         </div>
-        <button onClick={()=>setModal("new")} style={{ background:"#6366f1", border:"none", color:"#fff", padding:"7px 16px", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:800 }}>+ Add Property</button>
+        <div style={{ display:"flex", gap:8 }}>
+          <button onClick={exportCSV} style={{ background:DS.panel, border:`1px solid ${DS.border}`, color:DS.textSub, padding:"7px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.semi }}>Export CSV</button>
+          <button onClick={() => setModal("new")} style={{ background:DS.accent, border:"none", color:"#0a0f1a", padding:"7px 16px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:DS.fs.sm, fontWeight:DS.fw.black }}>+ Add Property</button>
+        </div>
       </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search property name, address, owner, submarket..." style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:8, color:"#f1f5f9", padding:"8px 12px", fontSize:12, outline:"none" }}/>
-      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:12, overflowX:"auto" }}>
-        <table style={{ width:"100%", borderCollapse:"collapse", minWidth:800 }}>
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search address, owner, submarket..." style={{ flex:1, minWidth:200, background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, padding:"7px 12px", fontSize:DS.fs.sm, outline:"none" }}/>
+        <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.textSub, padding:"7px 11px", fontSize:DS.fs.sm, outline:"none" }}>
+          <option value="All">All Types</option>{PROP_TYPES.map(t=><option key={t}>{t}</option>)}
+        </select>
+        <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.textSub, padding:"7px 11px", fontSize:DS.fs.sm, outline:"none" }}>
+          <option value="All">All Statuses</option>{PROP_STATUSES.map(s=><option key={s}>{s}</option>)}
+        </select>
+        <select value={filterSm} onChange={e=>setFilterSm(e.target.value)} style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.textSub, padding:"7px 11px", fontSize:DS.fs.sm, outline:"none" }}>
+          <option value="All">All Submarkets</option>{smList.map(s=><option key={s}>{s}</option>)}
+        </select>
+      </div>
+      {properties.length > 0 && (() => {
+        const active = properties.filter(p=>p.status==="Active");
+        const priced = properties.filter(p=>p.pricePerSF>0);
+        return (
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            {[
+              { label:"Total Properties", value:properties.length, color:DS.blue },
+              { label:"Active", value:active.length, color:DS.green },
+              { label:"Avg Size (Active)", value:active.length?(Math.round(active.reduce((s,p)=>s+(p.sqft||0),0)/active.length)).toLocaleString()+" SF":"—", color:DS.accent },
+              { label:"Avg Asking $/SF", value:priced.length?"$"+(priced.reduce((s,p)=>s+(p.pricePerSF||0),0)/priced.length).toFixed(0):"—", color:DS.purple },
+            ].map(c=>(
+              <div key={c.label} style={{ flex:1, minWidth:120, background:DS.panel, border:`1px solid ${DS.border}`, borderLeft:`3px solid ${c.color}`, borderRadius:DS.r.md, padding:"11px 14px" }}>
+                <div style={{ color:c.color, fontWeight:DS.fw.black, fontSize:DS.fs.h2, fontFamily:"'DM Mono', monospace" }}>{c.value}</div>
+                <div style={{ color:DS.textMute, fontSize:10, fontWeight:DS.fw.bold, textTransform:"uppercase", letterSpacing:"0.5px", marginTop:3 }}>{c.label}</div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+      <div style={{ background:DS.panel, border:`1px solid ${DS.border}`, borderRadius:DS.r.lg, overflowX:"auto" }}>
+        <table style={{ width:"100%", borderCollapse:"collapse", minWidth:940 }}>
           <thead>
-            <tr style={{ borderBottom:`2px solid ${DS.border}` }}>
-              {["Property","Submarket","Subtype","Sq Ft","Yr Built","Clear Ht","Docks","Owner","Contact","Last Sale","Tags",""].map(h=>(
-                <th key={h} style={{ color:"#64748b", fontSize:10, fontWeight:700, textAlign:"left", padding:"9px 10px", whiteSpace:"nowrap" }}>{h}</th>
-              ))}
+            <tr style={{ borderBottom:`2px solid ${DS.border}`, background:"rgba(7,14,26,0.6)" }}>
+              <SortTh col="name" label="Property" />
+              <SortTh col="type" label="Type" />
+              <SortTh col="status" label="Status" />
+              <SortTh col="sqft" label="SF" />
+              <SortTh col="askingPrice" label="Price" />
+              <SortTh col="pricePerSF" label="$/SF" />
+              <SortTh col="ownerName" label="Owner" />
+              <SortTh col="submarket" label="Submarket" />
+              <SortTh col="yearBuilt" label="Yr Built" />
+              <th style={{ color:DS.textMute, fontSize:10, fontWeight:700, textAlign:"left", padding:"10px 12px", textTransform:"uppercase", letterSpacing:"0.6px" }}>Last Activity</th>
+              <th style={{ width:90 }}></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(p=>(
-              <tr key={p.id} style={{ borderBottom:`1px solid ${DS.border}` }}
-                onMouseEnter={e=>e.currentTarget.style.background="#1a2d42"}
-                onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <td style={{ padding:"10px", color:"#f1f5f9", fontWeight:600, fontSize:12 }}>
-                  <div>{p.name}</div>
-                  {p.address && <div style={{ color:"#475569", fontSize:10 }}>{p.address}</div>}
-                </td>
-                <td style={{ padding:"10px", color:"#94a3b8", fontSize:11 }}>{p.submarket||"—"}</td>
-                <td style={{ padding:"10px", color:"#64748b", fontSize:11 }}>{p.subtype||"—"}</td>
-                <td style={{ padding:"10px", color:"#cbd5e1", fontSize:12 }}>{p.sqft?p.sqft.toLocaleString():"—"}</td>
-                <td style={{ padding:"10px", color:"#64748b", fontSize:11 }}>{p.yearBuilt||"—"}</td>
-                <td style={{ padding:"10px", color:"#64748b", fontSize:11 }}>{p.clearHeight?p.clearHeight+"'":"—"}</td>
-                <td style={{ padding:"10px", color:"#64748b", fontSize:11 }}>{p.dockDoors||"—"}</td>
-                <td style={{ padding:"10px", color:"#94a3b8", fontSize:11 }}>{p.owner||"—"}</td>
-                <td style={{ padding:"10px", color:"#60a5fa", fontSize:11 }}>{p.ownerContact||"—"}</td>
-                <td style={{ padding:"10px", color:"#f59e0b", fontSize:11 }}>{p.lastSalePrice>0?fmt(p.lastSalePrice):"—"}</td>
-                <td style={{ padding:"10px" }}>{p.tags&&p.tags.split(",").map(t=>t.trim()).filter(Boolean).map(t=><span key={t} style={{ background:"#1e3048", color:"#94a3b8", padding:"1px 6px", borderRadius:20, fontSize:9, marginRight:3 }}>{t}</span>)}</td>
-                <td style={{ padding:"10px" }}>
-                  <div style={{ display:"flex", gap:4 }}>
-                    <button onClick={()=>setModal(p)} style={{ background:"none", border:"none", color:"#64748b", cursor:"pointer", fontSize:13 }}></button>
-                    <button onClick={()=>{ if(window.confirm("Delete?")) setProperties(prev=>prev.filter(x=>x.id!==p.id)); }} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:13 }}></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {filtered.map(p => {
+              const sc = statusColors[p.status] || DS.textMute;
+              const lastAct = (p.activities||[])[0];
+              const daysAgo = lastAct ? daysSince(lastAct.createdAt || lastAct.date) : (p.updatedAt ? daysSince(p.updatedAt) : null);
+              const primaryPhoto = (p.photos||[]).find(ph=>ph.isPrimary) || (p.photos||[])[0];
+              return (
+                <tr key={p.id} onClick={() => setModal(p)} style={{ borderBottom:`1px solid ${DS.border}`, cursor:"pointer" }} onMouseEnter={e=>e.currentTarget.style.background=DS.panelHi} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <td style={{ padding:"11px 12px", maxWidth:220 }}>
+                    <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                      {primaryPhoto ? (
+                        <img src={primaryPhoto.url} alt="" style={{ width:38, height:38, objectFit:"cover", borderRadius:DS.r.xs, flexShrink:0, border:`1px solid ${DS.border}` }}/>
+                      ) : (
+                        <div style={{ width:38, height:38, background:DS.surface, borderRadius:DS.r.xs, border:`1px solid ${DS.border}`, flexShrink:0 }}/>
+                      )}
+                      <div style={{ minWidth:0 }}>
+                        <div style={{ color:DS.text, fontWeight:DS.fw.semi, fontSize:DS.fs.sm, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:160 }}>{p.name||"—"}</div>
+                        <div style={{ color:DS.textMute, fontSize:DS.fs.xs, marginTop:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:160 }}>{[p.address,p.city,p.state].filter(Boolean).join(", ")||"—"}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{ padding:"11px 12px" }}>
+                    <div style={{ color:DS.textSub, fontSize:DS.fs.sm }}>{p.type||"—"}</div>
+                    <div style={{ color:DS.textFaint, fontSize:DS.fs.xs }}>{p.subtype||""}</div>
+                  </td>
+                  <td style={{ padding:"11px 12px" }}>
+                    <span style={{ background:sc+"18", color:sc, border:`1px solid ${sc}44`, padding:"2px 9px", borderRadius:DS.r.full, fontSize:10, fontWeight:700, whiteSpace:"nowrap" }}>{p.status||"—"}</span>
+                  </td>
+                  <td style={{ padding:"11px 12px", color:DS.text, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{p.sqft>0?p.sqft.toLocaleString():"—"}</td>
+                  <td style={{ padding:"11px 12px", color:DS.accent, fontWeight:DS.fw.bold, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{p.askingPrice>0?fmt(p.askingPrice):"—"}</td>
+                  <td style={{ padding:"11px 12px", color:DS.green, fontSize:DS.fs.sm, fontFamily:"'DM Mono', monospace" }}>{p.pricePerSF>0?"$"+p.pricePerSF+"/SF":"—"}</td>
+                  <td style={{ padding:"11px 12px", maxWidth:140 }}>
+                    <div style={{ color:DS.textSub, fontSize:DS.fs.sm, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{p.ownerName||"—"}</div>
+                    {p.ownerEntity && <div style={{ color:DS.textFaint, fontSize:DS.fs.xs }}>{p.ownerEntity}</div>}
+                  </td>
+                  <td style={{ padding:"11px 12px", color:DS.textSub, fontSize:DS.fs.sm }}>{p.submarket||"—"}</td>
+                  <td style={{ padding:"11px 12px", color:DS.textFaint, fontSize:DS.fs.sm }}>{p.yearBuilt||"—"}</td>
+                  <td style={{ padding:"11px 12px" }}>
+                    {daysAgo !== null ? (
+                      <span style={{ color: daysAgo > 30 ? DS.red : daysAgo > 14 ? DS.accent : DS.green, fontSize:DS.fs.xs, fontFamily:"'DM Mono', monospace" }}>{daysAgo === 0 ? "Today" : `${daysAgo}d ago`}</span>
+                    ) : <span style={{ color:DS.textFaint, fontSize:DS.fs.xs }}>—</span>}
+                  </td>
+                  <td style={{ padding:"11px 12px" }} onClick={e=>e.stopPropagation()}>
+                    <div style={{ display:"flex", gap:4 }}>
+                      <button onClick={e=>{e.stopPropagation();setModal(p);}} style={{ background:DS.panelHi, border:`1px solid ${DS.border}`, color:DS.textSub, cursor:"pointer", fontSize:DS.fs.xs, padding:"4px 10px", borderRadius:DS.r.sm }}>Edit</button>
+                      <button onClick={e=>{e.stopPropagation();if(window.confirm("Delete property?")) setProperties(prev=>prev.filter(x=>x.id!==p.id));}} style={{ background:"none", border:`1px solid ${DS.red}33`, color:DS.red, cursor:"pointer", fontSize:DS.fs.xs, padding:"4px 8px", borderRadius:DS.r.sm }}>Del</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
-        {filtered.length === 0 && <div style={{ color:"#475569", fontSize:13, textAlign:"center", padding:"40px 0" }}>No properties yet. Track buildings in your market — specs, owners, and opportunities.</div>}
+        {filtered.length === 0 && (
+          <div style={{ color:DS.textMute, fontSize:DS.fs.lg, textAlign:"center", padding:"48px 0" }}>
+            {properties.length === 0 ? "No properties yet. Add buildings you own, represent, or track in your market." : "No properties match the current filters."}
+          </div>
+        )}
       </div>
-      {modal && <PropertyModal property={modal==="new"?null:modal}/>}
+      {modal && <PropertyModal property={modal === "new" ? null : modal} />}
     </div>
   );
 }
@@ -4071,6 +9113,293 @@ function DealTimelineModal({ deal, onClose }) {
   );
 }
 
+// ── DealDNA + Performance Mirror ─────────────────────────────────
+function DealDNATab({ deals }) {
+  const enriched = useMemo(() => deals.map(calcDeal), [deals]);
+  const closed = enriched.filter(d => d.stage === "Closed");
+  const lost   = enriched.filter(d => d.stage === "Lost");
+  const active = enriched.filter(d => d.stage !== "Closed" && d.stage !== "Lost");
+  const stageOrder = ["Prospect", "Proposal", "LOI", "Under Contract"];
+
+  // ── Build winning pattern from closed deals ──────────────────
+  const pattern = useMemo(() => {
+    if (closed.length < 2) return null;
+
+    // Avg days per stage (from stageHistory transitions)
+    const avgDaysPerStage = {};
+    stageOrder.forEach(stage => {
+      const times = [];
+      closed.forEach(d => {
+        if (!d.stageHistory || d.stageHistory.length < 2) return;
+        const idx = d.stageHistory.findIndex(h => h.stage === stage);
+        const nxt = d.stageHistory.findIndex((h, i) => i > idx && h.stage !== stage);
+        if (idx >= 0 && nxt >= 0) {
+          const days = Math.floor((new Date(d.stageHistory[nxt].enteredDate + "T00:00:00") - new Date(d.stageHistory[idx].enteredDate + "T00:00:00")) / 86400000);
+          if (days >= 0 && days < 730) times.push(days);
+        }
+      });
+      avgDaysPerStage[stage] = times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : null;
+    });
+
+    // Avg total activities in closed deals
+    const actCounts = closed.map(d => (d.activities || []).filter(a => a.type !== "System").length);
+    const avgActivities = actCounts.length ? actCounts.reduce((a, b) => a + b, 0) / actCounts.length : 0;
+
+    // Days to first activity after deal creation
+    const firstActDelays = [];
+    closed.forEach(d => {
+      const created = d.stageHistory?.[0]?.enteredDate;
+      const first = [...(d.activities || [])].filter(a => a.type !== "System").sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+      if (created && first) {
+        const days = Math.floor((new Date(first.date) - new Date(created + "T00:00:00")) / 86400000);
+        if (days >= 0 && days < 365) firstActDelays.push(days);
+      }
+    });
+    const avgFirstActDelay = firstActDelays.length ? Math.round(firstActDelays.reduce((a, b) => a + b, 0) / firstActDelays.length) : null;
+
+    // Total days prospect → closed
+    const totalDays = [];
+    closed.forEach(d => {
+      const first = d.stageHistory?.[0]?.enteredDate;
+      const closedEntry = d.stageHistory?.find(h => h.stage === "Closed")?.enteredDate || d.expectedClose;
+      if (first && closedEntry) {
+        const days = Math.floor((new Date(closedEntry + "T00:00:00") - new Date(first + "T00:00:00")) / 86400000);
+        if (days > 0 && days < 1825) totalDays.push(days);
+      }
+    });
+    const avgTotalDays = totalDays.length ? Math.round(totalDays.reduce((a, b) => a + b, 0) / totalDays.length) : null;
+
+    // Win rate by lead source
+    const sourceMap = {};
+    deals.filter(d => d.stage === "Closed" || d.stage === "Lost").forEach(d => {
+      const src = d.leadSource || "Unknown";
+      if (!sourceMap[src]) sourceMap[src] = { won: 0, lost: 0 };
+      if (d.stage === "Closed") sourceMap[src].won++; else sourceMap[src].lost++;
+    });
+    const sourceRates = Object.entries(sourceMap)
+      .map(([src, s]) => ({ src, total: s.won + s.lost, won: s.won, rate: Math.round(s.won / (s.won + s.lost) * 100) }))
+      .filter(x => x.total >= 1).sort((a, b) => b.rate - a.rate);
+
+    // Avg commission closed vs lost
+    const avgClosedComm = closed.reduce((s, d) => s + (d.netCommission || 0), 0) / closed.length;
+    const avgLostComm   = lost.length ? lost.reduce((s, d) => s + (d.netCommission || 0), 0) / lost.length : 0;
+
+    // Bottleneck stage (longest avg)
+    const bottleneck = stageOrder.reduce((worst, stage) => {
+      const v = avgDaysPerStage[stage];
+      if (v == null) return worst;
+      return (!worst || v > avgDaysPerStage[worst]) ? stage : worst;
+    }, null);
+
+    return { avgDaysPerStage, avgActivities, avgFirstActDelay, avgTotalDays, sourceRates, avgClosedComm, avgLostComm, bottleneck };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closed, lost, deals]);
+
+  // ── Score each active deal vs pattern ───────────────────────
+  const scoredDeals = useMemo(() => {
+    if (!pattern) return active.map(d => ({ ...d, dnaScore: null, dnaInsights: [] }));
+    return active.map(d => {
+      let score = 100;
+      const insights = [];
+
+      // Stage timing
+      const avgDays = pattern.avgDaysPerStage[d.stage];
+      const dis = d.daysInStage || 0;
+      if (avgDays != null && avgDays > 0) {
+        if (dis > avgDays * 1.75) { score -= 35; insights.push({ type: "danger", text: `${dis}d in ${d.stage} — your avg is ${avgDays}d` }); }
+        else if (dis > avgDays * 1.15) { score -= 15; insights.push({ type: "warn", text: `Running ${dis - avgDays}d over your typical ${d.stage} pace` }); }
+        else insights.push({ type: "good", text: `On pace in ${d.stage} (${dis}d / avg ${avgDays}d)` });
+      }
+
+      // Activity count vs closed-deal average (prorated by stage index)
+      const stageIdx = stageOrder.indexOf(d.stage);
+      const expectedActs = pattern.avgActivities * ((stageIdx + 1) / stageOrder.length);
+      const actualActs = (d.activities || []).filter(a => a.type !== "System").length;
+      if (actualActs < expectedActs * 0.4) { score -= 25; insights.push({ type: "danger", text: `Only ${actualActs} activit${actualActs === 1 ? "y" : "ies"} logged — closed deals had ~${Math.round(expectedActs)} by this stage` }); }
+      else if (actualActs < expectedActs * 0.7) { score -= 10; insights.push({ type: "warn", text: `Activity below pattern (${actualActs} vs ~${Math.round(expectedActs)} typical)` }); }
+      else insights.push({ type: "good", text: `Activity level on pattern (${actualActs} logged)` });
+
+      // First activity delay
+      if (pattern.avgFirstActDelay != null) {
+        const created = d.stageHistory?.[0]?.enteredDate;
+        const firstAct = [...(d.activities || [])].filter(a => a.type !== "System").sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+        if (!firstAct && created) {
+          const ageDays = Math.floor((new Date() - new Date(created + "T00:00:00")) / 86400000);
+          if (ageDays > pattern.avgFirstActDelay * 1.5) { score -= 20; insights.push({ type: "warn", text: `No activity yet — closed deals had first touch in ${pattern.avgFirstActDelay}d` }); }
+        }
+      }
+
+      score = Math.max(0, Math.min(100, score));
+      const label = score >= 80 ? "On Pattern" : score >= 60 ? "Drifting" : score >= 40 ? "At Risk" : "Off Pattern";
+      const color = score >= 80 ? DS.green : score >= 60 ? DS.accent : score >= 40 ? "#f97316" : DS.red;
+      return { ...d, dnaScore: score, dnaLabel: label, dnaColor: color, dnaInsights: insights };
+    }).sort((a, b) => (a.dnaScore ?? 999) - (b.dnaScore ?? 999));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, pattern]);
+
+  const noDataState = (
+    <div style={{ textAlign: "center", padding: "56px 24px", background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg }}>
+      <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.h3, marginBottom: 8 }}>Not enough data yet</div>
+      <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Close at least 2 deals to generate your personal DNA pattern. Every deal you close makes this smarter.</div>
+    </div>
+  );
+
+  const stageColors = { "Prospect": DS.blue, "Proposal": DS.accent, "LOI": DS.purple, "Under Contract": "#f97316" };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Deal DNA</div>
+        <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 3 }}>
+          Your personal closing patterns vs active pipeline · built from {closed.length} closed deal{closed.length !== 1 ? "s" : ""}
+        </div>
+      </div>
+
+      {closed.length < 2 ? noDataState : (<>
+
+        {/* ── Winning Pattern Blueprint ── */}
+        <div style={{ background: `linear-gradient(135deg, ${DS.panel} 0%, #0d1e30 100%)`, border: `1px solid ${DS.green}33`, borderRadius: DS.r.lg, padding: "20px 24px" }}>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "0.5px", marginBottom: 14 }}>YOUR CLOSING BLUEPRINT — {closed.length} CLOSED DEALS</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
+            {stageOrder.map(stage => {
+              const avg = pattern.avgDaysPerStage[stage];
+              const color = stageColors[stage] || DS.textSub;
+              return (
+                <div key={stage} style={{ background: DS.bg, borderRadius: DS.r.md, padding: "12px 14px", borderLeft: `3px solid ${color}` }}>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 4 }}>{stage.toUpperCase()}</div>
+                  <div style={{ color: avg != null ? color : DS.textFaint, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>
+                    {avg != null ? avg : "—"}<span style={{ fontSize: DS.fs.xs, fontWeight: DS.fw.normal }}>{avg != null ? "d" : ""}</span>
+                  </div>
+                  <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>avg days</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+            {[
+              { label: "Avg Total Days to Close", value: pattern.avgTotalDays != null ? `${pattern.avgTotalDays}d` : "—", color: DS.green },
+              { label: "Avg Activities per Deal", value: pattern.avgActivities.toFixed(1), color: DS.blue },
+              { label: "Avg Commission", value: pattern.avgClosedComm > 0 ? fmt(pattern.avgClosedComm) : "—", color: DS.accent },
+              { label: "Pipeline Bottleneck", value: pattern.bottleneck || "—", color: "#f97316" },
+            ].map(s => (
+              <div key={s.label} style={{ background: DS.bg, borderRadius: DS.r.md, padding: "10px 14px" }}>
+                <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginBottom: 3 }}>{s.label}</div>
+                <div style={{ color: s.color, fontWeight: DS.fw.black, fontSize: DS.fs.md }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Active Deal Scores ── */}
+        {scoredDeals.length > 0 && (
+          <div>
+            <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.md, marginBottom: 10 }}>Active Deal Scores vs Your Pattern</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {scoredDeals.map(d => (
+                <div key={d.id} style={{ background: DS.panel, border: `1px solid ${d.dnaColor}44`, borderRadius: DS.r.lg, padding: "14px 16px", display: "flex", gap: 14, alignItems: "flex-start" }}>
+                  {/* Score circle */}
+                  <div style={{ width: 52, height: 52, borderRadius: "50%", background: d.dnaColor + "18", border: `2px solid ${d.dnaColor}66`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <div style={{ color: d.dnaColor, fontWeight: DS.fw.black, fontSize: DS.fs.md, lineHeight: 1 }}>{d.dnaScore}</div>
+                    <div style={{ color: d.dnaColor + "88", fontSize: 8, fontWeight: DS.fw.bold }}>DNA</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <div style={{ color: DS.text, fontWeight: DS.fw.semi, fontSize: DS.fs.md, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                      <span style={{ background: d.dnaColor + "22", color: d.dnaColor, fontSize: 9, padding: "1px 6px", borderRadius: DS.r.full, fontWeight: DS.fw.black, flexShrink: 0 }}>{d.dnaLabel}</span>
+                    </div>
+                    <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 8 }}>{d.stage} · {d.daysInStage}d · {fmt(d.netCommission)}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {d.dnaInsights.map((ins, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 5 }}>
+                          <span style={{ color: ins.type === "good" ? DS.green : ins.type === "warn" ? DS.accent : DS.red, fontSize: 10, marginTop: 1, flexShrink: 0 }}>
+                            {ins.type === "good" ? "✓" : ins.type === "warn" ? "△" : "✗"}
+                          </span>
+                          <span style={{ color: ins.type === "good" ? DS.textMute : ins.type === "warn" ? "#f59e0b" : "#fca5a5", fontSize: DS.fs.xs }}>{ins.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Performance Mirror ── */}
+        <div>
+          <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.md, marginBottom: 10 }}>Performance Mirror</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+
+            {/* Lead source win rates */}
+            {pattern.sourceRates.length > 0 && (
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12 }}>WIN RATE BY LEAD SOURCE</div>
+                {pattern.sourceRates.map((s, i) => (
+                  <div key={s.src} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 20, color: DS.textFaint, fontSize: DS.fs.xs }}>#{i + 1}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                        <span style={{ color: DS.text, fontSize: DS.fs.sm, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.src}</span>
+                        <span style={{ color: s.rate >= 60 ? DS.green : s.rate >= 40 ? DS.accent : DS.red, fontWeight: DS.fw.black, fontSize: DS.fs.sm, flexShrink: 0, marginLeft: 8 }}>{s.rate}%</span>
+                      </div>
+                      <div style={{ background: DS.border, height: 3, borderRadius: 2 }}>
+                        <div style={{ width: `${s.rate}%`, height: "100%", background: s.rate >= 60 ? DS.green : s.rate >= 40 ? DS.accent : DS.red, borderRadius: 2 }} />
+                      </div>
+                    </div>
+                    <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, flexShrink: 0 }}>{s.won}/{s.total}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Key pattern insights */}
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px" }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12 }}>KEY PATTERNS</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[
+                  pattern.avgTotalDays && { text: `Your deals close in an avg of ${pattern.avgTotalDays} days`, color: DS.green },
+                  pattern.bottleneck && { text: `Your slowest stage is ${pattern.bottleneck} (${pattern.avgDaysPerStage[pattern.bottleneck]}d avg) — push harder here`, color: "#f97316" },
+                  pattern.avgFirstActDelay != null && { text: `Closed deals had first activity within ${pattern.avgFirstActDelay} days of creation`, color: DS.blue },
+                  pattern.avgActivities > 0 && { text: `Your closed deals averaged ${pattern.avgActivities.toFixed(1)} logged activities`, color: DS.accent },
+                  pattern.avgClosedComm > 0 && pattern.avgLostComm > 0 && { text: `Deals you close avg ${fmt(pattern.avgClosedComm)} commission — lost deals avg ${fmt(pattern.avgLostComm)}`, color: DS.textSub },
+                  closed.length > 0 && lost.length > 0 && { text: `Your overall win rate: ${Math.round(closed.length / (closed.length + lost.length) * 100)}% (${closed.length} closed, ${lost.length} lost)`, color: DS.textSub },
+                  pattern.sourceRates[0] && { text: `Your best lead source: ${pattern.sourceRates[0].src} at ${pattern.sourceRates[0].rate}% win rate`, color: DS.green },
+                ].filter(Boolean).map((item, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <div style={{ width: 4, height: 4, borderRadius: "50%", background: item.color, flexShrink: 0, marginTop: 7 }} />
+                    <span style={{ color: item.color, fontSize: DS.fs.sm, lineHeight: 1.5 }}>{item.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Stage comparison: closed vs lost */}
+            {lost.length > 0 && (
+              <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "16px 18px", gridColumn: "span 2" }}>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, marginBottom: 12 }}>WHERE DEALS DIE — STAGE AT LOSS</div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  {stageOrder.concat(["Under Contract"]).map(stage => {
+                    const lostHere = lost.filter(d => d.stage === stage || d.stageHistory?.slice(-1)[0]?.stage === stage).length;
+                    const pct = lost.length > 0 ? Math.round(lostHere / lost.length * 100) : 0;
+                    if (lostHere === 0) return null;
+                    return (
+                      <div key={stage} style={{ flex: 1, background: DS.bg, borderRadius: DS.r.sm, padding: "10px 12px", textAlign: "center" }}>
+                        <div style={{ color: DS.red, fontWeight: DS.fw.black, fontSize: DS.fs.xl }}>{lostHere}</div>
+                        <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{stage}</div>
+                        <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{pct}% of losses</div>
+                      </div>
+                    );
+                  }).filter(Boolean)}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 // ── Intel / Analytics Pro Tab ────────────────────────────────────
 function IntelTab({ deals, expenses, gciGoal }) {
   const now = new Date();
@@ -4332,105 +9661,281 @@ function IntelTab({ deals, expenses, gciGoal }) {
           ))}
         </div>
       </Card>
+
+      {/* Co-Broker Split Summary */}
+      {(() => {
+        const splitDeals = allEnriched.filter(d => d.isSplit);
+        if (splitDeals.length === 0) return null;
+        const totalGross = splitDeals.reduce((s, d) => s + (d.grossCommission || 0), 0);
+        const totalYourNet = splitDeals.reduce((s, d) => s + (d.netCommission || 0), 0);
+        const totalCoBroke = totalGross - totalYourNet;
+        // Group by co-broker firm
+        const byFirm = {};
+        splitDeals.forEach(d => {
+          const firm = d.coBroker || "Unknown";
+          if (!byFirm[firm]) byFirm[firm] = { deals: [], gross: 0, yourNet: 0, coBroke: 0 };
+          byFirm[firm].deals.push(d);
+          byFirm[firm].gross += d.grossCommission || 0;
+          byFirm[firm].yourNet += d.netCommission || 0;
+          byFirm[firm].coBroke += (d.grossCommission || 0) - (d.netCommission || 0);
+        });
+        const firmList = Object.entries(byFirm).sort((a, b) => b[1].gross - a[1].gross);
+        return (
+          <Card title="CO-BROKER SPLIT SUMMARY" accent="#4c1d95">
+            {/* Summary stats */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+              {[
+                { label: "Split Deals", value: splitDeals.length, color: DS.purple },
+                { label: "Total Gross Comm", value: fmt(totalGross), color: DS.textSub },
+                { label: "Your Net", value: fmt(totalYourNet), color: DS.green },
+                { label: "Paid to Co-Brokers", value: fmt(totalCoBroke), color: DS.red },
+              ].map(s => (
+                <div key={s.label} style={{ background: "#070e1a", borderRadius: 8, padding: "10px 12px", border: `1px solid ${DS.border}` }}>
+                  <div style={{ color: s.color, fontWeight: 800, fontSize: 15, fontFamily: "'DM Mono', monospace" }}>{s.value}</div>
+                  <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginTop: 3 }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+            {/* By co-broker firm */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>By Co-Broker Firm</div>
+              <div style={{ background: "#070e1a", borderRadius: 8, border: `1px solid ${DS.border}`, overflow: "hidden" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 80px 80px 80px", gap: 0, padding: "6px 12px", borderBottom: `1px solid ${DS.border}` }}>
+                  {["Firm", "Deals", "Gross", "Your Net", "Their Cut"].map(h => (
+                    <div key={h} style={{ color: "#475569", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>{h}</div>
+                  ))}
+                </div>
+                {firmList.map(([firm, data]) => (
+                  <div key={firm} style={{ display: "grid", gridTemplateColumns: "1fr 60px 80px 80px 80px", gap: 0, padding: "8px 12px", borderBottom: `1px solid ${DS.border}` }}>
+                    <div style={{ color: DS.text, fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firm}</div>
+                    <div style={{ color: DS.purple, fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{data.deals.length}</div>
+                    <div style={{ color: DS.textSub, fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{fmt(data.gross)}</div>
+                    <div style={{ color: DS.green, fontSize: 12, fontWeight: 700, fontFamily: "'DM Mono', monospace" }}>{fmt(data.yourNet)}</div>
+                    <div style={{ color: DS.red, fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{fmt(data.coBroke)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Individual split deals */}
+            <div style={{ color: "#475569", fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Individual Split Deals</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {splitDeals.sort((a, b) => (b.grossCommission||0) - (a.grossCommission||0)).map(d => (
+                <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "#070e1a", borderRadius: 7, padding: "8px 12px", border: `1px solid ${DS.border}` }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: DS.text, fontWeight: 600, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                    <div style={{ color: "#475569", fontSize: 10, marginTop: 1 }}>{d.coBroker || "Co-Broker"} · {d.splitPct}% your side · <span style={{ color: d.stage === "Closed" ? DS.green : DS.textMute }}>{d.stage}</span></div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ color: DS.green, fontWeight: 700, fontSize: 12, fontFamily: "'DM Mono', monospace" }}>{fmt(d.netCommission)} <span style={{ color: "#475569", fontWeight: 400 }}>you</span></div>
+                    <div style={{ color: DS.red, fontSize: 10, fontFamily: "'DM Mono', monospace" }}>{fmt((d.grossCommission||0) - (d.netCommission||0))} to them</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+      })()}
     </div>
   );
 }
 
 // ── Lease Expiration Radar ───────────────────────────────────────
-function LeaseRadarTab({ deals, contacts, onNavigate }) {
+function LeaseRadarTab({ deals, contacts, onNavigate, leaseRadar, setLeaseRadar, setDeals, submarketList }) {
   const now = new Date();
   const enriched = useMemo(() => deals.map(calcDeal), [deals]);
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
+  const [modal, setModal] = useState(null); // null | "new" | lease object
+  const [filterUrgency, setFilterUrgency] = useState("all");
 
-  // Tenant leases from closed deals with leaseTerm
-  const tenantLeases = enriched.filter(d => d.leaseExpiresDate).map(d => {
-    const daysUntilExpiry = Math.floor((new Date(d.leaseExpiresDate + "T00:00:00") - now) / 86400000);
-    const urgency = daysUntilExpiry < 0 ? "expired" : daysUntilExpiry < 90 ? "critical" : daysUntilExpiry < 180 ? "urgent" : daysUntilExpiry < 365 ? "watch" : "monitor";
-    const urgencyColor = { expired: "#ef4444", critical: "#f97316", urgent: "#f59e0b", watch: "#60a5fa", monitor: "#10b981" }[urgency];
-    const urgencyLabel = { expired: "Expired", critical: "< 90 days", urgent: "< 6 months", watch: "< 1 year", monitor: "1+ year" }[urgency];
-    return { ...d, daysUntilExpiry, urgency, urgencyColor, urgencyLabel };
-  }).sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry);
+  const iS = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "8px 11px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl = t => <label style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, display: "block", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px" }}>{t}</label>;
 
-  // Manual lease tracking from properties (tenants with known expiry)
-  const propertiesWithExpiry = [];
+  const urgencyMeta = (days) => {
+    if (days < 0)   return { key: "expired",  color: "#ef4444", label: "Expired",      priority: 0 };
+    if (days < 90)  return { key: "critical", color: "#f97316", label: "< 90 days",    priority: 1 };
+    if (days < 180) return { key: "urgent",   color: "#f59e0b", label: "< 6 months",   priority: 2 };
+    if (days < 365) return { key: "watch",    color: "#60a5fa", label: "< 1 year",     priority: 3 };
+    return            { key: "monitor", color: "#10b981", label: "1+ year",     priority: 4 };
+  };
 
-  const urgencyCounts = { expired: 0, critical: 0, urgent: 0, watch: 0, monitor: 0 };
-  tenantLeases.forEach(l => urgencyCounts[l.urgency]++);
+  // Auto leases from closed deals
+  const autoLeases = enriched.filter(d => d.leaseExpiresDate).map(d => {
+    const days = Math.floor((new Date(d.leaseExpiresDate + "T00:00:00") - now) / 86400000);
+    const meta = urgencyMeta(days);
+    return { _id: "deal-" + d.id, _type: "auto", tenantName: d.client || d.name, propertyAddress: d.address || d.name, submarket: d.submarket, sqft: d.sqft, leaseExpiration: d.leaseExpiresDate, monthlyRent: d.monthlyRent, contactName: d.client, dealName: d.name, dealId: d.id, daysLeft: days, ...meta };
+  });
 
-  const UrgencyBand = ({ label, count, color }) => count > 0 ? (
-    <div style={{ background: color + "11", border: `1px solid ${color}33`, borderRadius: 8, padding: "8px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-      <span style={{ color, fontSize: 12, fontWeight: 600 }}>{label}</span>
-      <span style={{ color, fontWeight: 800, fontSize: 16 }}>{count}</span>
-    </div>
-  ) : null;
+  // Manual leases
+  const manualLeases = leaseRadar.filter(l => l.status !== "Converted").map(l => {
+    const days = l.leaseExpiration ? Math.floor((new Date(l.leaseExpiration + "T00:00:00") - now) / 86400000) : 9999;
+    const meta = urgencyMeta(days);
+    return { ...l, _id: "manual-" + l.id, _type: "manual", daysLeft: days, ...meta };
+  });
 
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div>
-          <div style={{ color: "#f1f5f9", fontWeight: 800, fontSize: 16 }}>Lease Expiration Radar</div>
-          <div style={{ color: "#475569", fontSize: 11, marginTop: 2 }}>
-            Track when your tenants' leases expire — your best source of repeat business
+  const allLeases = [...autoLeases, ...manualLeases].sort((a, b) => a.daysLeft - b.daysLeft);
+  const filtered = filterUrgency === "all" ? allLeases : allLeases.filter(l => l.key === filterUrgency);
+
+  const counts = allLeases.reduce((acc, l) => { acc[l.key] = (acc[l.key] || 0) + 1; return acc; }, {});
+
+  const saveLease = (form) => {
+    if (form.id) setLeaseRadar(prev => prev.map(l => l.id === form.id ? form : l));
+    else setLeaseRadar(prev => [...prev, { ...form, id: Date.now(), status: "Active" }]);
+    setModal(null);
+  };
+
+  const deleteLease = (id) => { if (window.confirm("Remove this lease?")) setLeaseRadar(prev => prev.filter(l => l.id !== id)); };
+
+  const convertToDeal = (lease) => {
+    const newDeal = {
+      id: Date.now(), name: `${lease.tenantName} — Lease Renewal`, client: lease.tenantName,
+      counterparty: "", stage: "Prospect", dealType: "Lease", repType: "Buyer/Tenant Rep",
+      subtype: "Distribution", sqft: lease.sqft || 0, dealTotal: 0, monthlyRent: lease.monthlyRent || 0,
+      leaseTerm: 0, commissionRate: 5, probability: 25, expectedClose: "", notes: lease.notes || "",
+      broker: localStorage.getItem("cre-broker-name") || "Me", daysInStage: 0,
+      activities: [{ id: Date.now() + 1, type: "System", text: `Converted from Lease Radar — expires ${lease.leaseExpiration}`, date: new Date().toISOString(), author: localStorage.getItem("cre-broker-name") || "You" }],
+      followUpDate: "", leadSource: "Existing Client", coBroker: "", splitPct: 100, won: null,
+      lossReason: "", richNotes: [], submarket: lease.submarket || "", tags: ["Lease Renewal"],
+      documents: [], stageHistory: [{ stage: "Prospect", enteredDate: today, note: "Created from Lease Radar" }],
+      commissionPaid: false, commissionPaidDate: "",
+    };
+    setDeals(prev => [...prev, newDeal]);
+    if (lease._type === "manual") setLeaseRadar(prev => prev.map(l => l.id === lease.id ? { ...l, status: "Converted", convertedDealId: newDeal.id } : l));
+    toast("✓ Deal created — Prospect stage", "success");
+    onNavigate("pipeline");
+  };
+
+  // ── Lease Entry Modal ──────────────────────────────────────────
+  const LeaseModal = () => {
+    const isNew = modal === "new";
+    const [form, setForm] = useState(isNew ? { tenantName: "", propertyAddress: "", submarket: smList[0] || "", sqft: "", leaseExpiration: "", monthlyRent: "", leaseType: "NNN", contactName: "", contactPhone: "", contactEmail: "", notes: "" } : { ...modal });
+    const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+    return (
+      <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }} onClick={() => setModal(null)}>
+        <div style={{ background: DS.panel, border: `1px solid ${DS.borderHi}`, borderRadius: DS.r.xl, padding: 26, width: 560, maxHeight: "90vh", overflowY: "auto", boxShadow: DS.shadow.xl }} onClick={e => e.stopPropagation()}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h3 }}>{isNew ? "Track New Lease" : "Edit Lease"}</div>
+            <button onClick={() => setModal(null)} style={{ background: "none", border: "none", color: DS.textMute, fontSize: 20, cursor: "pointer" }}>✕</button>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ gridColumn: "span 2" }}>{lbl("Tenant / Company Name")}<input value={form.tenantName} onChange={e => set("tenantName", e.target.value)} placeholder="e.g. Acme Manufacturing" style={iS} autoFocus /></div>
+            <div style={{ gridColumn: "span 2" }}>{lbl("Property Address")}<input value={form.propertyAddress} onChange={e => set("propertyAddress", e.target.value)} placeholder="e.g. 800 Commerce Dr" style={iS} /></div>
+            <div>{lbl("Submarket")}<select value={form.submarket} onChange={e => set("submarket", e.target.value)} style={iS}>{smList.map(s => <option key={s}>{s}</option>)}</select></div>
+            <div>{lbl("Building SF")}<input type="number" value={form.sqft} onChange={e => set("sqft", e.target.value)} placeholder="e.g. 50000" style={iS} /></div>
+            <div>{lbl("Lease Expiration Date")}<input type="date" value={form.leaseExpiration} onChange={e => set("leaseExpiration", e.target.value)} style={iS} /></div>
+            <div>{lbl("Monthly Rent ($)")}<input type="number" value={form.monthlyRent} onChange={e => set("monthlyRent", e.target.value)} placeholder="e.g. 25000" style={iS} /></div>
+            <div>{lbl("Lease Type")}<select value={form.leaseType} onChange={e => set("leaseType", e.target.value)} style={iS}><option>NNN</option><option>Gross</option><option>Modified Gross</option><option>FSG</option></select></div>
+            <div>{lbl("Contact Name")}<input value={form.contactName} onChange={e => set("contactName", e.target.value)} placeholder="Decision maker" style={iS} /></div>
+            <div>{lbl("Contact Phone")}<input value={form.contactPhone} onChange={e => set("contactPhone", e.target.value)} placeholder="555-0100" style={iS} /></div>
+            <div>{lbl("Contact Email")}<input value={form.contactEmail} onChange={e => set("contactEmail", e.target.value)} placeholder="contact@company.com" style={iS} /></div>
+            <div style={{ gridColumn: "span 2" }}>{lbl("Notes")}<textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} placeholder="Source of intel, relationship notes..." style={{ ...iS, resize: "vertical" }} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+            <button onClick={() => setModal(null)} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "9px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Cancel</button>
+            {!isNew && <button onClick={() => { deleteLease(form.id); setModal(null); }} style={{ background: "none", border: `1px solid ${DS.red}44`, color: DS.red, padding: "9px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Delete</button>}
+            <button onClick={() => saveLease(form)} disabled={!form.tenantName || !form.leaseExpiration} style={{ background: form.tenantName && form.leaseExpiration ? DS.accent : DS.border, border: "none", color: form.tenantName && form.leaseExpiration ? "#0a0f1a" : DS.textMute, padding: "9px 22px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>
+              {isNew ? "Add to Radar" : "Save Changes"}
+            </button>
           </div>
         </div>
       </div>
+    );
+  };
 
-      {tenantLeases.length === 0 ? (
-        <div style={{ background: DS.panel, border: "1px dashed #1e3048", borderRadius: 12, padding: "32px", textAlign: "center" }}>
-          <div style={{ color: "#475569", fontSize: 14, marginBottom: 8 }}>No lease expirations tracked yet</div>
-          <div style={{ color: "#334155", fontSize: 12 }}>When you close a Lease deal with an expected close date and lease term, expirations will automatically appear here.</div>
-          <div style={{ color: "#334155", fontSize: 12, marginTop: 6 }}>Make sure your closed lease deals have: Expected Close Date + Lease Term (months).</div>
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: 18 }}>Lease Expiration Radar</div>
+          <div style={{ color: DS.textMute, fontSize: 11, marginTop: 2 }}>Track expiring leases — your best source of repeat business and new prospects</div>
         </div>
-      ) : (
-        <>
-          {/* Summary bands */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <UrgencyBand label="️ Expired — call immediately" count={urgencyCounts.expired} color="#ef4444" />
-            <UrgencyBand label=" Critical — expiring within 90 days" count={urgencyCounts.critical} color="#f97316" />
-            <UrgencyBand label=" Urgent — expiring within 6 months" count={urgencyCounts.urgent} color="#f59e0b" />
-            <UrgencyBand label=" Watch — expiring within 1 year" count={urgencyCounts.watch} color="#60a5fa" />
-            <UrgencyBand label=" Monitor — 1+ year remaining" count={urgencyCounts.monitor} color="#10b981" />
-          </div>
+        <button onClick={() => setModal("new")} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 18px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>+ Track Lease</button>
+      </div>
 
-          {/* Lease list */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {tenantLeases.map(d => (
-              <div key={d.id} style={{ background: DS.panel, border: `1px solid ${d.urgencyColor}33`, borderRadius: 11, padding: "14px 18px", display: "flex", gap: 16, alignItems: "center" }}>
-                <div style={{ width: 56, height: 56, borderRadius: 10, background: d.urgencyColor + "22", border: `2px solid ${d.urgencyColor}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <div style={{ color: d.urgencyColor, fontWeight: 900, fontSize: 15, lineHeight: 1 }}>
-                    {d.daysUntilExpiry < 0 ? "EXP" : d.daysUntilExpiry > 365 ? Math.round(d.daysUntilExpiry / 30) + "mo" : d.daysUntilExpiry + "d"}
-                  </div>
-                  <div style={{ color: d.urgencyColor + "99", fontSize: 8, fontWeight: 700 }}>{d.daysUntilExpiry < 0 ? "ago" : "left"}</div>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-                    <span style={{ color: "#f1f5f9", fontWeight: 700, fontSize: 13 }}>{d.name}</span>
-                    <span style={{ background: d.urgencyColor + "22", color: d.urgencyColor, border: `1px solid ${d.urgencyColor}44`, padding: "1px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700 }}>{d.urgencyLabel}</span>
-                  </div>
-                  <div style={{ color: "#64748b", fontSize: 11 }}>Tenant: <span style={{ color: "#94a3b8" }}>{d.client}</span> · {d.submarket} · {d.sqft?.toLocaleString()} SF</div>
-                  <div style={{ color: "#475569", fontSize: 10, marginTop: 3 }}>
-                    Closed {d.expectedClose} · {d.leaseTerm} month term · Expires {d.leaseExpiresDate}
-                    {d.monthlyRent > 0 && <span> · ${d.monthlyRent?.toLocaleString()}/mo</span>}
-                  </div>
-                </div>
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <div style={{ color: d.urgencyColor, fontWeight: 900, fontSize: 18 }}>
-                    {d.daysUntilExpiry < 0 ? "Now" : d.daysUntilExpiry < 30 ? `${d.daysUntilExpiry}d` : `${Math.round(d.daysUntilExpiry / 30)}mo`}
-                  </div>
-                  <div style={{ color: "#334155", fontSize: 9 }}>until expiry</div>
-                  <div style={{ color: "#f59e0b", fontSize: 11, fontWeight: 700, marginTop: 4 }}>{fmt(d.netCommission)}</div>
-                  <div style={{ color: "#334155", fontSize: 9 }}>orig. commission</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
+      {/* Urgency filter pills */}
+      {allLeases.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[["all", DS.textMute, "All (" + allLeases.length + ")"], ["expired", "#ef4444", "Expired" + (counts.expired ? ` (${counts.expired})` : "")], ["critical", "#f97316", "< 90d" + (counts.critical ? ` (${counts.critical})` : "")], ["urgent", "#f59e0b", "< 6mo" + (counts.urgent ? ` (${counts.urgent})` : "")], ["watch", "#60a5fa", "< 1yr" + (counts.watch ? ` (${counts.watch})` : "")], ["monitor", "#10b981", "1+ yr" + (counts.monitor ? ` (${counts.monitor})` : "")]].map(([key, color, label]) => (
+            <button key={key} onClick={() => setFilterUrgency(key)}
+              style={{ padding: "5px 14px", borderRadius: 20, border: `1px solid ${filterUrgency === key ? color : DS.border}`, background: filterUrgency === key ? color + "22" : "none", color: filterUrgency === key ? color : DS.textMute, cursor: "pointer", fontSize: 11, fontWeight: DS.fw.bold }}>
+              {label}
+            </button>
+          ))}
+        </div>
       )}
+
+      {/* Empty state */}
+      {allLeases.length === 0 && (
+        <div style={{ background: DS.panel, border: `1px dashed ${DS.border}`, borderRadius: DS.r.lg, padding: 40, textAlign: "center" }}>
+          <div style={{ color: DS.textSub, fontSize: 15, fontWeight: DS.fw.bold, marginBottom: 6 }}>Nothing on radar yet</div>
+          <div style={{ color: DS.textMute, fontSize: 12, marginBottom: 4 }}>Manually add any tenant lease you want to track, or close a Lease deal with a lease term to auto-populate.</div>
+          <button onClick={() => setModal("new")} style={{ marginTop: 14, background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>+ Track Your First Lease</button>
+        </div>
+      )}
+
+      {/* Lease cards */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {filtered.map(lease => (
+          <div key={lease._id} style={{ background: DS.panel, border: `1px solid ${lease.color}33`, borderRadius: DS.r.lg, padding: "16px 18px", display: "flex", gap: 16, alignItems: "flex-start" }}>
+            {/* Countdown badge */}
+            <div style={{ width: 60, height: 60, borderRadius: DS.r.md, background: lease.color + "18", border: `2px solid ${lease.color}55`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div style={{ color: lease.color, fontWeight: DS.fw.black, fontSize: 14, lineHeight: 1 }}>
+                {lease.daysLeft < 0 ? "EXP" : lease.daysLeft > 365 ? Math.round(lease.daysLeft / 30) + "mo" : lease.daysLeft + "d"}
+              </div>
+              <div style={{ color: lease.color + "99", fontSize: 8, fontWeight: DS.fw.bold, marginTop: 2 }}>{lease.daysLeft < 0 ? "EXPIRED" : "LEFT"}</div>
+            </div>
+
+            {/* Main info */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+                <span style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: 14 }}>{lease.tenantName}</span>
+                <span style={{ background: lease.color + "22", color: lease.color, border: `1px solid ${lease.color}44`, padding: "2px 9px", borderRadius: 20, fontSize: 10, fontWeight: DS.fw.bold }}>{lease.label}</span>
+                {lease._type === "auto" && <span style={{ background: DS.blueSoft, color: DS.blue, border: `1px solid ${DS.blue}33`, padding: "2px 8px", borderRadius: 20, fontSize: 9, fontWeight: DS.fw.bold }}>From Deal</span>}
+              </div>
+              <div style={{ color: DS.textSub, fontSize: 12, marginBottom: 3 }}>
+                {lease.propertyAddress && <span>{lease.propertyAddress}</span>}
+                {lease.submarket && <span style={{ color: DS.textMute }}> · {lease.submarket}</span>}
+                {lease.sqft > 0 && <span style={{ color: DS.textMute }}> · {Number(lease.sqft).toLocaleString()} SF</span>}
+              </div>
+              <div style={{ color: DS.textFaint, fontSize: 11 }}>
+                Expires <strong style={{ color: lease.daysLeft < 90 ? lease.color : DS.textSub }}>{lease.leaseExpiration}</strong>
+                {lease.monthlyRent > 0 && <span> · ${Number(lease.monthlyRent).toLocaleString()}/mo</span>}
+                {lease.leaseType && <span> · {lease.leaseType}</span>}
+              </div>
+              {lease.contactName && (
+                <div style={{ marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  <span style={{ color: DS.textMute, fontSize: 11, display:"flex", alignItems:"center", gap:4 }}><IcUser /> {lease.contactName}</span>
+                  {lease.contactPhone && <span style={{ color: DS.textMute, fontSize: 11, display:"flex", alignItems:"center", gap:4 }}><IcPhone /> {lease.contactPhone}</span>}
+                  {lease.contactEmail && <span style={{ color: DS.blue, fontSize: 11, display:"flex", alignItems:"center", gap:4 }}><IcMail /> {lease.contactEmail}</span>}
+                </div>
+              )}
+              {lease.notes && <div style={{ color: DS.textFaint, fontSize: 11, fontStyle: "italic", marginTop: 4 }}>{lease.notes}</div>}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0, alignItems: "flex-end" }}>
+              <button onClick={() => convertToDeal(lease)}
+                style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "6px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 11, fontWeight: DS.fw.black, whiteSpace: "nowrap" }}>
+                → Pipeline
+              </button>
+              {lease._type === "manual" && (
+                <button onClick={() => setModal(leaseRadar.find(l => l.id === lease.id))}
+                  style={{ background: DS.panelHi, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "5px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 11 }}>
+                  Edit
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modal && <LeaseModal />}
     </div>
   );
 }
 
 // ── Morning Briefing / Home Tab ────────────────────────────────
-function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, totalWeighted, onNavigate, onStartSync }) {
+function HomeBriefing({ deals, tasks, contacts, setContacts, listings, gciGoal, closedYTD, totalWeighted, onNavigate, onStartSync, leaseRadar, setDeals }) {
   const enriched = useMemo(() => deals.map(calcDeal), [deals]);
   const now = new Date();
 
@@ -4456,16 +9961,48 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
     return order.indexOf(a.relationshipLevel) - order.indexOf(b.relationshipLevel);
   });
 
-  // Lease expirations coming up
-  const upcomingExpirations = enriched.filter(d => {
-    if (!d.leaseExpiresDate) return false;
-    const days = Math.floor((new Date(d.leaseExpiresDate + "T00:00:00") - now) / 86400000);
-    return days <= 365;
-  }).sort((a, b) => {
-    const da = Math.floor((new Date(a.leaseExpiresDate + "T00:00:00") - now) / 86400000);
-    const db = Math.floor((new Date(b.leaseExpiresDate + "T00:00:00") - now) / 86400000);
-    return da - db;
-  });
+  // Renewal opportunities — closed leases expiring within 18 months + manual leaseRadar
+  const renewalUrgency = (days) => {
+    if (days < 0)   return { color: "#ef4444", label: "Expired" };
+    if (days < 90)  return { color: "#f97316", label: "< 90 days" };
+    if (days < 180) return { color: "#f59e0b", label: "< 6 mo" };
+    if (days < 365) return { color: "#60a5fa", label: "< 1 yr" };
+    return            { color: "#10b981", label: "1–18 mo" };
+  };
+
+  const renewalOpps = useMemo(() => {
+    const items = [];
+    enriched.filter(d => d.leaseExpiresDate).forEach(d => {
+      const days = Math.floor((new Date(d.leaseExpiresDate + "T00:00:00") - now) / 86400000);
+      if (days <= 540) items.push({ id: "deal-" + d.id, name: d.name, client: d.client || d.name, submarket: d.submarket, sqft: d.sqft, monthlyRent: d.monthlyRent, expiry: d.leaseExpiresDate, days, ...renewalUrgency(days) });
+    });
+    (leaseRadar || []).filter(l => l.status !== "Converted" && l.leaseExpiration).forEach(l => {
+      const days = Math.floor((new Date(l.leaseExpiration + "T00:00:00") - now) / 86400000);
+      if (days <= 540) items.push({ id: "manual-" + l.id, name: l.tenantName, client: l.tenantName, submarket: l.submarket, sqft: l.sqft, monthlyRent: l.monthlyRent, expiry: l.leaseExpiration, days, ...renewalUrgency(days) });
+    });
+    return items.sort((a, b) => a.days - b.days);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enriched, leaseRadar]);
+
+  const createRenewalDeal = (opp) => {
+    const prob = opp.days < 0 ? 60 : opp.days < 90 ? 50 : opp.days < 180 ? 40 : 30;
+    const broker = localStorage.getItem("cre-broker-name") || "Me";
+    const newDeal = {
+      id: Date.now(), name: `${opp.client} — Renewal`, client: opp.client,
+      counterparty: "", stage: "Prospect", dealType: "Lease", repType: "Buyer/Tenant Rep",
+      subtype: "Distribution", sqft: opp.sqft || 0, dealTotal: 0, monthlyRent: opp.monthlyRent || 0,
+      leaseTerm: 0, commissionRate: 5, probability: prob, expectedClose: "",
+      notes: `Renewal opportunity — existing lease expires ${opp.expiry}`,
+      broker, activities: [{ id: Date.now()+1, type: "System", text: `Renewal deal created — lease expires ${opp.expiry}`, date: new Date().toISOString(), author: broker }],
+      followUpDate: today, leadSource: "Existing Client", coBroker: "", splitPct: 100,
+      won: null, lossReason: "", richNotes: [], submarket: opp.submarket || "", tags: ["Lease Renewal"],
+      documents: [], stageHistory: [{ stage: "Prospect", enteredDate: today, note: "Created from Renewal Engine" }],
+      commissionPaid: false, commissionPaidDate: "",
+    };
+    setDeals(prev => [...prev, newDeal]);
+    toast("Renewal deal added to pipeline", "success");
+    onNavigate("pipeline");
+  };
 
   // Listings with no showings > 30 days
   const staleListings = listings.filter(l => {
@@ -4485,6 +10022,94 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
 
   const gciProgress = Math.min((closedYTD / gciGoal) * 100, 100);
   const urgentCount = followUpsDue.length + urgentTasks.length + goneCold.length + outreachDue.length;
+
+  // ── Smart Morning Brief: score every possible action, surface top 5 ──
+  const morningMoves = useMemo(() => {
+    const moves = [];
+    const nowMs = now.getTime();
+
+    // 1. Overdue follow-ups on active deals
+    followUpsDue.forEach(d => {
+      const overdueDays = d.followUpDate < today ? Math.floor((nowMs - new Date(d.followUpDate + "T00:00:00").getTime()) / 86400000) : 0;
+      const stageWeight = { "Under Contract": 30, "LOI": 20, "Proposal": 10, "Prospect": 0 }[d.stage] || 0;
+      const commBonus = (d.netCommission || 0) > 100000 ? 15 : (d.netCommission || 0) > 50000 ? 8 : (d.netCommission || 0) > 20000 ? 4 : 0;
+      const score = Math.min(70 + overdueDays * 3 + stageWeight + commBonus, 100);
+      moves.push({
+        score, type: "follow-up", color: "#f87171", tab: "pipeline",
+        action: `Follow up on ${d.name}`,
+        context: [d.stage, overdueDays > 0 ? `${overdueDays}d overdue` : "due today", d.netCommission > 0 ? fmt(d.netCommission) + " commission" : null].filter(Boolean).join(" · "),
+        cta: "Open Pipeline",
+      });
+    });
+
+    // 2. Lease renewals — expiry urgency weighted
+    renewalOpps.slice(0, 8).forEach(opp => {
+      const urgencyScore = opp.days < 0 ? 97 : opp.days < 30 ? 91 : opp.days < 90 ? 82 : opp.days < 180 ? 58 : opp.days < 365 ? 42 : 28;
+      const timeStr = opp.days < 0 ? "EXPIRED" : opp.days < 30 ? `${opp.days} days left` : opp.days < 365 ? `${Math.round(opp.days / 30)} months left` : `${(opp.days / 365).toFixed(1)} yrs left`;
+      moves.push({
+        score: urgencyScore, type: "renewal", color: opp.color, tab: "lease-radar",
+        action: `Renewal: ${opp.name}`,
+        context: [opp.submarket, timeStr, opp.sqft > 0 ? opp.sqft.toLocaleString() + " SF" : null].filter(Boolean).join(" · "),
+        cta: "Lease Radar",
+      });
+    });
+
+    // 3. Key Relationship / Active contacts overdue for outreach
+    outreachDue.forEach(c => {
+      const days = c.lastContact ? Math.floor((nowMs - new Date(c.lastContact + "T00:00:00").getTime()) / 86400000) : 999;
+      const relScore = { "Key Relationship": 28, "Active": 18, "Warm": 9, "Cold": 2 }[c.relationshipLevel] || 2;
+      const dayBonus = Math.min(days * 0.35, 24);
+      const linkedActive = enriched.filter(d => (c.linkedDeals || []).includes(d.id) && d.stage !== "Closed" && d.stage !== "Lost");
+      const dealBonus = Math.min(linkedActive.length * 6, 18);
+      const score = Math.min(28 + relScore + dayBonus + dealBonus, 100);
+      moves.push({
+        score, type: "outreach", color: "#ec4899", tab: "contacts",
+        action: `Touch base with ${c.name}`,
+        context: [c.company || c.contactType, c.relationshipLevel, days < 900 ? `${days}d since last contact` : "never contacted", linkedActive.length > 0 ? `${linkedActive.length} active deal${linkedActive.length > 1 ? "s" : ""}` : null].filter(Boolean).join(" · "),
+        cta: "Go to Contacts",
+      });
+    });
+
+    // 4. Stagnating late-stage deals
+    goneCold.filter(d => ["LOI", "Under Contract", "Proposal"].includes(d.stage)).forEach(d => {
+      const stageWeight = { "Under Contract": 26, "LOI": 20, "Proposal": 10 }[d.stage] || 5;
+      const score = Math.min(48 + stageWeight + Math.min(d.daysInStage * 0.5, 22), 100);
+      moves.push({
+        score, type: "reactivate", color: "#60a5fa", tab: "pipeline",
+        action: `Re-engage ${d.name}`,
+        context: [d.stage, `${d.daysInStage}d stagnant`, d.client, d.netCommission > 0 ? fmt(d.netCommission) : null].filter(Boolean).join(" · "),
+        cta: "Open Pipeline",
+      });
+    });
+
+    // 5. Urgent tasks
+    urgentTasks.slice(0, 3).forEach(t => {
+      const overdueDays = t.dueDate < today ? Math.floor((nowMs - new Date(t.dueDate + "T00:00:00").getTime()) / 86400000) : 0;
+      const priScore = { "Urgent": 30, "High": 20, "Medium": 10, "Low": 2 }[t.priority] || 5;
+      const score = Math.min(50 + priScore + overdueDays * 2, 100);
+      moves.push({
+        score, type: "task", color: "#fb923c", tab: "tasks",
+        action: t.title,
+        context: [t.category, t.priority + " priority", overdueDays > 0 ? `${overdueDays}d overdue` : "due today"].filter(Boolean).join(" · "),
+        cta: "Go to Tasks",
+      });
+    });
+
+    // 6. Stale listings
+    staleListings.slice(0, 3).forEach(l => {
+      const lastShowing = (l.showings || []).slice(-1)[0];
+      const days = lastShowing ? Math.floor((nowMs - new Date(lastShowing + "T00:00:00").getTime()) / 86400000) : null;
+      moves.push({
+        score: 36, type: "listing", color: "#f97316", tab: "properties",
+        action: `Schedule showings: ${l.name}`,
+        context: [l.submarket, l.sqft ? l.sqft.toLocaleString() + " SF" : null, days ? `${days}d no showings` : "no showings yet"].filter(Boolean).join(" · "),
+        cta: "Go to Properties",
+      });
+    });
+
+    return moves.sort((a, b) => b.score - a.score).slice(0, 5);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followUpsDue, renewalOpps, outreachDue, goneCold, staleListings, urgentTasks, enriched]);
 
   const SectionCard = ({ title, count, color, children, tabId, emptyMsg }) => (
     <div style={{ background:DS.panel, border:`1px solid ${count > 0 ? color+"33" : "#1e3048"}`, borderRadius:12, overflow:"hidden" }}>
@@ -4516,7 +10141,7 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
         <div>
           <div style={{ color:"#f1f5f9", fontWeight:900, fontSize:22 }}>{greeting}</div>
           <div style={{ color:"#475569", fontSize:12, marginTop:2 }}>{now.toLocaleDateString("en-US",{ weekday:"long", month:"long", day:"numeric", year:"numeric" })}</div>
-          {urgentCount > 0 && <div style={{ color:"#fca5a5", fontSize:12, marginTop:4, fontWeight:600 }}>️ {urgentCount} item{urgentCount!==1?"s":""} need your attention today</div>}
+          {urgentCount > 0 && <div style={{ color:"#fca5a5", fontSize:12, marginTop:4, fontWeight:600 }}>{urgentCount} item{urgentCount!==1?"s":""} need your attention today</div>}
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:10, alignItems:"flex-end" }}>
           {/* 3-Minute Sync button */}
@@ -4542,6 +10167,44 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
         </div>
       </div>
 
+      {/* Smart Morning Brief */}
+      {morningMoves.length > 0 && (
+        <div style={{ background: "linear-gradient(135deg, #0d1b2e 0%, #111d2e 100%)", border: `1px solid ${DS.accent}33`, borderRadius: 14, overflow: "hidden", boxShadow: `0 0 30px ${DS.accent}0d` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "13px 18px 10px", borderBottom: `1px solid ${DS.accent}22` }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: DS.accent, boxShadow: `0 0 8px ${DS.accent}` }} />
+            <span style={{ color: DS.accent, fontWeight: DS.fw.black, fontSize: DS.fs.md, letterSpacing: "0.5px" }}>YOUR TOP MOVES TODAY</span>
+            <span style={{ color: DS.textMute, fontSize: DS.fs.sm, marginLeft: "auto" }}>{morningMoves.length} prioritized actions</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${morningMoves.length}, 1fr)`, gap: 0 }}>
+            {morningMoves.map((move, i) => {
+              const rankColors = ["#f59e0b", "#94a3b8", "#cd7f32", "#6b7280", "#6b7280"];
+              return (
+                <div key={i} style={{ padding: "14px 16px", borderRight: i < morningMoves.length - 1 ? `1px solid ${DS.border}` : "none", display: "flex", flexDirection: "column", gap: 7, cursor: "pointer", transition: "background 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = DS.panelHi}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                  onClick={() => onNavigate(move.tab)}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <div style={{ width: 20, height: 20, borderRadius: "50%", background: move.color + "22", border: `1.5px solid ${move.color}66`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                      <span style={{ fontSize: 9, color: rankColors[i], fontWeight: DS.fw.black }}>#{i + 1}</span>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi, lineHeight: 1.3, marginBottom: 3 }}>{move.action}</div>
+                      <div style={{ color: DS.textMute, fontSize: DS.fs.sm, lineHeight: 1.4 }}>{move.context}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                    <div style={{ flex: 1, height: 3, background: DS.border, borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ width: `${move.score}%`, height: "100%", background: `linear-gradient(90deg, ${move.color}88, ${move.color})`, borderRadius: 2 }} />
+                    </div>
+                    <span style={{ color: move.color, fontSize: DS.fs.xs, fontWeight: DS.fw.black, minWidth: 28, textAlign: "right" }}>{move.score}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Quick stats row */}
       <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
         {[
@@ -4563,14 +10226,14 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
         <SectionCard title="Follow-ups Due" count={followUpsDue.length} color="#4ade80" tabId="pipeline" emptyMsg="No follow-ups due today — nice.">
           {followUpsDue.slice(0,5).map(d => (
-            <ItemRow key={d.id} label={d.name} sub={`${d.client} · ${d.stage}`} badge={d.isOverdue ? "️ Overdue" : "Due today"} badgeColor={d.isOverdue?"#fca5a5":"#4ade80"}/>
+            <ItemRow key={d.id} label={d.name} sub={`${d.client} · ${d.stage}`} badge={d.isOverdue ? "Overdue" : "Due today"} badgeColor={d.isOverdue?"#fca5a5":"#4ade80"}/>
           ))}
           {followUpsDue.length > 5 && <div style={{ color:"#475569", fontSize:10 }}>+{followUpsDue.length-5} more — go to Pipeline tab</div>}
         </SectionCard>
 
         <SectionCard title="Urgent Tasks" count={urgentTasks.length} color="#fb923c" tabId="tasks" emptyMsg="No urgent tasks — you're on top of it.">
           {urgentTasks.slice(0,5).map(t => (
-            <ItemRow key={t.id} label={t.title} sub={`${t.category} · ${t.priority}`} badge={t.dueDate < today ? "️ Overdue" : "Due today"} badgeColor={t.dueDate < today?"#fca5a5":"#fb923c"}/>
+            <ItemRow key={t.id} label={t.title} sub={`${t.category} · ${t.priority}`} badge={t.dueDate < today ? "Overdue" : "Due today"} badgeColor={t.dueDate < today?"#fca5a5":"#fb923c"}/>
           ))}
           {urgentTasks.length > 5 && <div style={{ color:"#475569", fontSize:10 }}>+{urgentTasks.length-5} more — go to Tasks tab</div>}
         </SectionCard>
@@ -4585,26 +10248,57 @@ function HomeBriefing({ deals, tasks, contacts, listings, gciGoal, closedYTD, to
         <SectionCard title="Contact Outreach Queue" count={outreachDue.length} color="#ec4899" tabId="contacts" emptyMsg="All contacts recently touched — great work.">
           {outreachDue.slice(0,5).map(c => {
             const days = c.lastContact ? Math.floor((now - new Date(c.lastContact+"T00:00:00")) / 86400000) : null;
-            return <ItemRow key={c.id} label={c.name} sub={`${c.company} · ${c.relationshipLevel}`} badge={days !== null ? `${days}d since contact` : "Never contacted"} badgeColor="#ec4899"/>;
+            return (
+              <div key={c.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 0", borderBottom:`1px solid ${DS.border}` }}>
+                <div>
+                  <div style={{ color:"#94a3b8", fontSize:12, fontWeight:600 }}>{c.name}</div>
+                  <div style={{ color:"#475569", fontSize:10 }}>{c.company} · {c.relationshipLevel}</div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                  <span style={{ color:"#ec4899", fontSize:11, fontWeight:700 }}>{days !== null ? `${days}d` : "Never"}</span>
+                  <button onClick={() => setContacts(prev => prev.map(x => x.id === c.id ? { ...x, lastContact: today } : x))}
+                    style={{ background:"#1a1030", border:"1px solid #6b21a844", color:"#c084fc", padding:"2px 9px", borderRadius:20, cursor:"pointer", fontSize:10, fontWeight:700 }}>
+                    Log ✓
+                  </button>
+                </div>
+              </div>
+            );
           })}
           {outreachDue.length > 5 && <div style={{ color:"#475569", fontSize:10 }}>+{outreachDue.length-5} more — go to Contacts tab</div>}
         </SectionCard>
 
-        {staleListings.length > 0 && (
-          <SectionCard title="Listings Needing Attention" count={staleListings.length} color="#f97316" tabId="listings" emptyMsg="">
-            {staleListings.slice(0,4).map(l => (
-              <ItemRow key={l.id} label={l.name} sub={`${l.submarket} · ${l.sqft?.toLocaleString()} SF`} badge="No showings 30d+" badgeColor="#f97316"/>
-            ))}
-          </SectionCard>
-        )}
 
-        {upcomingExpirations.length > 0 && (
-          <SectionCard title="Lease Expirations — Next 12mo" count={upcomingExpirations.length} color="#ec4899" tabId="lease-radar" emptyMsg="">
-            {upcomingExpirations.slice(0,4).map(d => {
-              const days = Math.floor((new Date(d.leaseExpiresDate + "T00:00:00") - now) / 86400000);
-              return <ItemRow key={d.id} label={d.name} sub={`${d.client} · ${d.submarket}`} badge={days < 0 ? "Expired" : days < 90 ? `${days}d left` : `${Math.round(days/30)}mo left`} badgeColor={days < 90 ? "#ef4444" : days < 180 ? "#f59e0b" : "#60a5fa"}/>;
-            })}
-          </SectionCard>
+        {renewalOpps.length > 0 && (
+          <div style={{ background: DS.panel, border: `1px solid ${renewalOpps[0].color}33`, borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: `1px solid ${renewalOpps[0].color}22`, cursor: "pointer" }} onClick={() => onNavigate("lease-radar")}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: renewalOpps[0].color, fontWeight: DS.fw.black, fontSize: DS.fs.md }}>Lease Renewals</span>
+                <span style={{ background: renewalOpps[0].color + "22", color: renewalOpps[0].color, fontSize: 10, padding: "1px 7px", borderRadius: 8, fontWeight: DS.fw.black }}>{renewalOpps.length}</span>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[["< 90d", "#f97316", renewalOpps.filter(o=>o.days>=0&&o.days<90).length],
+                  ["< 6mo", "#f59e0b", renewalOpps.filter(o=>o.days>=90&&o.days<180).length],
+                  ["< 1yr", "#60a5fa", renewalOpps.filter(o=>o.days>=180&&o.days<365).length],
+                ].filter(([,, c]) => c > 0).map(([label, color, count]) => (
+                  <span key={label} style={{ background: color + "22", color, fontSize: 9, padding: "2px 7px", borderRadius: 8, fontWeight: DS.fw.bold }}>{count} {label}</span>
+                ))}
+              </div>
+            </div>
+            {renewalOpps.slice(0, 5).map(opp => (
+              <div key={opp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderBottom: `1px solid ${DS.border}` }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: opp.color, flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: DS.text, fontSize: DS.fs.md, fontWeight: DS.fw.semi, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{opp.name}</div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{[opp.submarket, opp.sqft > 0 && opp.sqft.toLocaleString() + " SF"].filter(Boolean).join(" · ")}</div>
+                </div>
+                <span style={{ background: opp.color + "22", color: opp.color, fontSize: 9, padding: "2px 8px", borderRadius: 8, fontWeight: DS.fw.black, flexShrink: 0 }}>
+                  {opp.days < 0 ? "EXPIRED" : opp.days < 30 ? `${opp.days}d` : `${Math.round(opp.days/30)}mo`}
+                </span>
+                <button onClick={() => createRenewalDeal(opp)} style={{ background: DS.green + "18", border: `1px solid ${DS.green}44`, color: DS.green, padding: "4px 11px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: 10, fontWeight: DS.fw.black, flexShrink: 0 }}>+ Deal</button>
+              </div>
+            ))}
+            {renewalOpps.length > 5 && <div style={{ padding: "8px 14px", color: DS.textFaint, fontSize: DS.fs.xs, textAlign: "center", cursor: "pointer" }} onClick={() => onNavigate("lease-radar")}>+{renewalOpps.length - 5} more → Lease Radar</div>}
+          </div>
         )}
 
         {/* Closing this month detail */}
@@ -4791,8 +10485,7 @@ function buildSensitivityTable(uwData, projYears, rowField, colField, rowValues,
   }));
 }
 
-function UnderwritingTab() {
-  const [uwData, setUwData] = useState({
+const UW_DEFAULT = {
     propertyName: "Industrial Distribution Center",
     propertyType: "Distribution",
     location: "Indianapolis, IN",
@@ -4800,52 +10493,51 @@ function UnderwritingTab() {
     yearBuilt: 2015,
     clearHeight: 32,
     dockDoors: 20,
-
-    // Acquisition
     purchasePrice: 15000000,
     closingCosts: 300000,
     capReserves: 150000,
     tiLcPerSf: 0,
-
-    // Rent Roll
     rentRoll: [
       { id: 1, tenant: "Tenant A", sqft: 75000, rentPerSqft: 6.50, leaseExpiry: "2028-12-31", creditRating: "Investment Grade", type: "Industrial" },
       { id: 2, tenant: "Tenant B", sqft: 50000, rentPerSqft: 7.00, leaseExpiry: "2027-06-30", creditRating: "Good", type: "Industrial" },
       { id: 3, tenant: "Vacant",   sqft: 25000, rentPerSqft: 0,    leaseExpiry: "",            creditRating: "—",                type: "Industrial" },
     ],
-
-    // Income assumptions
     vacancyRate: 5,
-    currentVacancy: 16.7, // % currently vacant (drives lease-up)
-    leaseUpPeriod: 6, // months to reach stabilized occupancy
+    currentVacancy: 16.7,
+    leaseUpPeriod: 6,
     otherIncome: 0,
     rentGrowth: 3.0,
     opexGrowth: 2.5,
-
-    // Financing
     loanAmount: 10500000,
     loanRate: 6.75,
     amortYears: 25,
     ioYears: 0,
-
-    // Operating Expenses
     realEstateTax: 165000,
     insurance: 52500,
     utilities: 22500,
     repairs: 52500,
-    management: 0, // will be % of EGI
+    management: 0,
     managementPct: 4,
     cam: 15000,
     reserves: 37500,
     otherOpex: 18000,
-
-    // Exit
     exitCapRate: 6.75,
     saleExpenses: 1.5,
     holdingPeriod: 5,
+};
+
+function UnderwritingTab() {
+  const [uwData, setUwData] = useState(() => {
+    try {
+      const saved = localStorage.getItem("cre-underwriting-v1");
+      return saved ? { ...UW_DEFAULT, ...JSON.parse(saved) } : UW_DEFAULT;
+    } catch { return UW_DEFAULT; }
   });
 
   const set = (k, v) => setUwData(p => ({ ...p, [k]: v }));
+  useEffect(() => {
+    try { localStorage.setItem("cre-underwriting-v1", JSON.stringify(uwData)); } catch {}
+  }, [uwData]);
   const [activeTab, setActiveTab] = useState("rentroll");
   const [projYears, setProjYears] = useState(5);
   const [sensMetric, setSensMetric] = useState("irr");
@@ -4941,7 +10633,7 @@ function UnderwritingTab() {
           ))}
           <button onClick={() => setShowProposal(true)}
             style={{ background: DS.blue, border: "none", color: "#fff", padding: "6px 16px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black, marginLeft: 8 }}>
-            📄 LOI / Proposal
+            LOI / Proposal
           </button>
         </div>
       </div>
@@ -5635,7 +11327,7 @@ function ProposalGeneratorModal({ uwData, proj, waltYears, occupancy, projYears,
     <div><div class='sig-line'>Seller Signature &amp; Date</div></div>
   </div>
   <p style='margin-top:40px;font-size:11px;color:#666'>Prepared by: ${brokerName} · ${brokerage} · ${today} · This LOI is non-binding and for discussion purposes only.</p>
-  <br/><button onclick='window.print()' style='background:#1a4f8a;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:bold'>🖨 Print / Save as PDF</button>
+  <br/><button onclick='window.print()' style='background:#1a4f8a;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:bold'>Print / Save as PDF</button>
   </body></html>`;
 
   const generateInvestmentMemo = () => `<!DOCTYPE html><html><head><meta charset='utf-8'><title>Investment Memo — ${uwData.propertyName}</title>
@@ -5685,7 +11377,7 @@ function ProposalGeneratorModal({ uwData, proj, waltYears, occupancy, projYears,
     <tr><td>Total Equity</td><td>$${Math.round(proj.equity).toLocaleString()}</td><td>Net Proceeds</td><td>$${Math.round(proj.exitProceedsNet).toLocaleString()}</td></tr>
   </table>
   <div class='footer'>Prepared by ${brokerName} · ${brokerage} · ${today} · This memo is for informational purposes only and does not constitute an offer or commitment. All projections are estimates and subject to change. Past performance is not indicative of future results.</div>
-  <br/><button onclick='window.print()' style='background:#1a4f8a;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:bold'>🖨 Print / Save as PDF</button>
+  <br/><button onclick='window.print()' style='background:#1a4f8a;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;font-weight:bold'>Print / Save as PDF</button>
   </body></html>`;
 
   return (
@@ -5723,7 +11415,7 @@ function ProposalGeneratorModal({ uwData, proj, waltYears, occupancy, projYears,
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={onClose} style={{ flex: 1, background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, padding: "10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md }}>Cancel</button>
             <button onClick={printDoc} style={{ flex: 2, background: DS.accent, border: "none", color: "#0a0f1a", padding: "10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>
-              🖨 Generate & Print
+              Generate & Print
             </button>
           </div>
         </div>
@@ -5732,6 +11424,413 @@ function ProposalGeneratorModal({ uwData, proj, waltYears, occupancy, projYears,
   );
 }
 
+
+// ── One-Tap Proposal ────────────────────────────────────────────
+function ProposalTab({ deals, contacts, comps, listings, properties, submarketList }) {
+  const brokerName    = localStorage.getItem("cre-broker-name") || "Broker";
+  const brokerage     = localStorage.getItem("cre-brokerage")   || "SVN";
+  const brokerPhone   = localStorage.getItem("cre-phone")       || "";
+  const brokerEmail   = localStorage.getItem("cre-email")       || "";
+
+  const [docType, setDocType] = useState("proposal"); // "proposal" | "tour" | "loi"
+  const [selectedDealId, setSelectedDealId] = useState(null);
+  const [overrides, setOverrides] = useState({});
+
+  const activeDealList = useMemo(() => deals.map(calcDeal).filter(d => !["Lost"].includes(d.stage)), [deals]);
+  const deal = activeDealList.find(d => d.id === selectedDealId) || activeDealList[0];
+  const contact = deal ? contacts.find(c => c.name === deal.client || (c.linkedDeals||[]).includes(deal.id)) : null;
+
+  const set = (k, v) => setOverrides(o => ({ ...o, [k]: v }));
+  const get = (k, fallback) => overrides[k] !== undefined ? overrides[k] : (fallback ?? "");
+
+  // Auto-populate overrides when deal changes
+  useEffect(() => {
+    if (!deal) return;
+    setOverrides({
+      propertyName: deal.name || "",
+      clientName: deal.client || "",
+      submarket: deal.submarket || "",
+      sqft: deal.sqft ? String(deal.sqft) : "",
+      dealType: deal.dealType || "Lease",
+      subtype: deal.subtype || "",
+      expectedClose: deal.expectedClose || "",
+      leaseTerm: deal.leaseTerm ? String(deal.leaseTerm) : "",
+      monthlyRent: deal.monthlyRent ? String(deal.monthlyRent) : "",
+      dealTotal: deal.dealTotal ? String(deal.dealTotal) : "",
+      netCommission: deal.netCommission ? String(Math.round(deal.netCommission)) : "",
+      notes: deal.notes || "",
+      stage: deal.stage || "",
+      repType: deal.repType || "",
+      tags: (deal.tags || []).join(", "),
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deal?.id]);
+
+  // Relevant comps for this submarket
+  const subComps = useMemo(() => {
+    if (!deal) return [];
+    return (comps || []).filter(c => c.submarket === deal.submarket || !deal.submarket).slice(0, 6);
+  }, [deal, comps]);
+
+  // Related listings
+  const subListings = useMemo(() => {
+    if (!deal) return [];
+    return (listings || []).filter(l => l.status === "Active" && (!deal.submarket || l.submarket === deal.submarket)).slice(0, 4);
+  }, [deal, listings]);
+
+  const smList = (submarketList || DEFAULT_SUBMARKETS).map(s => typeof s === "string" ? s : s.name);
+
+  const iS = { background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, color: DS.text, padding: "7px 10px", fontSize: DS.fs.sm, outline: "none", width: "100%", boxSizing: "border-box" };
+  const lbl = t => <label style={{ color: DS.textMute, fontSize: 10, fontWeight: DS.fw.bold, display: "block", marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px" }}>{t}</label>;
+  const Field = ({ label, children, span }) => <div style={{ gridColumn: span ? `span ${span}` : undefined }}>{lbl(label)}{children}</div>;
+
+  // ── Print functions ─────────────────────────────────────────────
+  const sharedStyles = `
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Helvetica Neue',Arial,sans-serif;color:#1e293b;background:#fff;padding:40px;font-size:13px;line-height:1.5}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;padding-bottom:20px;border-bottom:3px solid #f59e0b}
+    .logo{background:#f59e0b;color:#0d1826;padding:8px 14px;border-radius:6px;font-weight:900;font-size:13px;letter-spacing:1px}
+    h1{font-size:26px;font-weight:900;color:#0f172a;margin-bottom:4px}
+    h2{font-size:14px;font-weight:800;color:#0f172a;border-left:3px solid #f59e0b;padding-left:8px;margin:22px 0 10px;text-transform:uppercase;letter-spacing:0.5px}
+    .subtitle{color:#64748b;font-size:12px}
+    .kpi-row{display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap}
+    .kpi{flex:1;min-width:110px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px}
+    .kpi-label{font-size:10px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+    .kpi-value{font-size:18px;font-weight:900;color:#0f172a}
+    table{width:100%;border-collapse:collapse;font-size:11px;margin-top:8px}
+    th{background:#f1f5f9;color:#475569;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:8px 10px;text-align:left;border-bottom:2px solid #e2e8f0}
+    td{padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#334155;vertical-align:top}
+    .footer{margin-top:36px;padding-top:14px;border-top:1px solid #e2e8f0;color:#94a3b8;font-size:10px;display:flex;justify-content:space-between}
+    .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+    .progress-bar{background:#e2e8f0;border-radius:999px;height:8px;overflow:hidden;margin:8px 0}
+    .progress-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#f59e0b,#10b981)}
+    .stage-row{display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;margin-bottom:16px}
+    .stage-active{color:#f59e0b;font-weight:700}
+    .highlight-box{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 16px;margin:12px 0}
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .info-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid #f1f5f9}
+    .info-label{color:#64748b;font-size:11px}
+    .info-value{color:#0f172a;font-weight:600;font-size:11px}
+    @media print{button{display:none}}
+  `;
+
+  const printButton = `<br/><button onclick="window.print()" style="background:#f59e0b;border:none;padding:10px 24px;border-radius:8px;font-weight:800;font-size:14px;cursor:pointer;margin-top:8px">Print / Save as PDF</button>`;
+
+  const headerHTML = (title, subtitle) => `
+    <div class="header">
+      <div>
+        <div class="logo">${brokerage.toUpperCase()}</div><br/>
+        <h1>${title}</h1>
+        <div class="subtitle">${subtitle}</div>
+      </div>
+      <div style="text-align:right;color:#64748b;font-size:11px;line-height:1.8">
+        <strong style="color:#0f172a;font-size:13px">${brokerName}</strong><br/>
+        ${brokerage}<br/>
+        ${brokerPhone ? brokerPhone + "<br/>" : ""}
+        ${brokerEmail ? brokerEmail + "<br/>" : ""}
+        ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}
+      </div>
+    </div>`;
+
+  const printProposal = () => {
+    const win = window.open("", "_blank");
+    const stageOrder = ["Prospect","Proposal","LOI","Under Contract","Closed"];
+    const prog = Math.round((stageOrder.indexOf(get("stage")) / (stageOrder.length - 1)) * 100);
+    const compsRows = subComps.length ? subComps.map(c => `<tr><td>${c.name||c.address||"—"}</td><td>${c.submarket||"—"}</td><td>${c.compType}</td><td>${c.closeDate||"—"}</td><td>${c.sqft?.toLocaleString()||"—"} SF</td><td>${c.psfSale ? "$"+c.psfSale+"/SF" : c.psfLease ? "$"+c.psfLease+"/mo·SF" : "—"}</td></tr>`).join("") : "<tr><td colspan='6' style='color:#94a3b8'>No comps on record for this submarket</td></tr>";
+    win.document.write(`<!DOCTYPE html><html><head><title>Deal Proposal — ${get("propertyName")}</title><style>${sharedStyles}</style></head><body>
+      ${headerHTML(`Deal Proposal: ${get("propertyName")}`, `Prepared for: ${get("clientName")} · ${get("dealType")} Transaction`)}
+      <div class="kpi-row">
+        ${get("submarket") ? `<div class="kpi"><div class="kpi-label">Submarket</div><div class="kpi-value">${get("submarket")}</div></div>` : ""}
+        ${get("sqft") ? `<div class="kpi"><div class="kpi-label">Target Size</div><div class="kpi-value">${Number(get("sqft")).toLocaleString()} SF</div></div>` : ""}
+        ${get("dealType") ? `<div class="kpi"><div class="kpi-label">Transaction Type</div><div class="kpi-value">${get("dealType")}</div></div>` : ""}
+        ${get("subtype") ? `<div class="kpi"><div class="kpi-label">Property Type</div><div class="kpi-value">${get("subtype")}</div></div>` : ""}
+        ${get("expectedClose") ? `<div class="kpi"><div class="kpi-label">Target Close</div><div class="kpi-value">${get("expectedClose")}</div></div>` : ""}
+        ${get("stage") ? `<div class="kpi"><div class="kpi-label">Current Stage</div><div class="kpi-value">${get("stage")}</div></div>` : ""}
+      </div>
+      ${get("stage") ? `
+        <h2>Transaction Progress</h2>
+        <div class="progress-bar"><div class="progress-fill" style="width:${prog}%"></div></div>
+        <div class="stage-row">${stageOrder.map(s=>`<span class="${s===get("stage")?"stage-active":""}">${s}</span>`).join("")}</div>
+      ` : ""}
+      <h2>Transaction Summary</h2>
+      <div class="two-col">
+        <div>
+          ${[["Client / Tenant",get("clientName")],["Rep Type",get("repType")],["Property / Project",get("propertyName")],["Submarket",get("submarket")],["Property Type",get("subtype")],["Transaction Type",get("dealType")]].filter(r=>r[1]).map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span class="info-value">${v}</span></div>`).join("")}
+        </div>
+        <div>
+          ${[["Target SF",get("sqft")?Number(get("sqft")).toLocaleString()+" SF":""],["Lease Term",get("leaseTerm")?get("leaseTerm")+" months":""],["Monthly Rent",get("monthlyRent")?"$"+Number(get("monthlyRent")).toLocaleString():""],["Total Deal Value",get("dealTotal")?"$"+Number(get("dealTotal")).toLocaleString():""],["Expected Close",get("expectedClose")],["Tags",get("tags")]].filter(r=>r[1]).map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span class="info-value">${v}</span></div>`).join("")}
+        </div>
+      </div>
+      ${get("notes") ? `<h2>Notes & Deal Context</h2><div class="highlight-box" style="white-space:pre-wrap">${get("notes")}</div>` : ""}
+      <h2>Market Comps — ${get("submarket")||"All Submarkets"}</h2>
+      <table><thead><tr><th>Property</th><th>Submarket</th><th>Type</th><th>Date</th><th>Size</th><th>Price/SF</th></tr></thead><tbody>${compsRows}</tbody></table>
+      <div class="footer"><span>${brokerage} · ${brokerName}${brokerPhone?" · "+brokerPhone:""}${brokerEmail?" · "+brokerEmail:""}</span><span>Confidential · ${new Date().toLocaleDateString()}</span></div>
+      ${printButton}</body></html>`);
+    win.document.close();
+  };
+
+  const printTourBook = () => {
+    const win = window.open("", "_blank");
+    const listingRows = subListings.length
+      ? subListings.map(l => `
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;margin-bottom:12px;page-break-inside:avoid">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+              <div><strong style="font-size:15px;color:#0f172a">${l.name}</strong>${l.address?`<div style="color:#64748b;font-size:11px;margin-top:2px">${l.address}</div>`:""}</div>
+              <span style="background:#dcfce7;color:#166534;border:1px solid #bbf7d0;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700">${l.status}</span>
+            </div>
+            <div style="display:flex;gap:16px;flex-wrap:wrap">
+              ${l.submarket?`<div><div style="font-size:9px;color:#94a3b8;font-weight:700;margin-bottom:2px">SUBMARKET</div><div style="font-weight:600">${l.submarket}</div></div>`:""}
+              ${l.sqft?`<div><div style="font-size:9px;color:#94a3b8;font-weight:700;margin-bottom:2px">SIZE</div><div style="font-weight:600">${Number(l.sqft).toLocaleString()} SF</div></div>`:""}
+              ${l.subtype?`<div><div style="font-size:9px;color:#94a3b8;font-weight:700;margin-bottom:2px">TYPE</div><div style="font-weight:600">${l.subtype}</div></div>`:""}
+              ${l.askingRent?`<div><div style="font-size:9px;color:#94a3b8;font-weight:700;margin-bottom:2px">ASKING RENT</div><div style="font-weight:600;color:#0f172a">$${Number(l.askingRent).toLocaleString()}/mo·SF</div></div>`:""}
+              ${l.askingPrice?`<div><div style="font-size:9px;color:#94a3b8;font-weight:700;margin-bottom:2px">ASKING PRICE</div><div style="font-weight:600;color:#0f172a">$${Number(l.askingPrice).toLocaleString()}</div></div>`:""}
+            </div>
+            ${l.notes?`<div style="margin-top:10px;color:#64748b;font-size:11px;padding-top:10px;border-top:1px solid #e2e8f0">${l.notes}</div>`:""}
+          </div>`)
+        .join("")
+      : `<div style="color:#94a3b8;padding:20px;text-align:center">No active listings found for ${get("submarket")||"this submarket"}</div>`;
+
+    win.document.write(`<!DOCTYPE html><html><head><title>Tour Book — ${get("clientName")}</title><style>${sharedStyles}</style></head><body>
+      ${headerHTML(`Property Tour Book`, `Prepared for: ${get("clientName")} · ${get("submarket")||"Market"} · ${new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"})}`)}
+      <div class="highlight-box">
+        <strong style="color:#92400e">Tenant Requirements Summary</strong>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:8px">
+          ${get("sqft")?`<span><strong>${Number(get("sqft")).toLocaleString()} SF</strong> Target Size</span>`:""}
+          ${get("submarket")?`<span><strong>${get("submarket")}</strong> Preferred Submarket</span>`:""}
+          ${get("subtype")?`<span><strong>${get("subtype")}</strong> Property Type</span>`:""}
+          ${get("dealType")?`<span><strong>${get("dealType")}</strong> Transaction</span>`:""}
+        </div>
+      </div>
+      <h2>Properties for Consideration (${subListings.length})</h2>
+      ${listingRows}
+      ${subComps.length ? `
+        <h2>Market Comp Summary — ${get("submarket")||"Submarket"}</h2>
+        <table><thead><tr><th>Property</th><th>Type</th><th>Date</th><th>Size</th><th>Rate/Price per SF</th></tr></thead>
+        <tbody>${subComps.map(c=>`<tr><td>${c.name||c.address||"—"}</td><td>${c.compType}</td><td>${c.closeDate||"—"}</td><td>${c.sqft?.toLocaleString()||"—"} SF</td><td>${c.psfSale?"$"+c.psfSale+"/SF":c.psfLease?"$"+c.psfLease+"/mo·SF":"—"}</td></tr>`).join("")}</tbody></table>
+      ` : ""}
+      <div class="footer"><span>${brokerage} · ${brokerName}${brokerPhone?" · "+brokerPhone:""}${brokerEmail?" · "+brokerEmail:""}</span><span>Confidential · For ${get("clientName")} only · ${new Date().toLocaleDateString()}</span></div>
+      ${printButton}</body></html>`);
+    win.document.close();
+  };
+
+  const printLOI = () => {
+    const win = window.open("", "_blank");
+    const dateStr = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+    win.document.write(`<!DOCTYPE html><html><head><title>LOI Summary — ${get("propertyName")}</title><style>${sharedStyles}</style></head><body>
+      ${headerHTML(`Letter of Intent — Business Terms`, `${get("propertyName")} · ${get("dealType")} · ${dateStr}`)}
+      <div style="color:#64748b;font-size:12px;margin-bottom:20px">This document outlines the proposed business terms for the referenced transaction. This is not a legally binding agreement — formal LOI and lease/purchase documents to follow.</div>
+      <h2>Parties</h2>
+      <div class="two-col">
+        <div>
+          <div style="font-size:11px;color:#94a3b8;font-weight:700;margin-bottom:6px">TENANT / BUYER</div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px">${get("clientName")||"[Tenant Name]"}</div>
+          ${contact?.company?`<div style="color:#64748b;font-size:11px">${contact.company}</div>`:""}
+          ${contact?.email?`<div style="color:#64748b;font-size:11px">${contact.email}</div>`:""}
+        </div>
+        <div>
+          <div style="font-size:11px;color:#94a3b8;font-weight:700;margin-bottom:6px">BROKER OF RECORD</div>
+          <div style="font-weight:700;font-size:14px;margin-bottom:4px">${brokerName}</div>
+          <div style="color:#64748b;font-size:11px">${brokerage}</div>
+          ${brokerPhone?`<div style="color:#64748b;font-size:11px">${brokerPhone}</div>`:""}
+          ${brokerEmail?`<div style="color:#64748b;font-size:11px">${brokerEmail}</div>`:""}
+        </div>
+      </div>
+      <h2>Premises</h2>
+      ${[["Property / Project",get("propertyName")],["Address / Submarket",get("submarket")],["Property Type",get("subtype")],["Approximate Size",get("sqft")?Number(get("sqft")).toLocaleString()+" SF":""],["Transaction Type",get("dealType")],["Representation",get("repType")]].filter(r=>r[1]).map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span class="info-value">${v}</span></div>`).join("")}
+      <h2>Business Terms</h2>
+      ${[
+        get("dealType")==="Lease"&&get("leaseTerm")?["Lease Term",get("leaseTerm")+" months"]:[],
+        get("dealType")==="Lease"&&get("monthlyRent")?["Base Rent","$"+Number(get("monthlyRent")).toLocaleString()+"/mo·SF (NNN — taxes, insurance, and CAM additional)"]:[],
+        get("dealType")==="Sale"&&get("dealTotal")?["Purchase Price","$"+Number(get("dealTotal")).toLocaleString()+" (subject to due diligence)"]:[],
+        get("expectedClose")?["Target Commencement / Closing",get("expectedClose")]:[],
+        ["Brokerage Commission","Per separate agreement between brokers and landlord/seller"],
+        ["Inspection Period","To be determined — standard due diligence rights apply"],
+        ["Contingencies","Financing, inspection, and legal review (details per formal agreement)"],
+      ].filter(r=>r.length&&r[0]).map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span class="info-value">${v}</span></div>`).join("")}
+      ${get("notes") ? `<h2>Additional Notes</h2><div class="highlight-box" style="white-space:pre-wrap">${get("notes")}</div>` : ""}
+      <h2>Signature Lines</h2>
+      <div class="two-col" style="margin-top:8px">
+        <div style="border-top:1px solid #0f172a;padding-top:8px"><div style="font-size:11px;color:#64748b">Tenant / Buyer Signature</div><div style="margin-top:24px;font-size:11px;color:#64748b">Date</div></div>
+        <div style="border-top:1px solid #0f172a;padding-top:8px"><div style="font-size:11px;color:#64748b">Landlord / Seller or Authorized Representative</div><div style="margin-top:24px;font-size:11px;color:#64748b">Date</div></div>
+      </div>
+      <div class="footer"><span>${brokerage} · ${brokerName} · Confidential</span><span>Prepared ${dateStr}</span></div>
+      ${printButton}</body></html>`);
+    win.document.close();
+  };
+
+  const handlePrint = () => {
+    if (docType === "proposal") printProposal();
+    else if (docType === "tour") printTourBook();
+    else if (docType === "loi") printLOI();
+  };
+
+  const DOC_TYPES = [
+    { id: "proposal", label: "Deal Proposal", desc: "Executive summary with deal facts, comps, and progress" },
+    { id: "tour", label: "Tour Book", desc: "Property listings + market comps for a client tour" },
+    { id: "loi", label: "LOI Summary", desc: "Business terms outline ready for counterparty review" },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: DS.fs.h2, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.4px" }}>One-Tap Proposal</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 3 }}>Select a deal, choose your document type, review, and print — in under 60 seconds</div>
+        </div>
+        <button onClick={handlePrint} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>
+          Generate &amp; Print
+        </button>
+      </div>
+
+      {activeDealList.length === 0 ? (
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "48px 24px", textAlign: "center" }}>
+          <div style={{ color: DS.textSub, fontWeight: DS.fw.bold, fontSize: DS.fs.h3, marginBottom: 8 }}>No active deals</div>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.sm }}>Add a deal in the Pipeline to start generating proposals.</div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, alignItems: "start" }}>
+          {/* Left: deal selector + doc type */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {/* Doc type */}
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "14px 16px" }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", marginBottom: 10 }}>DOCUMENT TYPE</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {DOC_TYPES.map(dt => (
+                  <button key={dt.id} onClick={() => setDocType(dt.id)}
+                    style={{ background: docType === dt.id ? DS.accent + "14" : "none", border: `1px solid ${docType === dt.id ? DS.accent : DS.border}`, borderRadius: DS.r.md, padding: "10px 12px", cursor: "pointer", textAlign: "left", transition: "all 0.12s" }}>
+                    <div style={{ color: docType === dt.id ? DS.accent : DS.textSub, fontSize: DS.fs.sm, fontWeight: DS.fw.bold, marginBottom: 2 }}>{dt.label}</div>
+                    <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, lineHeight: 1.4 }}>{dt.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Deal selector */}
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", padding: "12px 14px 8px" }}>SELECT DEAL</div>
+              <div style={{ maxHeight: 300, overflowY: "auto" }}>
+                {activeDealList.map(d => {
+                  const isActive = deal?.id === d.id;
+                  const h = calcDealHealth(d);
+                  return (
+                    <button key={d.id} onClick={() => setSelectedDealId(d.id)}
+                      style={{ width: "100%", background: isActive ? DS.accent + "14" : "none", borderLeft: isActive ? `2px solid ${DS.accent}` : "2px solid transparent", border: "none", borderTop: "none", borderRight: "none", borderBottom: `1px solid ${DS.border}`, padding: "9px 14px", cursor: "pointer", textAlign: "left", display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ color: isActive ? DS.accent : DS.text, fontSize: DS.fs.sm, fontWeight: DS.fw.semi, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>{d.name}</span>
+                      <span style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>{d.stage} · {h.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Right: editable fields */}
+          {deal && (
+            <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px" }}>REVIEW &amp; EDIT FIELDS</div>
+                <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>Auto-filled from deal — edit before printing</div>
+              </div>
+
+              {/* Row 1 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <Field label="Property / Project Name">
+                  <input value={get("propertyName")} onChange={e => set("propertyName", e.target.value)} style={iS} />
+                </Field>
+                <Field label="Client / Tenant Name">
+                  <input value={get("clientName")} onChange={e => set("clientName", e.target.value)} style={iS} />
+                </Field>
+              </div>
+
+              {/* Row 2 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <Field label="Submarket">
+                  <select value={get("submarket")} onChange={e => set("submarket", e.target.value)} style={iS}>
+                    <option value="">— Select —</option>
+                    {smList.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </Field>
+                <Field label="Transaction Type">
+                  <select value={get("dealType")} onChange={e => set("dealType", e.target.value)} style={iS}>
+                    {DEAL_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Field>
+                <Field label="Property Subtype">
+                  <select value={get("subtype")} onChange={e => set("subtype", e.target.value)} style={iS}>
+                    <option value="">— Select —</option>
+                    {INDUSTRIAL_SUBTYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Field>
+              </div>
+
+              {/* Row 3 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <Field label="Target / Approximate SF">
+                  <input type="number" value={get("sqft")} onChange={e => set("sqft", e.target.value)} placeholder="0" style={iS} />
+                </Field>
+                <Field label="Stage">
+                  <select value={get("stage")} onChange={e => set("stage", e.target.value)} style={iS}>
+                    {STAGES.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </Field>
+                <Field label="Target Close Date">
+                  <input type="date" value={get("expectedClose")} onChange={e => set("expectedClose", e.target.value)} style={iS} />
+                </Field>
+              </div>
+
+              {/* Row 4 — financial */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <Field label="Lease Term (months)">
+                  <input type="number" value={get("leaseTerm")} onChange={e => set("leaseTerm", e.target.value)} placeholder="e.g. 60" style={iS} />
+                </Field>
+                <Field label="Monthly Rent ($/mo·SF)">
+                  <input type="number" value={get("monthlyRent")} onChange={e => set("monthlyRent", e.target.value)} placeholder="0.00" style={iS} />
+                </Field>
+                <Field label="Total Deal Value ($)">
+                  <input type="number" value={get("dealTotal")} onChange={e => set("dealTotal", e.target.value)} placeholder="0" style={iS} />
+                </Field>
+              </div>
+
+              {/* Row 5 */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <Field label="Rep Type">
+                  <select value={get("repType")} onChange={e => set("repType", e.target.value)} style={iS}>
+                    <option value="">— Select —</option>
+                    {REP_TYPES.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </Field>
+                <Field label="Tags (comma-separated)">
+                  <input value={get("tags")} onChange={e => set("tags", e.target.value)} placeholder="e.g. Off-Market, Hot" style={iS} />
+                </Field>
+              </div>
+
+              {/* Notes */}
+              <Field label="Notes / Deal Context">
+                <textarea value={get("notes")} onChange={e => set("notes", e.target.value)} rows={3} placeholder="Add any additional context, deal narrative, or client notes..." style={{ ...iS, resize: "vertical" }} />
+              </Field>
+
+              {/* Preview note */}
+              <div style={{ background: DS.surface, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, padding: "10px 14px", display: "flex", gap: 12, alignItems: "flex-start" }}>
+                <div style={{ flexShrink: 0, marginTop: 1 }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={DS.accent} strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                </div>
+                <div>
+                  <div style={{ color: DS.accent, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, marginBottom: 2 }}>
+                    {docType === "proposal" && `Deal Proposal — pulls in ${subComps.length} comp${subComps.length !== 1 ? "s" : ""} from ${get("submarket")||"your database"}`}
+                    {docType === "tour" && `Tour Book — includes ${subListings.length} active listing${subListings.length !== 1 ? "s" : ""} + ${subComps.length} market comp${subComps.length !== 1 ? "s" : ""} from ${get("submarket")||"your database"}`}
+                    {docType === "loi" && `LOI Summary — outlines business terms with signature blocks, ready for counterparty review`}
+                  </div>
+                  <div style={{ color: DS.textMute, fontSize: DS.fs.xs }}>Click "Generate &amp; Print" to open the document in a new tab. Print or save as PDF from there.</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── BOV Tab ─────────────────────────────────────────────────────
 function BOVTab({ comps, submarketList, brokerName, brokerage }) {
@@ -5802,6 +11901,8 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
     airConditioned: "Yes", heated: "Yes", boiler: "N/A",
     // Operating Status (Page 1)
     occupancyPct: "100", majorTenant: "", secondaryTenant: "N/A", tenantType: "",
+    // Industrial Specs
+    clearHeight: "", dockDoors: "", driveInDoors: "", officeSF: "", power: "", truckCourtDepth: "", columnSpacing: "", railServed: "No",
     // SWOT (Page 1)
     strengths: "", weaknesses: "", opportunities: "", threats: "", otherIssues: "", explainIssues: "",
     // Property vs Market (Page 1)
@@ -5836,6 +11937,12 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
   // ── Property card import ───────────────────────────────────────
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState("");
+
+  // ── Comps picker ──────────────────────────────────────────────
+  const [showCompsPicker, setShowCompsPicker] = useState(false);
+  const [pickerSlot, setPickerSlot] = useState(null); // 0/1/2
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerSm, setPickerSm] = useState("");
 
   const parsePropertyCard = (text) => {
     const get = (...patterns) => {
@@ -5987,7 +12094,7 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
       return { address: c.address || c.name || "", city: c.city || "", state: c.state || defaultState, units: c.sqft || "", leaseRate: annualPsf, leaseStart: c.closeDate || "", leaseType: "NNN" };
     });
     setForm(f => ({ ...f, saleComps: sc, leaseComps: lc, incomeBuildingSF: f.incomeBuildingSF || f.buildingSF }));
-    toast(`⚡ Auto-filled ${dbSale.length} sale + ${dbLease.length} lease comps from ${form.submarket}`);
+    toast(`Auto-filled ${dbSale.length} sale + ${dbLease.length} lease comps from ${form.submarket}`);
   };
 
   // ── Income calculations ───────────────────────────────────────
@@ -6003,7 +12110,6 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
 
   const pgi       = bSF * mktRent;
   const lessVac   = pgi * (vacPct / 100);
-  const lessCred  = 0; // credit loss applied to EGI below
   const egi       = pgi - lessVac;
   const lessProp  = bSF * propExp;
   const lessMgmt  = egi * (mgmtPct / 100);
@@ -6074,7 +12180,10 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
       *{margin:0;padding:0;box-sizing:border-box}
       body{font-family:'Helvetica Neue',Arial,sans-serif;color:#1a1a1a;background:#fff;padding:28px 32px;font-size:11px;line-height:1.55}
       .phdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:10px;border-bottom:3px solid #f59e0b;margin-bottom:12px}
-      .ptitle{font-size:14px;font-weight:900;color:#0f172a}.psub{font-size:10px;color:#64748b;margin-top:2px}
+      .ptitle{font-size:13px;font-weight:900;color:#0f172a}.psub{font-size:10px;color:#64748b;margin-top:2px}
+      .broker-bar{background:#0f172a;color:#fff;padding:6px 0;display:flex;align-items:center;justify-content:space-between;margin:-28px -32px 14px -32px;padding:8px 32px}
+      .broker-bar-name{font-size:13px;font-weight:900;letter-spacing:0.3px}
+      .broker-bar-right{font-size:10px;color:#94a3b8;text-align:right}
       .badge{background:#f59e0b;color:#0d1826;padding:6px 14px;border-radius:5px;font-weight:900;font-size:10px;text-align:center;line-height:1.6}
       .sh{background:#1a3a5c;color:#fff;font-weight:800;font-size:10px;text-align:center;padding:6px;letter-spacing:.5px;text-transform:uppercase;margin-top:12px}
       table{width:100%;border-collapse:collapse;font-size:10px;margin-top:0}
@@ -6096,10 +12205,14 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
       @media print{button{display:none!important}.pb{page-break-before:always}}
     </style></head><body>
 
+    <div class="broker-bar">
+      <div class="broker-bar-name">${brokerage} &nbsp;·&nbsp; ${brokerName}</div>
+      <div class="broker-bar-right">${brokerPhone ? brokerPhone + " &nbsp;·&nbsp; " : ""}${brokerEmail||""}<br/>${brokerLicense ? "Lic. " + brokerLicense : ""}</div>
+    </div>
     <div class="phdr">
       <div>
         <div class="ptitle">BROKER PRICE OPINION (BPO) — COMMERCIAL/INCOME PROPERTY</div>
-        <div class="psub">Effective Date: ${form.effectiveDate} &nbsp;|&nbsp; Client: ${form.clientName||"—"} &nbsp;|&nbsp; Prepared by ${brokerName}, ${brokerage}</div>
+        <div class="psub">Effective Date: ${form.effectiveDate} &nbsp;|&nbsp; Client: ${form.clientName||"—"} &nbsp;|&nbsp; Subject: ${form.streetAddress ? form.streetAddress + ", " + form.city + ", " + form.state : "—"}</div>
       </div>
       <div class="badge">BROKER PRICE<br/>OPINION<br/><span style="font-size:9px;font-weight:400">${form.submarket||""}</span></div>
     </div>
@@ -6141,6 +12254,27 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
       <tr><td class="lc">Occupancy (%):</td><td>${form.occupancyPct}%</td><td class="lc">Boiler:</td><td>${form.boiler}</td></tr>
       <tr><td class="lc">Major Tenant(s):</td><td>${form.majorTenant||"—"}</td><td class="lc">Secondary Tenant(s):</td><td>${form.secondaryTenant||"N/A"}</td></tr>
     </tbody></table>
+
+    ${(form.clearHeight||form.dockDoors||form.driveInDoors||form.officeSF||form.power||form.truckCourtDepth||form.columnSpacing) ? `
+    <div class="sh" style="background:#1a4030">INDUSTRIAL SPECIFICATIONS</div>
+    <table><tbody>
+      <tr>
+        ${form.clearHeight ? `<td class="lc">Clear Height:</td><td>${form.clearHeight} ft</td>` : "<td class='lc'>Clear Height:</td><td>—</td>"}
+        ${form.dockDoors ? `<td class="lc">Dock Doors:</td><td>${form.dockDoors}</td>` : "<td class='lc'>Dock Doors:</td><td>—</td>"}
+      </tr>
+      <tr>
+        ${form.driveInDoors ? `<td class="lc">Drive-In Doors:</td><td>${form.driveInDoors}</td>` : "<td class='lc'>Drive-In Doors:</td><td>—</td>"}
+        ${form.officeSF ? `<td class="lc">Office SF:</td><td>${parseInt(form.officeSF).toLocaleString()} SF</td>` : "<td class='lc'>Office SF:</td><td>—</td>"}
+      </tr>
+      <tr>
+        ${form.power ? `<td class="lc">Power:</td><td>${form.power}</td>` : "<td class='lc'>Power:</td><td>—</td>"}
+        ${form.truckCourtDepth ? `<td class="lc">Truck Court Depth:</td><td>${form.truckCourtDepth} ft</td>` : "<td class='lc'>Truck Court:</td><td>—</td>"}
+      </tr>
+      <tr>
+        ${form.columnSpacing ? `<td class="lc">Column Spacing:</td><td>${form.columnSpacing}</td>` : "<td class='lc'>Column Spacing:</td><td>—</td>"}
+        <td class="lc">Rail Served:</td><td>${form.railServed||"No"}</td>
+      </tr>
+    </tbody></table>` : ""}
 
     <table class="swot" style="margin-top:4px"><tbody>
       <tr><th colspan="2">STRENGTHS / WEAKNESSES / OPPORTUNITIES / THREATS</th><th colspan="2">PROPERTY VS COMPETITIVE MARKET</th></tr>
@@ -6217,7 +12351,7 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
       ${[["Broker(s) Name(s):", brokerName],["Broker Company:", brokerage],["License #:", brokerLicense||"—"],["Phone:", brokerPhone||"—"],["Email:", brokerEmail||"—"],["Date:", dateStr]].map(([k,v])=>`<div><div class="sk">${k}</div><div class="sv">${v}</div></div>`).join("")}
     </div>
     <div class="disc">This Broker Price Opinion is prepared by ${brokerName}, ${brokerage} for informational purposes only and does not constitute a certified appraisal or guarantee of value. All data is based on available market information as of ${dateStr}. Actual values may differ materially. This document is confidential and intended solely for the named recipient. All SVN® Offices Independently Owned and Operated.</div>
-    <br/><button onclick="window.print()" style="background:#f59e0b;color:#0d1826;border:none;padding:9px 22px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:900;margin-top:12px">🖨 Print / Save as PDF</button>
+    <br/><button onclick="window.print()" style="background:#f59e0b;color:#0d1826;border:none;padding:9px 22px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:900;margin-top:12px">Print / Save as PDF</button>
     </body></html>`);
     win.document.close();
   };
@@ -6423,6 +12557,20 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
                     </div>
                   </div>
                 </div>
+                {/* Industrial Specs */}
+                <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+                  <SectionHeader title="INDUSTRIAL SPECIFICATIONS" color="#1a4030" />
+                  <div style={{ padding: "14px 16px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+                    <div>{lbl("Clear Height (ft)")}<input value={form.clearHeight} onChange={e => set("clearHeight", e.target.value)} placeholder="28'" style={iS} /></div>
+                    <div>{lbl("Dock Doors")}<input type="number" value={form.dockDoors} onChange={e => set("dockDoors", e.target.value)} placeholder="8" style={iS} /></div>
+                    <div>{lbl("Drive-In Doors")}<input type="number" value={form.driveInDoors} onChange={e => set("driveInDoors", e.target.value)} placeholder="2" style={iS} /></div>
+                    <div>{lbl("Office SF")}<input type="number" value={form.officeSF} onChange={e => set("officeSF", e.target.value)} placeholder="2500" style={iS} /></div>
+                    <div>{lbl("Power")}<input value={form.power} onChange={e => set("power", e.target.value)} placeholder="600A / 277-480V 3-Phase" style={iS} /></div>
+                    <div>{lbl("Truck Court Depth (ft)")}<input value={form.truckCourtDepth} onChange={e => set("truckCourtDepth", e.target.value)} placeholder="130'" style={iS} /></div>
+                    <div>{lbl("Column Spacing")}<input value={form.columnSpacing} onChange={e => set("columnSpacing", e.target.value)} placeholder="50' x 52'" style={iS} /></div>
+                    <div>{lbl("Rail Served")}<select value={form.railServed} onChange={e => set("railServed", e.target.value)} style={iS}>{["No","Yes","Available"].map(o=><option key={o}>{o}</option>)}</select></div>
+                  </div>
+                </div>
                 {/* Operating Status */}
                 <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
                   <SectionHeader title="PROPERTY OPERATING STATUS" color="#1a3050" />
@@ -6466,9 +12614,17 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
                       {dbSale.length} sale comp{dbSale.length !== 1 ? "s" : ""} in DB for <strong style={{ color: DS.text }}>{form.submarket}</strong>
                     </div>
                     {dbSale.length > 0 && (
-                      <button onClick={autoFillComps} style={{ background: DS.blue + "22", border: `1px solid ${DS.blue}44`, color: DS.blue, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>⚡ Auto-fill from DB</button>
+                      <button onClick={autoFillComps} style={{ background: DS.blue + "22", border: `1px solid ${DS.blue}44`, color: DS.blue, padding: "5px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>Auto-fill from DB</button>
                     )}
                   </div>
+                  {/* Pull from comps DB */}
+                  {comps && comps.filter(c => c.compType === "Sale").length > 0 && (
+                    <div style={{ marginBottom:10 }}>
+                      <button onClick={() => setShowCompsPicker(true)} style={{ background:DS.blueSoft, border:`1px solid ${DS.blue}44`, color:DS.blue, padding:"6px 14px", borderRadius:DS.r.sm, cursor:"pointer", fontSize:12, fontWeight:700, display:"inline-flex", alignItems:"center", gap:6 }}>
+                        <IcSearch /> Pull from Comps Database ({comps.filter(c=>c.compType==="Sale").length} sale comps available)
+                      </button>
+                    </div>
+                  )}
                   <div style={{ overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640 }}>
                       <thead>
@@ -6650,13 +12806,13 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={saveBov} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "10px 24px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>Save BOV</button>
-              <button onClick={printBOV} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.text, padding: "10px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.semi }}>🖨 Print / Export PDF</button>
+              <button onClick={printBOV} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.text, padding: "10px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.semi, display:"inline-flex", alignItems:"center", gap:6 }}><IcPrint /> Print / Export PDF</button>
             </div>
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: DS.panel, border: `1px dashed ${DS.border}`, borderRadius: DS.r.lg, minHeight: 340 }}>
             <div style={{ textAlign: "center", color: DS.textFaint }}>
-              <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+              <div style={{ marginBottom: 12, display:"flex", justifyContent:"center" }}><IcDoc /></div>
               <div style={{ fontSize: DS.fs.md, fontWeight: DS.fw.semi, color: DS.textSub }}>Select a saved BOV or create a new one</div>
               <div style={{ fontSize: DS.fs.sm, marginTop: 4, color: DS.textFaint }}>Full SVN BPO format · Property ID → Market → Site → Comps → Income → Conclusion</div>
               <button onClick={openNew} style={{ marginTop: 16, background: DS.accent, border: "none", color: "#0a0f1a", padding: "9px 20px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.md, fontWeight: DS.fw.black }}>+ New BOV</button>
@@ -6698,6 +12854,126 @@ function BOVTab({ comps, submarketList, brokerName, brokerage }) {
           </div>
         </div>
       )}
+
+      {/* ── Comps Picker Modal ── */}
+      {showCompsPicker && (() => {
+        const saleCompsAll = (comps || []).filter(c => c.compType === "Sale");
+        const smOptions = [...new Set(saleCompsAll.map(c => c.submarket).filter(Boolean))].sort();
+        const filtered = saleCompsAll.filter(c => {
+          const smMatch = !pickerSm || c.submarket === pickerSm;
+          const txt = pickerSearch.toLowerCase();
+          const textMatch = !txt || (c.address||"").toLowerCase().includes(txt) || (c.city||"").toLowerCase().includes(txt) || (c.submarket||"").toLowerCase().includes(txt);
+          return smMatch && textMatch;
+        }).sort((a,b) => (b.closeDate||"").localeCompare(a.closeDate||""));
+
+        const fillSlot = (c, slot) => {
+          const idx = slot !== null ? slot : pickerSlot;
+          if (idx === null) return;
+          setSC(idx, "address", c.address || c.name || "");
+          setSC(idx, "cityState", [c.city, c.submarket].filter(Boolean).join(", "));
+          setSC(idx, "propType", c.subtype || "Industrial");
+          setSC(idx, "sqft", c.sqft || "");
+          setSC(idx, "yearBuilt", c.yearBuilt || "");
+          setSC(idx, "saleDate", c.closeDate ? (typeof c.closeDate === "string" ? c.closeDate.slice(0,10) : new Date(c.closeDate).toISOString().slice(0,10)) : "");
+          setSC(idx, "salePrice", c.salePrice || "");
+          setSC(idx, "psfSale", c.psfSale || "");
+          setSC(idx, "zoning", c.zoning || "");
+          setSC(idx, "comparability", "Comparable");
+          setShowCompsPicker(false);
+          setPickerSearch("");
+          toast(`✓ Comp filled into Sale Comp #${idx + 1}`);
+        };
+
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:2100 }} onClick={() => setShowCompsPicker(false)}>
+            <div style={{ background:DS.panel, border:`1px solid ${DS.borderHi}`, borderRadius:DS.r.xl, padding:24, width:780, maxHeight:"88vh", display:"flex", flexDirection:"column", boxShadow:DS.shadow.xl }} onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+                <div>
+                  <div style={{ color:DS.text, fontWeight:DS.fw.black, fontSize:DS.fs.h3 }}>Pull from Comps Database</div>
+                  <div style={{ color:DS.textMute, fontSize:DS.fs.sm, marginTop:2 }}>{saleCompsAll.length} sale comp{saleCompsAll.length !== 1 ? "s" : ""} available · click a row to fill a slot</div>
+                </div>
+                <button onClick={() => setShowCompsPicker(false)} style={{ background:"none", border:"none", color:DS.textMute, fontSize:20, cursor:"pointer" }}>✕</button>
+              </div>
+
+              {/* Slot selector */}
+              <div style={{ display:"flex", gap:8, marginBottom:12, alignItems:"center" }}>
+                <span style={{ color:DS.textMute, fontSize:DS.fs.xs, fontWeight:DS.fw.bold, textTransform:"uppercase" }}>Fill Slot:</span>
+                {[0,1,2].map(i => (
+                  <button key={i} onClick={() => setPickerSlot(i)} style={{ padding:"5px 14px", borderRadius:DS.r.sm, border:`1px solid ${pickerSlot===i ? DS.blue : DS.border}`, background: pickerSlot===i ? DS.blueSoft : DS.bg, color: pickerSlot===i ? DS.blue : DS.textSub, cursor:"pointer", fontSize:DS.fs.xs, fontWeight:DS.fw.bold }}>
+                    Comp #{i+1}
+                  </button>
+                ))}
+                {pickerSlot !== null && <span style={{ color:DS.accent, fontSize:DS.fs.xs, marginLeft:4 }}>→ filling Comp #{pickerSlot+1}</span>}
+              </div>
+
+              {/* Filters */}
+              <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+                <input
+                  value={pickerSearch}
+                  onChange={e => setPickerSearch(e.target.value)}
+                  placeholder="Search address, city, submarket…"
+                  style={{ flex:1, background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, padding:"6px 10px", fontSize:DS.fs.sm, outline:"none" }}
+                  autoFocus
+                />
+                <select value={pickerSm} onChange={e => setPickerSm(e.target.value)} style={{ background:DS.bg, border:`1px solid ${DS.border}`, borderRadius:DS.r.sm, color:DS.text, padding:"6px 10px", fontSize:DS.fs.sm, outline:"none" }}>
+                  <option value="">All Submarkets</option>
+                  {smOptions.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+
+              {/* Table */}
+              <div style={{ overflowY:"auto", flex:1, borderRadius:DS.r.md, border:`1px solid ${DS.border}` }}>
+                <table style={{ width:"100%", borderCollapse:"collapse" }}>
+                  <thead style={{ position:"sticky", top:0, background:"#0a1424", zIndex:1 }}>
+                    <tr>
+                      {["Address","City","Submarket","SF","Sale Price","$/SF","Date",""].map((h,i) => (
+                        <th key={i} style={{ padding:"7px 10px", color:DS.textFaint, fontSize:10, textAlign:"left", fontWeight:DS.fw.bold, whiteSpace:"nowrap", borderBottom:`1px solid ${DS.border}` }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 && (
+                      <tr><td colSpan={8} style={{ padding:"24px", textAlign:"center", color:DS.textFaint, fontSize:DS.fs.sm }}>No comps match your filters</td></tr>
+                    )}
+                    {filtered.map(c => {
+                      const dateStr = c.closeDate ? (typeof c.closeDate === "string" ? c.closeDate.slice(0,10) : new Date(c.closeDate).toISOString().slice(0,10)) : "—";
+                      return (
+                        <tr key={c.id} style={{ borderBottom:`1px solid ${DS.border}`, cursor: pickerSlot !== null ? "pointer" : "default" }}
+                          onClick={() => pickerSlot !== null && fillSlot(c, pickerSlot)}
+                          onMouseEnter={e => { if (pickerSlot !== null) e.currentTarget.style.background = DS.blueSoft; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = ""; }}>
+                          <td style={{ padding:"8px 10px", fontSize:DS.fs.sm, color:DS.text, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{c.address||"—"}</td>
+                          <td style={{ padding:"8px 10px", fontSize:DS.fs.sm, color:DS.textSub }}>{c.city||"—"}</td>
+                          <td style={{ padding:"8px 10px", fontSize:DS.fs.sm, color:DS.textMute }}>{c.submarket||"—"}</td>
+                          <td style={{ padding:"8px 10px", fontSize:DS.fs.sm, color:DS.textSub, fontFamily:"'DM Mono',monospace" }}>{c.sqft ? Number(c.sqft).toLocaleString() : "—"}</td>
+                          <td style={{ padding:"8px 10px", fontSize:DS.fs.sm, color:DS.text, fontFamily:"'DM Mono',monospace" }}>{c.salePrice ? "$"+Number(c.salePrice).toLocaleString() : "—"}</td>
+                          <td style={{ padding:"8px 10px", fontSize:DS.fs.sm, color:DS.accent, fontFamily:"'DM Mono',monospace", fontWeight:DS.fw.bold }}>{c.psfSale ? "$"+parseFloat(c.psfSale).toFixed(2) : "—"}</td>
+                          <td style={{ padding:"8px 10px", fontSize:DS.fs.sm, color:DS.textMute }}>{dateStr}</td>
+                          <td style={{ padding:"8px 10px" }}>
+                            <div style={{ display:"flex", gap:4 }}>
+                              {[0,1,2].map(i => (
+                                <button key={i} onClick={e => { e.stopPropagation(); fillSlot(c, i); }}
+                                  style={{ padding:"3px 8px", borderRadius:DS.r.sm, border:`1px solid ${DS.blue}44`, background:DS.blueSoft, color:DS.blue, cursor:"pointer", fontSize:10, fontWeight:DS.fw.bold, whiteSpace:"nowrap" }}>
+                                  #{i+1}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop:12, color:DS.textFaint, fontSize:DS.fs.xs, textAlign:"center" }}>
+                Select a slot above then click a row · or use the #1 #2 #3 buttons to fill directly
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6728,20 +13004,9 @@ function geocodeAndCache(rawAddr, key) {
     .catch(() => {});
 }
 
-// ── Leaflet Map Hook ───────────────────────────────────────────
-function useLeaflet() {
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    if (window.L) { setLoaded(true); return; }
-    const s = document.createElement('script');
-    s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-    s.crossOrigin = 'anonymous';
-    s.onload = () => setLoaded(true);
-    s.onerror = (e) => console.error('Leaflet failed to load:', e);
-    document.head.appendChild(s);
-  }, []);
-  return loaded;
-}
+// fix default marker icon paths broken by webpack
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({ iconRetinaUrl: null, iconUrl: null, shadowUrl: null });
 
 // ── Auto-geocode hook using Nominatim ─────────────────────────
 function useGeocode(items, getAddress) {
@@ -6798,112 +13063,113 @@ function useGeocode(items, getAddress) {
 }
 
 // ── Leaflet Map Component (comps) ──────────────────────────────
-function CompsLeafletMap({ comps }) {
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const leafletLoaded = useLeaflet();
+const saleIcon = L.divIcon({ className:'', html:`<div style="width:13px;height:13px;background:#3b82f6;border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px #3b82f688"></div>`, iconSize:[13,13], iconAnchor:[6,6] });
+const leaseIcon = L.divIcon({ className:'', html:`<div style="width:13px;height:13px;background:#10b981;border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px #10b98188"></div>`, iconSize:[13,13], iconAnchor:[6,6] });
 
-  // Use manually set coords OR auto-geocode from address
+function CompsLeafletMap({ comps }) {
   const compsNeedingGeocode = comps.filter(c => !c.lat && !c.lng && (c.address || c.name));
   const geocoded = useGeocode(compsNeedingGeocode, c => [c.address || c.name, c.city].filter(Boolean).join(", ") || '');
 
-  const resolvedComps = comps.map(c => {
-    const key = c.id || c.address || c.name;
-    const manualCoords = c.lat && c.lng ? { lat: parseFloat(c.lat), lng: parseFloat(c.lng) } : null;
-    const autoCoords = geocoded[key] || null;
-    return { ...c, _lat: (manualCoords || autoCoords)?.lat, _lng: (manualCoords || autoCoords)?.lng };
-  });
+  const mappable = comps.map(c => {
+    const key = String(c.id || c.address || c.name);
+    const manual = c.lat && c.lng ? { lat: parseFloat(c.lat), lng: parseFloat(c.lng) } : null;
+    const auto = geocoded[key] || null;
+    const coords = manual || auto;
+    return coords ? { ...c, _lat: coords.lat, _lng: coords.lng } : null;
+  }).filter(Boolean);
 
-  const mappable = resolvedComps.filter(c => c._lat && c._lng);
+  const geocodingCount = compsNeedingGeocode.filter(c => !geocoded[String(c.id || c.address || c.name)]).length;
 
-  useEffect(() => {
-    if (!leafletLoaded || !mapRef.current || mappable.length === 0) return;
-    const L = window.L;
-    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
-    const center = [mappable.reduce((s,c)=>s+c._lat,0)/mappable.length, mappable.reduce((s,c)=>s+c._lng,0)/mappable.length];
-    const map = L.map(mapRef.current, { center, zoom: 11 });
-    mapInstanceRef.current = map;
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
-    const saleIcon = L.divIcon({ className:'', html:`<div style="width:13px;height:13px;background:#3b82f6;border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px #3b82f688"></div>`, iconSize:[13,13], iconAnchor:[6,6] });
-    const leaseIcon = L.divIcon({ className:'', html:`<div style="width:13px;height:13px;background:#10b981;border:2px solid #fff;border-radius:50%;box-shadow:0 0 6px #10b98188"></div>`, iconSize:[13,13], iconAnchor:[6,6] });
-    mappable.forEach(c => {
-      const icon = c.compType === 'Sale' ? saleIcon : leaseIcon;
-      const psf = c.compType === 'Sale' ? (c.psfSale > 0 ? `$${parseFloat(c.psfSale).toFixed(2)}/SF` : '—') : (c.psfLease > 0 ? `$${parseFloat(c.psfLease).toFixed(3)}/SF/mo` : '—');
-      const popup = `<strong style="color:#f1f5f9">${c.name || c.address || '—'}</strong><br/><span style="color:#94a3b8">${c.submarket||''} · ${c.subtype||''}</span><br/><span style="color:${c.compType==='Sale'?'#60a5fa':'#34d399'};font-weight:700">${c.compType}</span> ${c.sqft?parseInt(c.sqft).toLocaleString()+' SF':''}<br/><strong style="color:#f59e0b">${psf}</strong>${c.closeDate?`<br/><span style="color:#64748b">${new Date(c.closeDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',year:'numeric'})}</span>`:''}`;
-      L.marker([c._lat, c._lng], { icon }).addTo(map).bindPopup(popup);
-    });
-    return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
-  }, [leafletLoaded, JSON.stringify(mappable.map(c=>[c._lat,c._lng,c.id]))]);
+  if (mappable.length === 0) return (
+    <div>
+      {geocodingCount > 0 && <div style={{ color:DS.accent, fontSize:DS.fs.xs, marginBottom:6 }}>⏳ Auto-locating {geocodingCount} address{geocodingCount!==1?'es':''}...</div>}
+      <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', color:DS.textFaint, fontSize:DS.fs.sm, background:DS.bg, borderRadius:DS.r.md, border:`1px dashed ${DS.border}` }}>No comps with mappable addresses yet.</div>
+    </div>
+  );
 
-  if (!leafletLoaded) return <div style={{ height:380, display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b', fontSize:13 }}>Loading map...</div>;
-
-  const geocodingCount = compsNeedingGeocode.length - Object.keys(geocoded).length;
+  const center = [mappable.reduce((s,c)=>s+c._lat,0)/mappable.length, mappable.reduce((s,c)=>s+c._lng,0)/mappable.length];
 
   return (
     <div>
-      {geocodingCount > 0 && <div style={{ color: DS.accent, fontSize: DS.fs.xs, marginBottom: 6 }}>⏳ Auto-locating {geocodingCount} comp address{geocodingCount !== 1 ? 'es' : ''} on map...</div>}
-      {mappable.length === 0 && !geocodingCount
-        ? <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', color:DS.textFaint, fontSize:DS.fs.sm, background:DS.bg, borderRadius:DS.r.md, border:`1px dashed ${DS.border}` }}>No comps with addresses found. Add an address to each comp to place it on the map.</div>
-        : <div ref={mapRef} style={{ height: 400, borderRadius: 12, overflow:'hidden' }} />
-      }
+      {geocodingCount > 0 && <div style={{ color:DS.accent, fontSize:DS.fs.xs, marginBottom:6 }}>⏳ Auto-locating {geocodingCount} address{geocodingCount!==1?'es':''}...</div>}
+      <MapContainer key={mappable.map(c=>c.id).join()} center={center} zoom={11} scrollWheelZoom={false} style={{ height:400, borderRadius:12, overflow:'hidden' }}>
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />
+        {mappable.map(c => {
+          const icon = c.compType === 'Sale' ? saleIcon : leaseIcon;
+          const psf = c.compType === 'Sale' ? (c.psfSale > 0 ? `$${parseFloat(c.psfSale).toFixed(2)}/SF` : '—') : (c.psfLease > 0 ? `$${parseFloat(c.psfLease).toFixed(3)}/SF/mo` : '—');
+          return (
+            <Marker key={c.id} position={[c._lat, c._lng]} icon={icon}>
+              <Popup>
+                <div>
+                  <strong>{c.name || c.address || '—'}</strong><br/>
+                  <span style={{ color:'#64748b' }}>{c.submarket||''}{c.subtype ? ` · ${c.subtype}` : ''}</span><br/>
+                  <span style={{ color: c.compType==='Sale'?'#2563eb':'#059669', fontWeight:700 }}>{c.compType}</span>{c.sqft ? ` · ${parseInt(c.sqft).toLocaleString()} SF` : ''}<br/>
+                  <strong>{psf}</strong>
+                  {c.closeDate && <><br/><span style={{ color:'#94a3b8', fontSize:11 }}>{new Date(c.closeDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',year:'numeric'})}</span></>}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+      </MapContainer>
       <div style={{ display:'flex', gap:16, marginTop:8, alignItems:'center', flexWrap:'wrap' }}>
         <div style={{ display:'flex', alignItems:'center', gap:5 }}><div style={{ width:10, height:10, borderRadius:'50%', background:'#3b82f6' }}/><span style={{ color:'#94a3b8', fontSize:11 }}>Sale ({mappable.filter(c=>c.compType==='Sale').length})</span></div>
         <div style={{ display:'flex', alignItems:'center', gap:5 }}><div style={{ width:10, height:10, borderRadius:'50%', background:'#10b981' }}/><span style={{ color:'#94a3b8', fontSize:11 }}>Lease ({mappable.filter(c=>c.compType==='Lease').length})</span></div>
-        <span style={{ color:'#475569', fontSize:10 }}>Addresses auto-located via OpenStreetMap · {mappable.length} of {comps.length} comps mapped</span>
+        <span style={{ color:'#475569', fontSize:10 }}>{mappable.length} of {comps.length} comps mapped · OpenStreetMap</span>
       </div>
     </div>
   );
 }
 
 // ── Leaflet Map Component (submarkets) ─────────────────────────
-function SubmarketLeafletMap({ rows }) {
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const leafletLoaded = useLeaflet();
-  const COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#f97316','#ec4899','#06b6d4','#84cc16','#f43f5e','#a78bfa'];
+const SM_COLORS = ['#f59e0b','#3b82f6','#10b981','#8b5cf6','#f97316','#ec4899','#06b6d4','#84cc16','#f43f5e','#a78bfa'];
 
-  // Auto-geocode submarkets that have no coords using their name as search query
+function SubmarketLeafletMap({ rows }) {
   const rowsNeedingGeocode = rows.filter(r => !r.lat && !r.lng);
   const geocoded = useGeocode(rowsNeedingGeocode.map(r=>({id:r.sm, sm:r.sm})), r => r.sm);
 
-  const resolvedRows = rows.map(r => {
+  const mappable = rows.map((r, i) => {
     const manual = r.lat && r.lng ? { lat: r.lat, lng: r.lng } : null;
     const auto = geocoded[r.sm] || null;
-    return { ...r, _lat: (manual || auto)?.lat, _lng: (manual || auto)?.lng };
-  });
-  const mappable = resolvedRows.filter(r => r._lat && r._lng);
+    const coords = manual || auto;
+    return coords ? { ...r, _lat: coords.lat, _lng: coords.lng, _color: SM_COLORS[i % SM_COLORS.length] } : null;
+  }).filter(Boolean);
 
-  useEffect(() => {
-    if (!leafletLoaded || !mapRef.current || mappable.length === 0) return;
-    const L = window.L;
-    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; }
-    const center = [mappable.reduce((s,r)=>s+r._lat,0)/mappable.length, mappable.reduce((s,r)=>s+r._lng,0)/mappable.length];
-    const map = L.map(mapRef.current, { center, zoom: 10 });
-    mapInstanceRef.current = map;
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
-    mappable.forEach((r, i) => {
-      const color = COLORS[i % COLORS.length];
-      const pipeline = r.active.reduce((s,d)=>s+(d.totalValue||0),0);
-      const size = Math.max(20, Math.min(44, 14 + r.smDeals.length * 5));
-      const icon = L.divIcon({ className:'', html:`<div style="width:${size}px;height:${size}px;background:${color};border:3px solid #fff;border-radius:50%;box-shadow:0 0 12px ${color}88;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:${size>28?11:9}px">${r.smDeals.length||''}</div>`, iconSize:[size,size], iconAnchor:[size/2,size/2] });
-      const popup = `<strong style="color:#f1f5f9;font-size:13px">${r.sm}</strong><br/><span style="color:#94a3b8">${r.smDeals.length} deals · ${r.smListings?r.smListings.length:0} listings · ${r.smComps.length} comps</span>${pipeline>0?`<br/><strong style="color:#f59e0b">$${Math.round(pipeline/1000)}K pipeline</strong>`:''}${r.commissions>0?`<br/><span style="color:#34d399">$${Math.round(r.commissions/1000)}K earned</span>`:''}`;
-      L.marker([r._lat, r._lng], { icon }).addTo(map).bindPopup(popup);
-    });
-    return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null; } };
-  }, [leafletLoaded, JSON.stringify(mappable.map(r=>[r._lat,r._lng,r.sm]))]);
+  const geocodingCount = rowsNeedingGeocode.filter(r => !geocoded[r.sm]).length;
 
-  if (!leafletLoaded) return <div style={{ height:360, display:'flex', alignItems:'center', justifyContent:'center', color:'#64748b' }}>Loading map...</div>;
+  if (mappable.length === 0) return (
+    <div>
+      {geocodingCount > 0 && <div style={{ color:DS.accent, fontSize:DS.fs.xs, marginBottom:6 }}>Auto-locating {geocodingCount} submarket{geocodingCount!==1?'s':''}...</div>}
+      <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', color:DS.textFaint, fontSize:DS.fs.sm, background:DS.bg, borderRadius:DS.r.md, border:`1px dashed ${DS.border}` }}>Enter submarket names that match real places (e.g. "Franklin, Indiana") to auto-locate them.</div>
+    </div>
+  );
 
-  const geocodingCount = rowsNeedingGeocode.length - Object.keys(geocoded).length;
+  const center = [mappable.reduce((s,r)=>s+r._lat,0)/mappable.length, mappable.reduce((s,r)=>s+r._lng,0)/mappable.length];
 
   return (
     <div>
-      {geocodingCount > 0 && <div style={{ color: DS.accent, fontSize: DS.fs.xs, marginBottom: 6 }}>⏳ Auto-locating {geocodingCount} submarket{geocodingCount!==1?'s':''}...</div>}
-      {mappable.length === 0 && !geocodingCount
-        ? <div style={{ height:100, display:'flex', alignItems:'center', justifyContent:'center', color:DS.textFaint, fontSize:DS.fs.sm, background:DS.bg, borderRadius:DS.r.md, border:`1px dashed ${DS.border}` }}>Enter submarket names that match real places (e.g. "Franklin, Indiana") to auto-locate them.</div>
-        : <div ref={mapRef} style={{ height: 360, borderRadius: 12, overflow:'hidden' }} />
-      }
-      <div style={{ color:'#475569', fontSize:10, marginTop:6 }}>Bubble size = # of deals · Auto-located via OpenStreetMap · {mappable.length}/{rows.length} submarkets mapped</div>
+      {geocodingCount > 0 && <div style={{ color:DS.accent, fontSize:DS.fs.xs, marginBottom:6 }}>Auto-locating {geocodingCount} submarket{geocodingCount!==1?'s':''}...</div>}
+      <MapContainer key={mappable.map(r=>r.sm).join()} center={center} zoom={10} scrollWheelZoom={false} style={{ height:360, borderRadius:12, overflow:'hidden' }}>
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="© OpenStreetMap" />
+        {mappable.map(r => {
+          const size = Math.max(20, Math.min(44, 14 + r.smDeals.length * 5));
+          const icon = L.divIcon({ className:'', html:`<div style="width:${size}px;height:${size}px;background:${r._color};border:3px solid #fff;border-radius:50%;box-shadow:0 0 12px ${r._color}88;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:${size>28?11:9}px">${r.smDeals.length||''}</div>`, iconSize:[size,size], iconAnchor:[size/2,size/2] });
+          const pipeline = r.active.reduce((s,d)=>s+(d.totalValue||0),0);
+          return (
+            <Marker key={r.sm} position={[r._lat, r._lng]} icon={icon}>
+              <Popup>
+                <div>
+                  <strong style={{ fontSize:13 }}>{r.sm}</strong><br/>
+                  <span style={{ color:'#64748b' }}>{r.smDeals.length} deals · {r.smListings?r.smListings.length:0} listings · {r.smComps.length} comps</span>
+                  {pipeline > 0 && <><br/><strong style={{ color:'#d97706' }}>${Math.round(pipeline/1000)}K pipeline</strong></>}
+                  {r.commissions > 0 && <><br/><span style={{ color:'#059669' }}>${Math.round(r.commissions/1000)}K earned</span></>}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+      </MapContainer>
+      <div style={{ color:'#475569', fontSize:10, marginTop:6 }}>Bubble size = # of deals · {mappable.length}/{rows.length} submarkets mapped · OpenStreetMap</div>
     </div>
   );
 }
@@ -6920,7 +13186,18 @@ export default function PipelineDashboard() {
     try { const s = localStorage.getItem("cre-campaigns-v1"); return s ? JSON.parse(s) : initialProspecting; } catch { return initialProspecting; }
   });
   const [comps, setComps] = useState(() => {
-    try { const s = localStorage.getItem("cre-comps-v1"); return s ? JSON.parse(s) : initialComps; } catch { return initialComps; }
+    try {
+      const s = localStorage.getItem("cre-comps-v1");
+      const parsed = s ? JSON.parse(s) : initialComps;
+      // One-time migration: strip the hardcoded demo comp
+      return parsed.filter(c => !(c.id === 1 && c.name === "Southpark Distribution Center"));
+    } catch { return initialComps; }
+  });
+  const [marketListings, setMarketListings] = useState(() => {
+    try { const s = localStorage.getItem("cre-market-listings-v1"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [leaseRadar, setLeaseRadar] = useState(() => {
+    try { const s = localStorage.getItem("cre-lease-radar-v1"); return s ? JSON.parse(s) : []; } catch { return []; }
   });
   const [submarketList, setSubmarketList] = useState(() => {
     try { const s = localStorage.getItem("cre-submarkets-v1"); return s ? JSON.parse(s) : DEFAULT_SUBMARKETS; } catch { return DEFAULT_SUBMARKETS; }
@@ -6945,6 +13222,8 @@ export default function PipelineDashboard() {
   useEffect(() => { localStorage.setItem("cre-listings-v1", JSON.stringify(listings)); }, [listings]);
   useEffect(() => { localStorage.setItem("cre-campaigns-v1", JSON.stringify(campaigns)); }, [campaigns]);
   useEffect(() => { localStorage.setItem("cre-comps-v1", JSON.stringify(comps)); }, [comps]);
+  useEffect(() => { localStorage.setItem("cre-market-listings-v1", JSON.stringify(marketListings)); }, [marketListings]);
+  useEffect(() => { localStorage.setItem("cre-lease-radar-v1", JSON.stringify(leaseRadar)); }, [leaseRadar]);
   useEffect(() => { localStorage.setItem("cre-submarkets-v1", JSON.stringify(submarketList)); }, [submarketList]);
   useEffect(() => { localStorage.setItem("cre-contacts-v1", JSON.stringify(contacts)); }, [contacts]);
   useEffect(() => { localStorage.setItem("cre-tasks-v1", JSON.stringify(tasks)); }, [tasks]);
@@ -6970,20 +13249,44 @@ export default function PipelineDashboard() {
   const [winLossDeal, setWinLossDeal] = useState(null);
   const [closedFollowUp, setClosedFollowUp] = useState(null);
   const [inlineEdit, setInlineEdit] = useState(null);
+  const [expandedRow, setExpandedRow] = useState(null);
+  const [analyticsView, setAnalyticsView] = useState("overview"); // "overview" | "intelligence" | "forecast"
+  const [pipelineView, setPipelineView] = useState("list"); // "list" | "timeline"
   const [showDailySync, setShowDailySync] = useState(false);
   const [checklistDeal, setChecklistDeal] = useState(null);
   const [milestoneDeal, setMilestoneDeal] = useState(null);
   const [closingStatementDeal, setClosingStatementDeal] = useState(null);
   const [emailDraftDeal, setEmailDraftDeal] = useState(null);
+  const [quickTaskDeal, setQuickTaskDeal] = useState(null);
   const [showCSVImport, setShowCSVImport] = useState(false);
+  const [showVoice, setShowVoice] = useState(false);
   const [filters, setFilters] = useState({ search: "", stages: [], subtypes: [], dealTypes: [], leadSources: [], dateFrom: "", dateTo: "" });
   const [sortKey, setSortKey] = useState("expectedClose");
   const [sortDir, setSortDir] = useState("asc");
   const [showFilters, setShowFilters] = useState(false);
   const [openActionMenu, setOpenActionMenu] = useState(null);
+  const [clientProfile, setClientProfile] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // First-run onboarding: open settings if broker name has never been set
+  useEffect(() => {
+    if (!localStorage.getItem("cre-broker-name")) {
+      setShowSettings(true);
+    }
+  }, []);
+
+  // Cmd+K / Ctrl+K global search shortcut
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); setShowSearch(s => !s); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "j") { e.preventDefault(); setShowVoice(s => !s); }
+      if (e.key === "Escape") { setShowSearch(false); setShowVoice(false); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const enriched = useMemo(() => deals.map(calcDeal), [deals]);
   const activeEnriched = enriched.filter(d => d.stage !== "Lost");
@@ -7011,7 +13314,6 @@ export default function PipelineDashboard() {
   const closedDeals = enriched.filter(d => d.stage === "Closed");
   const lostDeals = enriched.filter(d => d.stage === "Lost");
   const closedYTD = closedDeals.filter(d => d.expectedClose?.startsWith(String(thisYear))).reduce((s, d) => s + d.netCommission, 0);
-  const activeCount = activeEnriched.filter(d => d.stage !== "Closed").length;
   const gciProgress = Math.min((closedYTD / gciGoal) * 100, 100);
   const winRate = (closedDeals.length + lostDeals.length) > 0 ? Math.round(closedDeals.length / (closedDeals.length + lostDeals.length) * 100) : null;
   const lossBreakdown = LOSS_REASONS.map(r => ({ reason: r, count: lostDeals.filter(d => d.lossReason === r).length })).filter(x => x.count > 0);
@@ -7041,17 +13343,19 @@ export default function PipelineDashboard() {
 
   const saveModal = (form) => {
     const existing = deals.find(x => x.id === form.id);
-    // Auto-track stage history when stage changes
+    const author = localStorage.getItem("cre-broker-name") || "You";
+    const now = new Date().toISOString();
     let stageHistory = form.stageHistory || [];
+    let activities = form.activities || [];
     if (!existing) {
-      // New deal — initialize history with current stage
       stageHistory = [{ stage: form.stage || "Prospect", enteredDate: today, note: "Deal created" }];
+      activities = [{ id: Date.now(), type: "System", text: `Deal created by ${author}`, date: now, author }, ...activities];
     } else if (existing.stage !== form.stage) {
-      // Stage changed — append new entry
       stageHistory = [...(existing.stageHistory || [{ stage: existing.stage, enteredDate: today }]),
         { stage: form.stage, enteredDate: today, note: `Moved from ${existing.stage}` }];
+      activities = [{ id: Date.now() + 1, type: "System", text: `Stage changed: ${existing.stage} → ${form.stage}`, date: now, author }, ...activities];
     }
-    const d = { ...form, dealTotal: parseFloat(form.dealTotal) || 0, monthlyRent: parseFloat(form.monthlyRent) || 0, leaseTerm: parseFloat(form.leaseTerm) || 0, sqft: parseFloat(form.sqft) || 0, commissionRate: parseFloat(form.commissionRate) || 0, probability: parseFloat(form.probability) || 0, daysInStage: parseInt(form.daysInStage) || 0, splitPct: parseFloat(form.splitPct) || 100, activities: form.activities || [], richNotes: form.richNotes || [], tags: form.tags || [], documents: form.documents || [], stageHistory };
+    const d = { ...form, dealTotal: parseFloat(form.dealTotal) || 0, monthlyRent: parseFloat(form.monthlyRent) || 0, leaseTerm: parseFloat(form.leaseTerm) || 0, sqft: parseFloat(form.sqft) || 0, commissionRate: parseFloat(form.commissionRate) || 0, probability: parseFloat(form.probability) || 0, daysInStage: parseInt(form.daysInStage) || 0, splitPct: parseFloat(form.splitPct) || 100, activities, richNotes: form.richNotes || [], tags: form.tags || [], documents: form.documents || [], stageHistory, commissionPaid: form.commissionPaid || false, commissionPaidDate: form.commissionPaidDate || "" };
     if (form.id) setDeals(prev => prev.map(x => x.id === form.id ? d : x));
     else setDeals(prev => [...prev, { ...d, id: Date.now() }]);
     if (d.submarket) geocodeAndCache(d.submarket, d.submarket);
@@ -7068,15 +13372,16 @@ export default function PipelineDashboard() {
   const saveDocuments = (updated) => { toast("Documents saved"); setDeals(prev => prev.map(d => d.id === updated.id ? updated : d)); setDocumentsDeal(updated); };
   const saveWinLoss = (updated) => { toast(updated.stage === "Closed" ? "Deal marked won!" : "Deal marked lost", updated.stage === "Closed" ? "success" : "info");
     const existing = deals.find(x => x.id === updated.id);
+    const author = localStorage.getItem("cre-broker-name") || "You";
     const newStage = updated.won ? "Closed" : "Lost";
     const stageHistory = [...(existing?.stageHistory || [{ stage: existing?.stage || "Unknown", enteredDate: today }]),
       { stage: newStage, enteredDate: today, note: updated.won ? "Deal closed/won" : `Lost: ${updated.lossReason||""}` }];
-    const saved = { ...updated, stageHistory };
+    const autoEntry = { id: Date.now(), type: "System", text: updated.won ? `Deal closed/won by ${author}` : `Deal marked lost — ${updated.lossReason || "no reason given"}`, date: new Date().toISOString(), author };
+    const saved = { ...updated, stageHistory, activities: [autoEntry, ...(existing?.activities || [])] };
     setDeals(prev => prev.map(d => d.id === updated.id ? saved : d));
     setWinLossDeal(null);
     if (updated.won) setTimeout(() => setClosedFollowUp({ deal: saved, wasWon: true }), 300);
   };
-  const deleteDeal = (id) => { if (window.confirm("Delete this deal?")) { setDeals(prev => prev.filter(d => d.id !== id)); toast("Deal deleted", "error"); } };
   const sortBy = (key) => { if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc"); else { setSortKey(key); setSortDir("asc"); } };
   const toggleFilter = (key, val) => setFilters(f => ({ ...f, [key]: f[key].includes(val) ? f[key].filter(x => x !== val) : [...f[key], val] }));
 
@@ -7085,7 +13390,9 @@ export default function PipelineDashboard() {
     if (field === "stage") {
       const d = deals.find(x => x.id === dealId);
       if (d && d.stage !== value) {
+        const author = localStorage.getItem("cre-broker-name") || "You";
         update.stageHistory = [...(d.stageHistory || []), { stage: value, enteredDate: today, note: "Updated inline" }];
+        update.activities = [{ id: Date.now(), type: "System", text: `Stage changed: ${d.stage} → ${value}`, date: new Date().toISOString(), author }, ...(d.activities || [])];
         const stageProbMap = { "Prospect": 20, "Proposal": 45, "LOI": 65, "Under Contract": 85, "Closed": 100, "Lost": 0 };
         if (stageProbMap[value] !== undefined && !d.probability) update.probability = stageProbMap[value];
       }
@@ -7143,7 +13450,7 @@ export default function PipelineDashboard() {
         <td>${d.daysInStage}d</td>
       </tr>`).join("");
     const dateStr = new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
-    win.document.write(`<!DOCTYPE html><html><head><title>Industrial Pipeline Report</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>CRE OS Report</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family: 'Helvetica Neue', Arial, sans-serif; color:#1e293b; background:#fff; padding:32px; font-size:13px; }
@@ -7168,10 +13475,10 @@ export default function PipelineDashboard() {
     </style></head><body>
     <div class="header">
       <div>
-        <div class="title">Industrial CRE Pipeline</div>
+        <div class="title">CRE OS</div>
         <div class="subtitle">${dateStr}</div>
       </div>
-      <div class="logo">INDUSTRIAL<br/>PIPELINE</div>
+      <div class="logo">CRE OS</div>
     </div>
 
     <div class="kpi-row">
@@ -7191,7 +13498,7 @@ export default function PipelineDashboard() {
     <tbody>${dealRows}</tbody></table>
 
     <div class="footer">
-      <span>Industrial Pipeline CRE Tracker · Confidential</span>
+      <span>CRE OS · Confidential</span>
       <span>Generated ${dateStr}</span>
     </div>
     <br/><button onclick="window.print()" style="background:#f59e0b;border:none;padding:10px 24px;border-radius:8px;font-weight:800;font-size:14px;cursor:pointer;">️ Print / Save as PDF</button>
@@ -7231,6 +13538,12 @@ export default function PipelineDashboard() {
     return days <= 180;
   }).length;
 
+  const leaseRadarBadge = (() => {
+    const fromDeals = enriched.filter(d => d.leaseExpiresDate && Math.floor((new Date(d.leaseExpiresDate+"T00:00:00")-new Date())/86400000) <= 540).length;
+    const fromManual = leaseRadar.filter(l => l.status !== "Converted" && l.leaseExpiration && Math.floor((new Date(l.leaseExpiration+"T00:00:00")-new Date())/86400000) <= 540).length;
+    return fromDeals + fromManual || 0;
+  })();
+
   const brokerName = localStorage.getItem("cre-broker-name") || "Broker";
   const brokerage = localStorage.getItem("cre-brokerage") || "SVN";
 
@@ -7239,27 +13552,31 @@ export default function PipelineDashboard() {
       { id: "home", label: "Home", badge: (followUpsDue.length + urgentTasksCount + goneColdCount + outreachDueCount + criticalLeases) || 0 },
       { id: "pipeline", label: "Pipeline" },
       { id: "analytics", label: "Analytics" },
-      { id: "intel", label: "Intel" },
       { id: "underwriting", label: "Underwriting" },
     ]},
     { label: "Transactions", items: [
-      { id: "listings", label: "Listings", badge: listings.filter(l=>l.status==="Active").length },
+      { id: "proposal", label: "Proposals" },
       { id: "bov", label: "BOV" },
-      { id: "forecast", label: "Forecast" },
-      { id: "timeline", label: "Timeline" },
       { id: "calendar", label: "Calendar" },
       { id: "comps", label: "Market Comps", badge: comps.length },
-      { id: "lease-radar", label: "Lease Radar" },
+      { id: "lease-radar", label: "Lease Radar", badge: leaseRadarBadge },
+    ]},
+    { label: "Intelligence", items: [
+      { id: "autopilot", label: "Autopilot", badge: (() => { const active = deals.map(calcDeal).filter(d=>!["Closed","Lost"].includes(d.stage)); return calcAllAutopilotActions(active, contacts).filter(x=>x.actions[0]?.priority==="high").length; })() },
+      { id: "radar", label: "Health Radar", badge: (() => { const crit = []; leaseRadar.forEach(l => { if (l.leaseExpiry) { const d = Math.round((new Date(l.leaseExpiry) - new Date()) / 86400000); if (d >= 0 && d <= 180) crit.push(l); }}); return crit.length; })() },
+      { id: "deal-room", label: "Deal Room" },
+      { id: "living-property", label: "Living Record" },
+      { id: "matches", label: "Deal Matches", badge: contacts.flatMap(c=>(c.requirements||[]).filter(r=>r.active)).length },
     ]},
     { label: "Relationships", items: [
       { id: "contacts", label: "Contacts", badge: contacts.length },
       { id: "properties", label: "Properties", badge: properties.length },
-      { id: "prospecting", label: "Prospecting", badge: campaigns.length },
       { id: "submarkets", label: "Submarkets" },
     ]},
     { label: "Operations", items: [
       { id: "tasks", label: "Tasks", badge: overdueTasks > 0 ? overdueTasks : pendingTasks },
       { id: "expenses", label: "Expenses" },
+      { id: "help", label: "Feature Guide" },
     ]},
   ];
 
@@ -7322,9 +13639,9 @@ export default function PipelineDashboard() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
           </button>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <div style={{ background: `linear-gradient(135deg, ${DS.accent} 0%, #f97316 100%)`, borderRadius: DS.r.sm, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: DS.fw.black, fontSize: 10, color: "#0a0f1a", letterSpacing: "1px", boxShadow: "0 2px 8px rgba(245,158,11,0.4)", fontFamily: "'DM Mono', monospace" }}>IND</div>
+            <div style={{ background: `linear-gradient(135deg, ${DS.accent} 0%, #f97316 100%)`, borderRadius: DS.r.sm, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: DS.fw.black, fontSize: 10, color: "#0a0f1a", letterSpacing: "1px", boxShadow: "0 2px 8px rgba(245,158,11,0.4)", fontFamily: "'DM Mono', monospace" }}>OS</div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.3px" }}>Industrial Pipeline</div>
+              <div style={{ fontSize: 14, fontWeight: DS.fw.black, color: DS.text, letterSpacing: "-0.3px" }}>CRE OS</div>
               <div style={{ fontSize: 10, color: DS.textMute }}>{brokerage}</div>
             </div>
           </div>
@@ -7347,12 +13664,18 @@ export default function PipelineDashboard() {
 
           {/* Pipeline actions */}
           {activeTab === "pipeline" && <>
+            {/* List / Timeline toggle */}
+            <div style={{ display: "flex", background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, overflow: "hidden" }}>
+              {["list","timeline"].map(v => (
+                <button key={v} onClick={() => setPipelineView(v)} style={{ padding: "5px 12px", background: pipelineView === v ? DS.borderHi : "none", border: "none", color: pipelineView === v ? DS.text : DS.textMute, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: pipelineView === v ? DS.fw.semi : DS.fw.normal, textTransform: "capitalize" }}>{v}</button>
+              ))}
+            </div>
             <button onClick={() => setShowFilters(f => !f)} style={{ background: showFilters ? DS.borderHi : DS.panel, border: `1px solid ${DS.border}`, color: showFilters ? DS.text : DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: showFilters ? DS.fw.semi : DS.fw.normal }}>Filters</button>
             <button onClick={printReport} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>PDF Report</button>
             <button onClick={exportCSV} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>Export CSV</button>
             <button onClick={() => setShowCSVImport(true)} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm }}>Import CSV</button>
-            <button onClick={() => setQuickAdd(true)} style={{ background: DS.panel, border: `1px solid ${DS.accent}`, color: DS.accent, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>Quick Add</button>
-            <button onClick={() => setModal("new")} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "6px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>+ New Deal</button>
+            {pipelineView === "list" && <button onClick={() => setQuickAdd(true)} style={{ background: DS.panel, border: `1px solid ${DS.accent}`, color: DS.accent, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>Quick Add</button>}
+            {pipelineView === "list" && <button onClick={() => setModal("new")} style={{ background: DS.accent, border: "none", color: "#0a0f1a", padding: "6px 14px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.black }}>+ New Deal</button>}
           </>}
 
           {/* Settings */}
@@ -7395,27 +13718,108 @@ export default function PipelineDashboard() {
         {/* ── Main content ── */}
         <div className="tab-content" style={{ flex: 1, overflowY: "auto", padding: "24px 28px", display: "flex", flexDirection: "column", gap: 18 }}>
 
-          {activeTab === "home" && <HomeBriefing deals={deals} tasks={tasks} contacts={contacts} listings={listings} gciGoal={gciGoal} closedYTD={closedYTD} totalWeighted={totalWeighted} onNavigate={setActiveTab} onStartSync={() => setShowDailySync(true)} />}
-          {activeTab === "bov" && <BOVTab comps={comps} submarketList={submarketList} brokerName={brokerName} brokerage={brokerage} />}
-          {activeTab === "listings" && <ListingsTab listings={listings} setListings={setListings} submarketList={submarketList} />}
-          {activeTab === "forecast" && <ForecastTab deals={deals} />}
-          {activeTab === "prospecting" && <ProspectingTab campaigns={campaigns} setCampaigns={setCampaigns} deals={deals} submarketList={submarketList} />}
-          {activeTab === "comps" && <MarketCompsTab comps={comps} setComps={setComps} submarketList={submarketList} />}
-          {activeTab === "submarkets" && <SubmarketTab deals={deals} listings={listings} comps={comps} submarketList={submarketList} setSubmarketList={setSubmarketList} />}
-          {activeTab === "contacts" && <ContactsTab contacts={contacts} setContacts={setContacts} deals={deals} submarketList={submarketList} />}
-          {activeTab === "tasks" && <TasksTab tasks={tasks} setTasks={setTasks} deals={deals} />}
-          {activeTab === "expenses" && <ExpenseTab expenses={expenses} setExpenses={setExpenses} closedYTD={closedYTD} gciGoal={gciGoal} />}
-          {activeTab === "properties" && <PropertyDBTab properties={properties} setProperties={setProperties} submarketList={submarketList} contacts={contacts} />}
-          {activeTab === "timeline" && <TimelineTab deals={deals} />}
-          {activeTab === "calendar" && <CalendarTab deals={deals} tasks={tasks} listings={listings} onNavigate={setActiveTab} />}
-          {activeTab === "intel" && <IntelTab deals={deals} expenses={expenses} gciGoal={gciGoal} />}
-          {activeTab === "lease-radar" && <LeaseRadarTab deals={deals} contacts={contacts} onNavigate={setActiveTab} />}
+          {activeTab === "home" && <ErrorBoundary key="home">
+            <>
+              <HomeBriefing deals={deals} tasks={tasks} contacts={contacts} setContacts={setContacts} listings={listings} gciGoal={gciGoal} closedYTD={closedYTD} totalWeighted={totalWeighted} onNavigate={setActiveTab} onStartSync={() => setShowDailySync(true)} leaseRadar={leaseRadar} setDeals={setDeals} />
+              {/* Autopilot Feed on Home */}
+              {(() => {
+                const enriched = deals.map(calcDeal);
+                const feed = calcAllAutopilotActions(enriched, contacts).slice(0, 5);
+                if (feed.length === 0) return null;
+                const urgentItems = feed.filter(x => x.actions[0]?.priority === "high");
+                return (
+                  <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "18px 22px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: urgentItems.length > 0 ? DS.red : DS.accent, boxShadow: `0 0 8px ${urgentItems.length > 0 ? DS.red : DS.accent}` }} />
+                        <span style={{ color: urgentItems.length > 0 ? DS.red : DS.accent, fontWeight: DS.fw.black, fontSize: DS.fs.md, letterSpacing: "0.5px" }}>AUTOPILOT FEED</span>
+                        {urgentItems.length > 0 && <span style={{ background: DS.red + "22", color: DS.red, border: `1px solid ${DS.red}44`, borderRadius: DS.r.full, fontSize: 9, padding: "2px 8px", fontWeight: DS.fw.black }}>{urgentItems.length} urgent</span>}
+                      </div>
+                      <button onClick={() => setActiveTab("autopilot")} style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textMute, padding: "4px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs }}>View All</button>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {feed.map(({ deal, actions }) => {
+                        const top = actions[0];
+                        const pc = { high: DS.red, medium: DS.accent, low: DS.green }[top.priority];
+                        return (
+                          <div key={deal.id} onClick={() => setActiveTab("autopilot")} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: DS.bg, borderRadius: DS.r.sm, border: `1px solid ${DS.border}`, borderLeft: `2px solid ${pc}`, cursor: "pointer" }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                <span style={{ color: DS.text, fontSize: DS.fs.sm, fontWeight: DS.fw.semi }}>{deal.name}</span>
+                                <span style={{ color: pc, fontSize: 9, fontWeight: DS.fw.black, textTransform: "uppercase" }}>{top.priority === "high" ? "Urgent" : top.priority === "medium" ? "Medium" : "Suggested"}</span>
+                              </div>
+                              <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{top.title}</div>
+                            </div>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: DS.textFaint, flexShrink: 0 }}><polyline points="9 18 15 12 9 6"/></svg>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          </ErrorBoundary>}
+          {activeTab === "proposal" && <ErrorBoundary key="proposal"><ProposalTab deals={deals} contacts={contacts} comps={comps} listings={listings} properties={properties} submarketList={submarketList} /></ErrorBoundary>}
+          {activeTab === "bov" && <ErrorBoundary key="bov"><BOVTab comps={comps} submarketList={submarketList} brokerName={brokerName} brokerage={brokerage} /></ErrorBoundary>}
+          {activeTab === "listings" && <ErrorBoundary key="listings"><ListingsTab listings={listings} setListings={setListings} submarketList={submarketList} /></ErrorBoundary>}
+          {activeTab === "comps" && <ErrorBoundary key="comps"><MarketCompsTab comps={comps} setComps={setComps} submarketList={submarketList} marketListings={marketListings} setMarketListings={setMarketListings} /></ErrorBoundary>}
+          {activeTab === "submarkets" && <ErrorBoundary key="submarkets"><SubmarketTab deals={deals} listings={listings} comps={comps} submarketList={submarketList} setSubmarketList={setSubmarketList} /></ErrorBoundary>}
+          {activeTab === "contacts" && <ErrorBoundary key="contacts"><ContactsTab contacts={contacts} setContacts={setContacts} deals={deals} listings={listings} submarketList={submarketList} onConvertToDeal={(contact, form) => {
+            const newDeal = {
+              id: Date.now(),
+              name: form.name,
+              client: form.client,
+              counterparty: "",
+              stage: form.stage,
+              dealType: form.dealType,
+              repType: form.repType,
+              subtype: form.subtype,
+              sqft: parseFloat(form.sqft) || 0,
+              dealTotal: 0,
+              monthlyRent: 0,
+              leaseTerm: 0,
+              commissionRate: parseFloat(form.commissionRate) || 5,
+              probability: parseFloat(form.probability) || 25,
+              expectedClose: form.expectedClose || "",
+              notes: form.notes || "",
+              broker: "Me",
+              daysInStage: 0,
+              activities: [],
+              followUpDate: "",
+              leadSource: form.leadSource,
+              coBroker: "",
+              splitPct: 100,
+              won: null,
+              lossReason: "",
+              richNotes: [],
+              submarket: form.submarket,
+              tags: [],
+              documents: [],
+              stageHistory: [{ stage: form.stage, enteredDate: today, note: `Converted from contact: ${contact.name}` }],
+            };
+            setDeals(prev => [...prev, newDeal]);
+            setContacts(prev => prev.map(c => c.id === contact.id ? { ...c, linkedDeals: [...(c.linkedDeals||[]), newDeal.id] } : c));
+            if (newDeal.submarket) geocodeAndCache(newDeal.submarket, newDeal.submarket);
+            setActiveTab("pipeline");
+          }} /></ErrorBoundary>}
+          {activeTab === "tasks" && <ErrorBoundary key="tasks"><TasksTab tasks={tasks} setTasks={setTasks} deals={deals} /></ErrorBoundary>}
+          {activeTab === "expenses" && <ErrorBoundary key="expenses"><ExpenseTab expenses={expenses} setExpenses={setExpenses} closedYTD={closedYTD} gciGoal={gciGoal} /></ErrorBoundary>}
+          {activeTab === "properties" && <ErrorBoundary key="properties"><PropertyDBTab properties={properties} setProperties={setProperties} submarketList={submarketList} contacts={contacts} deals={deals} setDeals={setDeals} onNavigate={setActiveTab} /></ErrorBoundary>}
+          {activeTab === "matches" && <ErrorBoundary key="matches"><MatchEngineTab contacts={contacts} listings={listings} properties={properties} deals={deals} setDeals={setDeals} setContacts={setContacts} onNavigate={setActiveTab} /></ErrorBoundary>}
+          {activeTab === "autopilot" && <ErrorBoundary key="autopilot"><AutopilotTab deals={deals} contacts={contacts} setDeals={setDeals} setTasks={setTasks} onNavigate={setActiveTab} /></ErrorBoundary>}
+          {activeTab === "radar" && <ErrorBoundary key="radar"><TenantRadarTab deals={deals} contacts={contacts} leaseRadar={leaseRadar} onNavigate={setActiveTab} /></ErrorBoundary>}
+          {activeTab === "deal-room" && <ErrorBoundary key="deal-room"><DealRoomTab deals={deals} contacts={contacts} onNavigate={setActiveTab} setDeals={setDeals} /></ErrorBoundary>}
+          {activeTab === "living-property" && <ErrorBoundary key="living-property"><LivingPropertyTab properties={properties} setProperties={setProperties} deals={deals} contacts={contacts} comps={comps} leaseRadar={leaseRadar} submarketList={submarketList} onNavigate={setActiveTab} /></ErrorBoundary>}
+          {activeTab === "help" && <ErrorBoundary key="help"><HelpTab /></ErrorBoundary>}
+          {activeTab === "calendar" && <ErrorBoundary key="calendar"><CalendarTab deals={deals} tasks={tasks} listings={listings} onNavigate={setActiveTab} /></ErrorBoundary>}
+          {activeTab === "lease-radar" && <ErrorBoundary key="lease-radar"><LeaseRadarTab deals={deals} contacts={contacts} onNavigate={setActiveTab} leaseRadar={leaseRadar} setLeaseRadar={setLeaseRadar} setDeals={setDeals} submarketList={submarketList} /></ErrorBoundary>}
 
           {/* ── UNDERWRITING TAB ── */}
-          {activeTab === "underwriting" && <UnderwritingTab />}
+          {activeTab === "underwriting" && <ErrorBoundary key="underwriting"><UnderwritingTab /></ErrorBoundary>}
 
           {/* ── PIPELINE + ANALYTICS TABS ── */}
-          {(activeTab === "pipeline" || activeTab === "analytics") && <>
+          {(activeTab === "pipeline" || activeTab === "analytics") && <ErrorBoundary key="pipeline"><>
             {/* ── Morning Briefing ── */}
             <div style={{ background: `linear-gradient(135deg, ${DS.panel} 0%, #0d1e30 100%)`, borderRadius: DS.r.lg, padding: "18px 22px", border: `1px solid ${DS.border}`, boxShadow: DS.shadow.md }}>
               <div style={{ color: DS.accent, fontSize: DS.fs.lg, fontWeight: DS.fw.black, marginBottom: 12, letterSpacing: "-0.2px" }}>{greeting} — Here's your day</div>
@@ -7487,7 +13891,14 @@ export default function PipelineDashboard() {
           </div>
 
           {activeTab === "analytics" && <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {/* Analytics sub-tab nav */}
+            <div style={{ display: "flex", gap: 4, background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.md, padding: 4, alignSelf: "flex-start" }}>
+              {[["overview","Overview"],["intelligence","Intelligence"],["forecast","Forecast"],["commissions","Commissions"],["dna","Deal DNA"]].map(([v, label]) => (
+                <button key={v} onClick={() => setAnalyticsView(v)} style={{ padding: "6px 16px", background: analyticsView === v ? DS.bg : "none", border: analyticsView === v ? `1px solid ${DS.borderHi}` : "1px solid transparent", borderRadius: DS.r.sm, color: analyticsView === v ? DS.text : DS.textMute, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: analyticsView === v ? DS.fw.semi : DS.fw.normal }}>{label}</button>
+              ))}
+            </div>
+
+            {analyticsView === "overview" && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div style={{ background: DS.panel, borderRadius: DS.r.lg, padding: "16px 18px", border: `1px solid ${DS.border}` }}>
                 <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.lg, marginBottom: 2 }}>Pipeline by Stage</div>
                 <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 12 }}>Deal count and total value</div>
@@ -7629,6 +14040,11 @@ export default function PipelineDashboard() {
               </ResponsiveContainer>
               {lastYearClosed === 0 && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, textAlign:"center", marginTop:6 }}>No {thisYear - 1} data yet — close deals with a {thisYear - 1} close date to populate last year's bars.</div>}
             </div>
+            </>}
+            {analyticsView === "intelligence" && <IntelTab deals={deals} expenses={expenses} gciGoal={gciGoal} />}
+            {analyticsView === "forecast" && <ForecastTab deals={deals} gciGoal={gciGoal} closedYTD={closedYTD} />}
+            {analyticsView === "commissions" && <CommissionDashboard deals={deals} />}
+            {analyticsView === "dna" && <DealDNATab deals={deals} />}
           </>}
 
           {/* Stage Summary */}
@@ -7668,13 +14084,19 @@ export default function PipelineDashboard() {
             </div>
           )}
 
+          {/* Timeline View */}
+          {activeTab === "pipeline" && pipelineView === "timeline" && (
+            <TimelineTab deals={deals} />
+          )}
+
           {/* Deal Table */}
-          {activeTab === "pipeline" && (
+          {activeTab === "pipeline" && pipelineView === "list" && (
             <div style={{ background: DS.panel, borderRadius: DS.r.lg, border: `1px solid ${DS.border}`, overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1200 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
                 <thead>
                   <tr style={{ borderBottom: `2px solid ${DS.border}` }}>
-                    {[["stage","Stage"],["name","Property"],["client","Client"],["counterparty","Counterparty"],["dealType","Type"],["repType","Rep"],["subtype","Subtype"],["submarket","Submarket"],["sqft","Sq Ft"],["totalValue","Value"],["pricePerSqft","$/SF"],["netCommission","Net Comm"],["probability","Prob"],["weighted","Weighted"],["leadSource","Source"],["followUpDate","Follow-up"],["expectedClose","Close"],["daysInStage","Days"]].map(([key, label]) => (
+                    <th style={{ ...th(""), width: 28, cursor: "default" }} />
+                    {[["stage","Stage"],["name","Deal"],["client","Client"],["dealType","Type"],["sqft","Sq Ft"],["totalValue","Value"],["netCommission","Commission"],["probability","Prob"],["followUpDate","Follow-up"],["expectedClose","Close"]].map(([key, label]) => (
                       <th key={key} style={th(key)} onClick={() => sortBy(key)}>{label}{sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}</th>
                     ))}
                     <th style={{ ...th(""), cursor: "default" }}>Actions</th>
@@ -7682,11 +14104,18 @@ export default function PipelineDashboard() {
                 </thead>
                 <tbody>
                   {filtered.map(d => (
-                    <tr key={d.id}
-                      style={{ borderBottom: `1px solid ${DS.border}`, background: d.stage === "Lost" ? DS.red + "08" : d.isAging ? DS.red + "0c" : d.isDueToday ? DS.green + "06" : "transparent" }}
-                      onMouseEnter={e => e.currentTarget.style.background = DS.borderHi + "33"}
-                      onMouseLeave={e => e.currentTarget.style.background = d.stage === "Lost" ? DS.red + "08" : d.isAging ? DS.red + "0c" : d.isDueToday ? DS.green + "06" : "transparent"}>
-                      <td style={td}>
+                    <React.Fragment key={d.id}>
+                    <tr
+                      style={{ borderBottom: expandedRow === d.id ? "none" : `1px solid ${DS.border}`, background: expandedRow === d.id ? DS.panelHi : d.stage === "Lost" ? DS.red + "08" : d.isAging ? DS.red + "0c" : d.isDueToday ? DS.green + "06" : "transparent", cursor: "pointer" }}
+                      onClick={() => setExpandedRow(expandedRow === d.id ? null : d.id)}
+                      onMouseEnter={e => { if (expandedRow !== d.id) e.currentTarget.style.background = DS.borderHi + "33"; }}
+                      onMouseLeave={e => { if (expandedRow !== d.id) e.currentTarget.style.background = d.stage === "Lost" ? DS.red + "08" : d.isAging ? DS.red + "0c" : d.isDueToday ? DS.green + "06" : "transparent"; }}>
+                      {/* Expand chevron */}
+                      <td style={{ ...td, width: 28, paddingLeft: 10 }} onClick={e => { e.stopPropagation(); setExpandedRow(expandedRow === d.id ? null : d.id); }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: DS.textFaint, transform: expandedRow === d.id ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}><polyline points="9 18 15 12 9 6"/></svg>
+                      </td>
+                      {/* Stage */}
+                      <td style={td} onClick={e => e.stopPropagation()}>
                         {inlineEdit?.id === d.id && inlineEdit?.field === "stage" ? (
                           <select autoFocus defaultValue={d.stage}
                             onChange={e => saveInlineField(d.id, "stage", e.target.value)}
@@ -7700,36 +14129,43 @@ export default function PipelineDashboard() {
                           </div>
                         )}
                       </td>
-                      <td style={{ ...td, color: DS.text, fontWeight: DS.fw.semi, maxWidth: 180 }}>
+                      {/* Deal name + badges */}
+                      <td style={{ ...td, color: DS.text, fontWeight: DS.fw.semi, maxWidth: 220 }} onClick={e => e.stopPropagation()}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                           <span style={{ fontSize: DS.fs.md }}>{d.name || "—"}</span>
-                          {d.activities?.length > 0 && <span style={{ background: DS.border, color: DS.textMute, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>{d.activities.length}</span>}
-                          {(d.richNotes||[]).length > 0 && <span style={{ background: DS.blue + "22", color: DS.blue, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>{d.richNotes.length} note{d.richNotes.length > 1 ? "s" : ""}</span>}
-                          {(d.documents||[]).length > 0 && <span style={{ background: DS.green + "22", color: DS.green, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>{d.documents.length} doc{d.documents.length > 1 ? "s" : ""}</span>}
-                          {d.health && <span style={{ background: d.health.color + "22", color: d.health.color, border: `1px solid ${d.health.color}44`, fontSize: 9, padding: "1px 6px", borderRadius: 8, fontWeight: DS.fw.bold }}>{d.health.score}</span>}
+                          {d.health && <span style={{ background: d.health.color + "22", color: d.health.color, border: `1px solid ${d.health.color}44`, fontSize: 9, padding: "1px 6px", borderRadius: 8, fontWeight: DS.fw.black }}>{d.health.score}</span>}
                           {d.isSplit && <span style={{ background: DS.purple + "22", color: DS.purple, fontSize: 9, padding: "1px 5px", borderRadius: 8, fontWeight: DS.fw.semi }}>split</span>}
                         </div>
-                        {(d.tags||[]).length > 0 && (
-                          <div style={{ display:"flex", gap:3, flexWrap:"wrap", marginTop:3 }}>
-                            {(d.tags||[]).slice(0,3).map(tag=><span key={tag} style={{ background: DS.blue + "22", color: DS.blue, fontSize: 8, padding:"1px 5px", borderRadius:20, fontWeight: DS.fw.semi }}>{tag}</span>)}
-                            {(d.tags||[]).length > 3 && <span style={{ color: DS.textFaint, fontSize:8 }}>+{d.tags.length-3}</span>}
-                          </div>
-                        )}
+                        <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>{[d.subtype, d.submarket].filter(Boolean).join(" · ") || " "}</div>
                       </td>
-                      <td style={td}>{d.client || "—"}</td>
-                      <td style={{ ...td, color: DS.textSub }}>{d.counterparty || "—"}</td>
-                      <td style={td}><span style={{ background: d.dealType === "Sale" ? DS.blue + "22" : DS.green + "22", color: d.dealType === "Sale" ? DS.blue : DS.green, padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: DS.fw.bold }}>{d.dealType}</span></td>
-                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.xs }}>{d.repType?.replace(" Rep","") || "—"}</td>
-                      <td style={{ ...td, color: DS.textSub, fontSize: DS.fs.sm }}>{d.subtype || "—"}</td>
-                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.sm }}>{d.submarket || "—"}</td>
-                      <td style={td}>{d.sqft > 0 ? d.sqft.toLocaleString() : "—"}</td>
-                      <td style={td}>{d.totalValue > 0 ? fmt(d.totalValue) : "—"}</td>
-                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.xs }}>{d.pricePerSqft > 0 ? "$" + d.pricePerSqft.toFixed(2) : "—"}</td>
-                      <td style={{ ...td, color: DS.accent, fontWeight: DS.fw.bold }}>
+                      {/* Client */}
+                      <td style={td} onClick={e => e.stopPropagation()}>
+                        {d.client ? <button onClick={e=>{e.stopPropagation();setClientProfile(d.client);}} style={{ background:"none", border:"none", color:DS.blue, cursor:"pointer", fontSize:DS.fs.md, padding:0, textDecoration:"underline dotted", textUnderlineOffset:3, fontWeight:DS.fw.semi }}>{d.client}</button> : "—"}
+                        {d.counterparty && <div style={{ color: DS.textFaint, fontSize: DS.fs.xs, marginTop: 1 }}>{d.counterparty}</div>}
+                      </td>
+                      {/* Type */}
+                      <td style={td} onClick={e => e.stopPropagation()}>
+                        <span style={{ background: d.dealType === "Sale" ? DS.blue + "22" : DS.green + "22", color: d.dealType === "Sale" ? DS.blue : DS.green, padding: "1px 7px", borderRadius: 10, fontSize: 10, fontWeight: DS.fw.bold }}>{d.dealType}</span>
+                        <div style={{ color: DS.textMute, fontSize: 9, marginTop: 2 }}>{d.repType?.replace(" Rep","") || ""}</div>
+                      </td>
+                      {/* Sq Ft */}
+                      <td style={td} onClick={e => e.stopPropagation()}>{d.sqft > 0 ? d.sqft.toLocaleString() : "—"}</td>
+                      {/* Value */}
+                      <td style={td} onClick={e => e.stopPropagation()}>
+                        {d.totalValue > 0 ? fmt(d.totalValue) : "—"}
+                        {d.pricePerSqft > 0 && <div style={{ color: DS.textFaint, fontSize: 9, marginTop: 1 }}>${d.pricePerSqft.toFixed(2)}/SF</div>}
+                      </td>
+                      {/* Commission */}
+                      <td style={{ ...td, color: DS.accent, fontWeight: DS.fw.bold }} onClick={e => e.stopPropagation()}>
                         {fmt(d.netCommission)}
                         {d.isSplit && <div style={{ color: DS.textMute, fontSize: 9 }}>{d.splitPct}% split</div>}
+                        {d.stage === "Closed" && d.netCommission > 0 && (d.commissionPaid
+                          ? <div style={{ color:DS.green, fontSize:9, fontWeight:700, marginTop:2 }}>Received</div>
+                          : <div style={{ color:DS.accent, fontSize:9, marginTop:2 }}>Pending</div>
+                        )}
                       </td>
-                      <td style={td}>
+                      {/* Prob */}
+                      <td style={td} onClick={e => e.stopPropagation()}>
                         {inlineEdit?.id === d.id && inlineEdit?.field === "probability" ? (
                           <input autoFocus type="number" min="0" max="100" defaultValue={d.probability}
                             onBlur={e => saveInlineField(d.id, "probability", parseInt(e.target.value)||0)}
@@ -7740,10 +14176,10 @@ export default function PipelineDashboard() {
                             {pct(d.probability)}
                           </span>
                         )}
+                        <div style={{ color: DS.textFaint, fontSize: 9, marginTop: 1 }}>{fmt(d.weighted)}</div>
                       </td>
-                      <td style={{ ...td, color: DS.green, fontWeight: DS.fw.semi }}>{fmt(d.weighted)}</td>
-                      <td style={{ ...td, color: DS.textMute, fontSize: DS.fs.xs }}>{d.leadSource || "—"}</td>
-                      <td style={td}>
+                      {/* Follow-up */}
+                      <td style={td} onClick={e => e.stopPropagation()}>
                         {inlineEdit?.id === d.id && inlineEdit?.field === "followUpDate" ? (
                           <input autoFocus type="date" defaultValue={d.followUpDate}
                             onBlur={e => saveInlineField(d.id, "followUpDate", e.target.value)}
@@ -7751,12 +14187,15 @@ export default function PipelineDashboard() {
                             style={{ background: DS.bg, border: `1px solid ${DS.accent}`, borderRadius: DS.r.sm, color: DS.text, padding: "3px 6px", fontSize: DS.fs.xs, outline: "none" }} />
                         ) : (
                           <span onClick={() => setInlineEdit({ id: d.id, field: "followUpDate" })} style={{ cursor: "pointer", color: d.isOverdue ? DS.red : d.isDueToday ? DS.green : d.followUpDate ? DS.textMute : DS.textFaint, fontWeight: d.isDueToday || d.isOverdue ? DS.fw.bold : DS.fw.normal }} title="Click to set follow-up date">
-                            {d.followUpDate ? `${d.isOverdue ? "⚠ " : d.isDueToday ? "● " : ""}${new Date(d.followUpDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "set date"}
+                            {d.followUpDate ? `${d.isOverdue ? "⚠ " : d.isDueToday ? "● " : ""}${new Date(d.followUpDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "—"}
                           </span>
                         )}
                       </td>
-                      <td style={td}>{d.expectedClose ? new Date(d.expectedClose + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}</td>
-                      <td style={td}><span style={{ background: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? DS.red + "22" : DS.green + "11", color: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? DS.red : DS.green, padding: "1px 6px", borderRadius: 9, fontSize: 10, fontWeight: DS.fw.bold }}>{d.daysInStage}d</span></td>
+                      {/* Close date */}
+                      <td style={td} onClick={e => e.stopPropagation()}>
+                        {d.expectedClose ? new Date(d.expectedClose + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" }) : "—"}
+                        {d.daysInStage > 0 && <div style={{ color: d.daysInStage > 30 && d.stage !== "Closed" && d.stage !== "Lost" ? DS.red : DS.textFaint, fontSize: 9, marginTop: 1 }}>{d.daysInStage}d in stage</div>}
+                      </td>
                       <td style={td}>
                         <div style={{ position: "relative" }}>
                           <button onClick={e => { e.stopPropagation(); setOpenActionMenu(openActionMenu === d.id ? null : d.id); }} style={{ background: openActionMenu === d.id ? DS.borderHi : DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, cursor: "pointer", fontSize: 16, padding: "2px 10px", borderRadius: DS.r.sm, fontWeight: DS.fw.bold, lineHeight: 1 }}>···</button>
@@ -7777,21 +14216,23 @@ export default function PipelineDashboard() {
                                 const milestoneDone = (d.milestones||[]).filter(m => m.completed).length;
                                 const overdueMs = (d.milestones||[]).filter(m => !m.completed && m.dueDate && m.dueDate < today).length;
                                 return [
-                                  item("✏️  Edit Deal", () => setModal(d)),
-                                  item("📋  Log Activity", () => setActivityDeal(d)),
-                                  item("📝  Notes", () => setRichNotesDeal(d)),
-                                  item("📎  Documents" + ((d.documents||[]).length > 0 ? ` (${d.documents.length})` : ""), () => setDocumentsDeal(d)),
-                                  item("📅  Timeline", () => setTimelineDeal(d)),
-                                  item(`🏁  Milestones${milestoneCount > 0 ? ` — ${milestoneDone}/${milestoneCount}${overdueMs > 0 ? ` · ${overdueMs} overdue` : ""}` : ""}`, () => setMilestoneDeal(d), overdueMs > 0 ? DS.red : milestoneCount > 0 ? DS.purple : null),
-                                  (d.stage === "Under Contract" || d.stage === "LOI") && item(`✅  Checklist${checklistDone > 0 ? ` — ${checklistDone}/${checklistItems.length}` : ""}`, () => setChecklistDeal(d), DS.accent),
-                                  item("✉️  Email Templates", () => setEmailDraftDeal(d), DS.blue),
-                                  (d.stage === "Under Contract" || d.stage === "Closed") && item("💰  Closing Statement", () => setClosingStatementDeal(d), DS.green),
-                                  d.stage !== "Closed" && d.stage !== "Lost" && item("🏆  Close Out", () => setWinLossDeal(d), DS.green),
-                                  item("⧉  Duplicate", () => { const clone = { ...d, id: Date.now(), name: d.name + " (copy)", stageHistory: [], won: null, lossReason: "" }; setDeals(prev => [...prev, clone]); toast("Deal duplicated"); }, null, true),
+                                  item("Edit Deal", () => setModal(d)),
+                                  item("Log Activity", () => setActivityDeal(d)),
+                                  item("Notes", () => setRichNotesDeal(d)),
+                                  item("Documents" + ((d.documents||[]).length > 0 ? ` (${d.documents.length})` : ""), () => setDocumentsDeal(d)),
+                                  item("Timeline", () => setTimelineDeal(d)),
+                                  item(`Milestones${milestoneCount > 0 ? ` — ${milestoneDone}/${milestoneCount}${overdueMs > 0 ? ` · ${overdueMs} overdue` : ""}` : ""}`, () => setMilestoneDeal(d), overdueMs > 0 ? DS.red : milestoneCount > 0 ? DS.purple : null),
+                                  (d.stage === "Under Contract" || d.stage === "LOI") && item(`Checklist${checklistDone > 0 ? ` — ${checklistDone}/${checklistItems.length}` : ""}`, () => setChecklistDeal(d), DS.accent),
+                                  item("Email Templates", () => setEmailDraftDeal(d), DS.blue),
+                                  item("Add Task", () => setQuickTaskDeal(d), DS.accent),
+                                  (d.stage === "Under Contract" || d.stage === "Closed") && item("Closing Statement", () => setClosingStatementDeal(d), DS.green),
+                                  d.stage === "Closed" && item(d.commissionPaid ? "Commission Received" : "Mark Commission Paid", () => { const author = localStorage.getItem("cre-broker-name") || "You"; const nowPaid = !d.commissionPaid; const entry = { id: Date.now(), type: "System", text: nowPaid ? `Commission marked received by ${author}` : "Commission marked unpaid", date: new Date().toISOString(), author }; setDeals(prev => prev.map(x => x.id === d.id ? { ...x, commissionPaid: nowPaid, commissionPaidDate: nowPaid ? today : "", activities: [entry, ...(x.activities || [])] } : x)); toast(d.commissionPaid ? "Marked unpaid" : "Commission marked as received!", "success"); close(); }, d.commissionPaid ? DS.green : DS.accent),
+                                  d.stage !== "Closed" && d.stage !== "Lost" && item("Close Out", () => setWinLossDeal(d), DS.green),
+                                  item("Duplicate", () => { const clone = { ...d, id: Date.now(), name: d.name + " (copy)", stageHistory: [], won: null, lossReason: "" }; setDeals(prev => [...prev, clone]); toast("Deal duplicated"); }, null, true),
                                   <div key="del" onClick={() => { if (window.confirm("Delete this deal?")) { setDeals(prev => prev.filter(x => x.id !== d.id)); toast("Deal deleted", "error"); close(); } }} style={{ padding: "9px 14px", cursor: "pointer", fontSize: DS.fs.sm, color: DS.red }}
                                     onMouseEnter={e => e.currentTarget.style.background = DS.redSoft}
                                     onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                                    🗑  Delete
+                                    Delete
                                   </div>
                                 ].filter(Boolean);
                               })()}
@@ -7800,31 +14241,163 @@ export default function PipelineDashboard() {
                         </div>
                       </td>
                     </tr>
+                    {/* ── Expanded row panel ── */}
+                    {expandedRow === d.id && (
+                      <tr style={{ borderBottom: `2px solid ${d.health?.color || DS.border}44` }}>
+                        <td colSpan={12} style={{ padding: 0, background: DS.bg }}>
+                          <div style={{ padding: "16px 20px 18px 44px", display: "flex", gap: 24 }}>
+
+                            {/* Health + Issues */}
+                            <div style={{ minWidth: 160, flexShrink: 0 }}>
+                              {d.health ? (
+                                <>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                                    <div style={{ width: 48, height: 48, borderRadius: "50%", background: d.health.color + "18", border: `2px solid ${d.health.color}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                      <span style={{ color: d.health.color, fontWeight: 900, fontSize: 16, fontFamily: "'DM Mono', monospace" }}>{d.health.score}</span>
+                                    </div>
+                                    <div>
+                                      <div style={{ color: d.health.color, fontWeight: DS.fw.black, fontSize: DS.fs.md }}>{d.health.label}</div>
+                                      <div style={{ color: DS.textFaint, fontSize: DS.fs.xs }}>Health Score</div>
+                                    </div>
+                                  </div>
+                                  {d.health.issues.length > 0 && (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                      {d.health.issues.map((iss, i) => (
+                                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: DS.fs.xs, color: DS.textSub }}>
+                                          <div style={{ width: 4, height: 4, borderRadius: "50%", background: d.health.color, flexShrink: 0 }} />
+                                          {iss}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {d.health.issues.length === 0 && <div style={{ color: DS.green, fontSize: DS.fs.xs }}>No issues — deal is on track</div>}
+                                </>
+                              ) : (
+                                <div style={{ color: DS.textFaint, fontSize: DS.fs.sm }}>Closed / Lost</div>
+                              )}
+                            </div>
+
+                            {/* Stage progress + deal meta */}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              {/* Stage progress bar */}
+                              {d.stage !== "Lost" && (() => {
+                                const pipeline = ["Prospect","Proposal","LOI","Under Contract","Closed"];
+                                const idx = pipeline.indexOf(d.stage);
+                                return (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 14 }}>
+                                    {pipeline.map((s, i) => {
+                                      const done = idx > i;
+                                      const active = idx === i;
+                                      const c = STAGE_COLORS[s];
+                                      return (
+                                        <React.Fragment key={s}>
+                                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                                            <div style={{ width: 28, height: 28, borderRadius: "50%", background: done || active ? c.text + "22" : DS.border, border: `2px solid ${done || active ? c.text : DS.borderHi}`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: active ? `0 0 8px ${c.text}66` : "none" }}>
+                                              {done ? <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={c.text} strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                                                : <div style={{ width: 6, height: 6, borderRadius: "50%", background: active ? c.text : DS.borderHi }} />}
+                                            </div>
+                                            <span style={{ color: active ? c.text : done ? DS.textMute : DS.textFaint, fontSize: 8, fontWeight: active ? DS.fw.black : DS.fw.normal, whiteSpace: "nowrap" }}>{s}</span>
+                                          </div>
+                                          {i < pipeline.length - 1 && <div style={{ flex: 1, height: 2, background: done ? DS.green + "66" : DS.border, marginBottom: 14, minWidth: 12 }} />}
+                                        </React.Fragment>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                              {/* Deal meta grid */}
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "4px 16px" }}>
+                                {[
+                                  ["Submarket", d.submarket || "—"],
+                                  ["Lead Source", d.leadSource || "—"],
+                                  ["Weighted", fmt(d.weighted)],
+                                  ["$/SF", d.pricePerSqft > 0 ? "$" + d.pricePerSqft.toFixed(2) : "—"],
+                                  d.activities?.length > 0 && ["Last Activity", (() => { const a = d.activities[0]; const days = Math.floor((new Date()-new Date(a.date))/86400000); return `${a.type} · ${days === 0 ? "today" : days + "d ago"}`; })()],
+                                  d.counterparty && ["Counterparty", d.counterparty],
+                                  d.leaseTerm > 0 && ["Lease Term", d.leaseTerm + " mo"],
+                                  d.coBroker && ["Co-Broker", d.coBroker],
+                                ].filter(Boolean).map(([label, val]) => (
+                                  <div key={label}>
+                                    <div style={{ color: DS.textFaint, fontSize: 9, fontWeight: DS.fw.bold, textTransform: "uppercase", letterSpacing: "0.4px" }}>{label}</div>
+                                    <div style={{ color: DS.textSub, fontSize: DS.fs.sm, marginTop: 1 }}>{val}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              {/* Tags */}
+                              {(d.tags||[]).length > 0 && (
+                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
+                                  {d.tags.map(tag => <span key={tag} style={{ background: DS.blue + "22", color: DS.blue, fontSize: 9, padding: "2px 7px", borderRadius: 20, fontWeight: DS.fw.semi }}>{tag}</span>)}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Quick actions */}
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 130, flexShrink: 0 }}>
+                              {[
+                                { label: "Log Activity", color: DS.green, onClick: () => { setActivityDeal(d); setExpandedRow(null); } },
+                                { label: "Add Note", color: DS.blue, onClick: () => { setRichNotesDeal(d); setExpandedRow(null); } },
+                                { label: "Edit Deal", color: DS.textSub, onClick: () => { setModal(d); setExpandedRow(null); } },
+                                { label: "Email Templates", color: DS.purple, onClick: () => { setEmailDraftDeal(d); setExpandedRow(null); } },
+                                d.stage !== "Closed" && d.stage !== "Lost" && { label: "Close Out", color: DS.accent, onClick: () => { setWinLossDeal(d); setExpandedRow(null); } },
+                              ].filter(Boolean).map(({ label, color, onClick }) => (
+                                <button key={label} onClick={e => { e.stopPropagation(); onClick(); }} style={{ background: color + "14", border: `1px solid ${color}33`, color, padding: "6px 12px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.semi, textAlign: "left" }}>{label}</button>
+                              ))}
+                            </div>
+
+                            {/* Autopilot recommendations */}
+                            {!["Closed","Lost"].includes(d.stage) && (() => {
+                              const apActions = calcAutopilotActions(d, deals.map(calcDeal), contacts);
+                              if (apActions.length === 0) return null;
+                              const priorityColor = { high: DS.red, medium: DS.accent, low: DS.green };
+                              return (
+                                <div style={{ minWidth: 220, maxWidth: 260, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                                  <div style={{ color: DS.textMute, fontSize: 9, fontWeight: DS.fw.black, letterSpacing: "1px", textTransform: "uppercase", marginBottom: 2 }}>Autopilot</div>
+                                  {apActions.map(action => {
+                                    const ac = priorityColor[action.priority];
+                                    return (
+                                      <div key={action.id} style={{ background: DS.surface, border: `1px solid ${ac}33`, borderLeft: `2px solid ${ac}`, borderRadius: DS.r.sm, padding: "8px 10px" }}>
+                                        <div style={{ color: ac, fontSize: 9, fontWeight: DS.fw.black, textTransform: "uppercase", marginBottom: 3 }}>{action.priority === "high" ? "High Priority" : action.priority === "medium" ? "Medium" : "Suggested"}</div>
+                                        <div style={{ color: DS.textSub, fontSize: DS.fs.xs, lineHeight: 1.4 }}>{action.title}</div>
+                                      </div>
+                                    );
+                                  })}
+                                  <button onClick={e => { e.stopPropagation(); setExpandedRow(null); setActiveTab("autopilot"); }}
+                                    style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textFaint, padding: "4px 10px", borderRadius: DS.r.sm, cursor: "pointer", fontSize: DS.fs.xs, textAlign: "center", marginTop: 2 }}>
+                                    View full Autopilot
+                                  </button>
+                                </div>
+                              );
+                            })()}
+
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
                 </tbody>
                 <tfoot>
                   <tr style={{ borderTop: `2px solid ${DS.border}`, background: DS.surface }}>
-                    <td colSpan={8} style={{ padding: "10px", color: DS.textMute, fontSize: DS.fs.sm }}>Showing {filtered.length} deal{filtered.length !== 1 ? "s" : ""} · {filtered.reduce((s,d)=>s+(d.sqft||0),0).toLocaleString()} SF</td>
-                    <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black }}>{filtered.reduce((s,d)=>s+(d.sqft||0),0).toLocaleString()}</td>
-                    <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black }}>{fmt(filtered.reduce((s,d)=>s+d.totalValue,0))}</td>
-                    <td />
-                    <td style={{ padding: "10px", color: DS.accent, fontWeight: DS.fw.black }}>{fmt(filtered.reduce((s,d)=>s+d.netCommission,0))}</td>
-                    <td />
-                    <td style={{ padding: "10px", color: DS.green, fontWeight: DS.fw.black }}>{fmt(filtered.reduce((s,d)=>s+d.weighted,0))}</td>
-                    <td colSpan={5} style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black, textAlign: "right", fontSize: DS.fs.md }}>Total Pipeline: {fmt(filtered.reduce((s,d)=>s+d.totalValue,0))}</td>
+                    <td colSpan={5} style={{ padding: "10px", color: DS.textMute, fontSize: DS.fs.sm }}>Showing {filtered.length} deal{filtered.length !== 1 ? "s" : ""}</td>
+                    <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.sm }}>{filtered.reduce((s,d)=>s+(d.sqft||0),0).toLocaleString()} SF</td>
+                    <td style={{ padding: "10px", color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.sm }}>{fmt(filtered.reduce((s,d)=>s+d.totalValue,0))}</td>
+                    <td style={{ padding: "10px", color: DS.accent, fontWeight: DS.fw.black, fontSize: DS.fs.sm }}>{fmt(filtered.reduce((s,d)=>s+d.netCommission,0))}</td>
+                    <td style={{ padding: "10px", color: DS.green, fontWeight: DS.fw.semi, fontSize: DS.fs.xs }}>Weighted: {fmt(filtered.reduce((s,d)=>s+d.weighted,0))}</td>
+                    <td colSpan={3} style={{ padding: "10px", color: DS.textMute, fontWeight: DS.fw.normal, textAlign: "right", fontSize: DS.fs.xs }}>Click any row to expand</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
           )}
-        </>}
+        </></ErrorBoundary>}
 
         </div>
       </div>
 
       {/* Global modals */}
-      {showSearch && <GlobalSearch deals={deals} contacts={contacts} properties={properties} comps={comps} tasks={tasks} onNavigate={setActiveTab} onClose={() => setShowSearch(false)} />}
+      {showSearch && <GlobalSearch deals={deals} contacts={contacts} properties={properties} comps={comps} tasks={tasks} listings={listings} onNavigate={setActiveTab} onClose={() => setShowSearch(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} gciGoal={gciGoal} setGciGoal={setGciGoal} />}
+      {clientProfile && <ClientProfileModal clientName={clientProfile} contacts={contacts} deals={deals} properties={properties} onNavigate={setActiveTab} onClose={() => setClientProfile(null)} />}
       {quickAdd && <QuickAdd onSave={saveQuickAdd} onClose={() => setQuickAdd(false)} />}
       {modal && <DealModal deal={modal === "new" ? null : modal} onSave={saveModal} onClose={() => setModal(null)} submarketList={submarketList} comps={comps} />}
       {activityDeal && <ActivityLog deal={activityDeal} onClose={() => setActivityDeal(null)} onSave={saveActivity} />}
@@ -7862,6 +14435,7 @@ export default function PipelineDashboard() {
       {milestoneDeal && <MilestoneTrackerModal deal={milestoneDeal} onSave={saveMilestones} onClose={() => setMilestoneDeal(null)} />}
       {closingStatementDeal && <CommissionClosingStatement deal={closingStatementDeal} brokerName={brokerName} brokerage={brokerage} onClose={() => setClosingStatementDeal(null)} />}
       {emailDraftDeal && <EmailDraftModal deal={emailDraftDeal} brokerName={brokerName} brokerage={brokerage} onClose={() => setEmailDraftDeal(null)} />}
+      {quickTaskDeal && <QuickTaskModal deal={quickTaskDeal} onSave={(t) => { setTasks(prev => [...prev, { ...t, id: Date.now(), done: false }]); setQuickTaskDeal(null); }} onClose={() => setQuickTaskDeal(null)} />}
       {showCSVImport && (
         <CSVImportModal
           onImport={handleCSVImport}
@@ -7869,6 +14443,28 @@ export default function PipelineDashboard() {
           submarketList={submarketList}
         />
       )}
+      {/* Floating voice button */}
+      <button onClick={() => setShowVoice(true)} title="Voice Note (⌘J)"
+        style={{ position: "fixed", bottom: 28, right: 28, width: 52, height: 52, borderRadius: "50%", background: `linear-gradient(135deg, #ef4444, #dc2626)`, border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 20px #ef444466", zIndex: 900, transition: "transform 0.15s" }}
+        onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
+        onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round"/><line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2.5" strokeLinecap="round"/><line x1="8" y1="23" x2="16" y2="23" stroke="white" strokeWidth="2.5" strokeLinecap="round"/></svg>
+      </button>
+
+      {showVoice && (
+        <VoiceCaptureModal
+          deals={deals}
+          contacts={contacts}
+          setDeals={setDeals}
+          setContacts={setContacts}
+          tasks={tasks}
+          setTasks={setTasks}
+          properties={properties}
+          setProperties={setProperties}
+          onClose={() => setShowVoice(false)}
+        />
+      )}
+
       <ToastProvider />
     </div>
   );
