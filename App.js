@@ -8820,57 +8820,142 @@ function PropertyDBTab({ properties, setProperties, submarketList, contacts, dea
 }
 
 // ── Calendar Tab ──────────────────────────────────────────────
-function CalendarTab({ deals, tasks, listings, onNavigate }) {
-  const [month, setMonth] = useState(new Date().getMonth());
-  const [year, setYear] = useState(new Date().getFullYear());
+function CalendarTab({ deals, tasks, setTasks, listings, leaseRadar, onNavigate }) {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth());
+  const [year, setYear] = useState(now.getFullYear());
+  const [selectedDate, setSelectedDate] = useState(null); // "YYYY-MM-DD" for day panel
+  const [quickTask, setQuickTask] = useState(null);       // date string for quick-add modal
+  const [qtTitle, setQtTitle] = useState("");
+  const [filterTypes, setFilterTypes] = useState({ "Close": true, "Follow-up": true, "Task": true, "Showing": true, "Lease": true });
 
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+  const goToday = () => { setMonth(now.getMonth()); setYear(now.getFullYear()); setSelectedDate(null); };
 
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = now.toISOString().split("T")[0];
 
-  // Build events map keyed by "YYYY-MM-DD"
+  const EVENT_META = {
+    "Close":     { color: DS.accent,   label: "Close Dates" },
+    "Follow-up": { color: DS.green,    label: "Follow-ups" },
+    "Task":      { color: "#f97316",   label: "Tasks" },
+    "Showing":   { color: DS.blue,     label: "Showings" },
+    "Lease":     { color: "#a855f7",   label: "Lease Expiry" },
+  };
+
   const events = useMemo(() => {
     const map = {};
     const add = (date, ev) => { if (!date) return; if (!map[date]) map[date] = []; map[date].push(ev); };
     deals.forEach(d => {
-      if (d.expectedClose) add(d.expectedClose, { label: d.name, color: DS.accent, tab: "pipeline", kind: "Close" });
-      if (d.followUpDate) add(d.followUpDate, { label: d.name, color: DS.green, tab: "pipeline", kind: "Follow-up" });
+      if (d.expectedClose) add(d.expectedClose, { label: d.name, kind: "Close", tab: "pipeline", dealId: d.id });
+      if (d.followUpDate)  add(d.followUpDate,  { label: d.name, kind: "Follow-up", tab: "pipeline", dealId: d.id });
     });
-    tasks.forEach(t => { if (!t.done) add(t.dueDate, { label: t.title, color: "#f97316", tab: "tasks", kind: "Task" }); });
-    listings.forEach(l => (l.showings || []).forEach(s => { if (s.date) add(s.date, { label: `Showing: ${l.name}`, color: DS.blue, tab: "listings", kind: "Showing" }); }));
+    tasks.forEach(t => {
+      if (!t.done && t.dueDate) add(t.dueDate, { label: t.title, kind: "Task", tab: "tasks", taskId: t.id });
+    });
+    listings.forEach(l => (l.showings || []).forEach(s => {
+      if (s.date) add(s.date, { label: `Showing: ${l.name}`, kind: "Showing", tab: "listings" });
+    }));
+    (leaseRadar || []).forEach(l => {
+      const expiry = l.leaseExpiration || l.leaseExpiry;
+      if (expiry) add(expiry, { label: `Lease Expiry: ${l.tenantName || l.name || "Tenant"}`, kind: "Lease", tab: "lease-radar" });
+    });
     return map;
-  }, [deals, tasks, listings, month, year]);
+  }, [deals, tasks, listings, leaseRadar]);
+
+  const filteredEvents = useMemo(() => {
+    const out = {};
+    Object.entries(events).forEach(([date, evs]) => {
+      const f = evs.filter(e => filterTypes[e.kind]);
+      if (f.length) out[date] = f;
+    });
+    return out;
+  }, [events, filterTypes]);
 
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-
   const rows = [];
   for (let i = 0; i < cells.length; i += 7) rows.push(cells.slice(i, i + 7));
 
-  const monthEvents = Object.entries(events).filter(([d]) => d.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`));
+  const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+  const monthEvents = Object.entries(filteredEvents).filter(([d]) => d.startsWith(monthKey));
   const totalEvents = monthEvents.reduce((s, [, evs]) => s + evs.length, 0);
+
+  // Upcoming events (next 14 days from today)
+  const upcoming = useMemo(() => {
+    const result = [];
+    for (let i = 0; i <= 14; i++) {
+      const d = new Date(now); d.setDate(d.getDate() + i);
+      const ds = d.toISOString().split("T")[0];
+      const evs = (filteredEvents[ds] || []);
+      if (evs.length) result.push({ date: ds, day: d.getDate(), month: d.getMonth(), label: i === 0 ? "Today" : i === 1 ? "Tomorrow" : DAYS[d.getDay()] + " " + (d.getMonth()+1) + "/" + d.getDate(), events: evs });
+    }
+    return result;
+  }, [filteredEvents]);
+
+  // ICS export
+  const exportICS = () => {
+    const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//CRE OS//Calendar//EN", "CALSCALE:GREGORIAN"];
+    Object.entries(events).forEach(([date, evs]) => {
+      evs.forEach(ev => {
+        const d = date.replace(/-/g, "");
+        lines.push("BEGIN:VEVENT");
+        lines.push(`DTSTART;VALUE=DATE:${d}`);
+        lines.push(`DTEND;VALUE=DATE:${d}`);
+        lines.push(`SUMMARY:${ev.label} [${ev.kind}]`);
+        lines.push(`UID:creos-${ev.kind}-${date}-${Math.random().toString(36).slice(2)}`);
+        lines.push("END:VEVENT");
+      });
+    });
+    lines.push("END:VCALENDAR");
+    const blob = new Blob([lines.join("\r\n")], { type: "text/calendar" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "creos-calendar.ics"; a.click();
+    URL.revokeObjectURL(url);
+    toast("ICS file exported — import into Google Calendar or Apple Calendar", "success");
+  };
+
+  const saveQuickTask = () => {
+    if (!qtTitle.trim() || !quickTask) return;
+    const t = { id: Date.now(), title: qtTitle.trim(), dueDate: quickTask, priority: "Medium", done: false, createdAt: new Date().toISOString() };
+    setTasks(prev => [...prev, t]);
+    setQtTitle(""); setQuickTask(null);
+    toast("Task added", "success");
+  };
+
+  const dayPanelEvents = selectedDate ? (filteredEvents[selectedDate] || []) : [];
+  const selDateObj = selectedDate ? new Date(selectedDate + "T00:00:00") : null;
+  const selLabel = selDateObj ? `${MONTHS[selDateObj.getMonth()]} ${selDateObj.getDate()}, ${selDateObj.getFullYear()}` : "";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ color: DS.text, fontWeight: DS.fw.black, fontSize: DS.fs.h2 }}>Calendar</div>
           <div style={{ color: DS.textMute, fontSize: DS.fs.sm, marginTop: 2 }}>{totalEvents} event{totalEvents !== 1 ? "s" : ""} this month</div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {[["Close Dates", DS.accent], ["Follow-ups", DS.green], ["Tasks", "#f97316"], ["Showings", DS.blue]].map(([l, c]) => (
-              <div key={l} style={{ display: "flex", alignItems: "center", gap: 5 }}><div style={{ width: 8, height: 8, borderRadius: "50%", background: c }} /><span style={{ color: DS.textMute, fontSize: DS.fs.xs }}>{l}</span></div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 10 }}>
+          {/* Legend + filter toggles */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {Object.entries(EVENT_META).map(([kind, { color, label }]) => (
+              <button key={kind} onClick={() => setFilterTypes(p => ({ ...p, [kind]: !p[kind] }))}
+                style={{ display: "flex", alignItems: "center", gap: 5, background: filterTypes[kind] ? color + "18" : DS.surface, border: `1px solid ${filterTypes[kind] ? color + "55" : DS.border}`, borderRadius: DS.r.sm, padding: "4px 10px", cursor: "pointer" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: filterTypes[kind] ? color : DS.border }} />
+                <span style={{ color: filterTypes[kind] ? color : DS.textFaint, fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>{label}</span>
+              </button>
             ))}
           </div>
+          {/* Nav controls */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={exportICS} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, borderRadius: DS.r.sm, padding: "6px 12px", cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>Export ICS</button>
+            <button onClick={goToday} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.textSub, borderRadius: DS.r.sm, padding: "6px 12px", cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>Today</button>
             <button onClick={prevMonth} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.text, borderRadius: DS.r.sm, padding: "6px 12px", cursor: "pointer", fontSize: DS.fs.md }}>‹</button>
             <span style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.lg, minWidth: 150, textAlign: "center" }}>{MONTHS[month]} {year}</span>
             <button onClick={nextMonth} style={{ background: DS.panel, border: `1px solid ${DS.border}`, color: DS.text, borderRadius: DS.r.sm, padding: "6px 12px", cursor: "pointer", fontSize: DS.fs.md }}>›</button>
@@ -8878,31 +8963,143 @@ function CalendarTab({ deals, tasks, listings, onNavigate }) {
         </div>
       </div>
 
-      <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: `1px solid ${DS.border}` }}>
-          {DAYS.map(d => <div key={d} style={{ padding: "10px 0", textAlign: "center", color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, letterSpacing: "0.5px" }}>{d}</div>)}
-        </div>
-        {rows.map((row, ri) => (
-          <div key={ri} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: ri < rows.length - 1 ? `1px solid ${DS.border}` : "none" }}>
-            {[...row, ...Array(7 - row.length).fill(null)].map((day, ci) => {
-              const dateStr = day ? `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}` : null;
-              const dayEvents = dateStr ? (events[dateStr] || []) : [];
-              const isToday = dateStr === todayStr;
-              return (
-                <div key={ci} style={{ minHeight: 90, padding: "6px 5px", background: isToday ? DS.accentSoft : day ? DS.bg : DS.surface, borderRight: ci < 6 ? `1px solid ${DS.border}` : "none", borderTop: isToday ? `2px solid ${DS.accent}` : "none" }}>
-                  {day && <div style={{ fontSize: DS.fs.xs, fontWeight: isToday ? DS.fw.black : DS.fw.normal, color: isToday ? DS.accent : DS.textMute, marginBottom: 4, textAlign: "right", paddingRight: 2 }}>{day}</div>}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    {dayEvents.slice(0, 3).map((ev, ei) => (
-                      <div key={ei} onClick={() => { onNavigate(ev.tab); toast(`${ev.kind}: ${ev.label}`, "info"); }} style={{ background: ev.color + "22", color: ev.color, border: `1px solid ${ev.color}33`, fontSize: 9, padding: "2px 5px", borderRadius: 3, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: DS.fw.semi }} title={ev.label}>{ev.label}</div>
-                    ))}
-                    {dayEvents.length > 3 && <div style={{ color: DS.textMute, fontSize: 9, paddingLeft: 4 }}>+{dayEvents.length - 3} more</div>}
-                  </div>
-                </div>
-              );
-            })}
+      <div style={{ display: "grid", gridTemplateColumns: selectedDate ? "1fr 300px" : "1fr", gap: 14, alignItems: "start" }}>
+        {/* Calendar grid */}
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: `1px solid ${DS.border}` }}>
+            {DAYS.map(d => <div key={d} style={{ padding: "10px 0", textAlign: "center", color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.bold, letterSpacing: "0.5px" }}>{d}</div>)}
           </div>
-        ))}
+          {rows.map((row, ri) => (
+            <div key={ri} style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: ri < rows.length - 1 ? `1px solid ${DS.border}` : "none" }}>
+              {[...row, ...Array(7 - row.length).fill(null)].map((day, ci) => {
+                const dateStr = day ? `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}` : null;
+                const dayEvs = dateStr ? (filteredEvents[dateStr] || []) : [];
+                const isToday = dateStr === todayStr;
+                const isSelected = dateStr === selectedDate;
+                return (
+                  <div key={ci}
+                    onClick={() => { if (!day) return; if (isSelected) { setSelectedDate(null); } else { setSelectedDate(dateStr); } }}
+                    style={{ minHeight: 90, padding: "6px 5px", background: isSelected ? DS.accent + "18" : isToday ? DS.accentSoft : day ? DS.bg : DS.surface, borderRight: ci < 6 ? `1px solid ${DS.border}` : "none", borderTop: isSelected ? `2px solid ${DS.accent}` : isToday ? `2px solid ${DS.accent}66` : "none", cursor: day ? "pointer" : "default", transition: "background 0.1s" }}>
+                    {day && (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, paddingRight: 2 }}>
+                        <span style={{ fontSize: DS.fs.xs, fontWeight: isToday ? DS.fw.black : DS.fw.normal, color: isToday ? DS.accent : isSelected ? DS.accent : DS.textMute }}>{day}</span>
+                        {dayEvs.length === 0 && (
+                          <button onClick={e => { e.stopPropagation(); setQuickTask(dateStr); setQtTitle(""); }}
+                            style={{ background: "none", border: "none", color: DS.textFaint, fontSize: 14, cursor: "pointer", lineHeight: 1, padding: "0 2px", opacity: 0.5 }} title="Add task">+</button>
+                        )}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      {dayEvs.slice(0, 3).map((ev, ei) => {
+                        const col = EVENT_META[ev.kind]?.color || DS.accent;
+                        return (
+                          <div key={ei} onClick={e => { e.stopPropagation(); setSelectedDate(dateStr); }}
+                            style={{ background: col + "22", color: col, border: `1px solid ${col}33`, fontSize: 9, padding: "2px 5px", borderRadius: 3, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: DS.fw.semi }} title={ev.label}>
+                            {ev.label}
+                          </div>
+                        );
+                      })}
+                      {dayEvs.length > 3 && (
+                        <div onClick={e => { e.stopPropagation(); setSelectedDate(dateStr); }}
+                          style={{ color: DS.accent, fontSize: 9, paddingLeft: 4, cursor: "pointer", fontWeight: DS.fw.semi }}>
+                          +{dayEvs.length - 3} more
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+
+        {/* Day detail panel */}
+        {selectedDate && (
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, overflow: "hidden", position: "sticky", top: 80 }}>
+            <div style={{ padding: "14px 16px", borderBottom: `1px solid ${DS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.md }}>{selLabel}</div>
+                <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginTop: 2 }}>{dayPanelEvents.length} event{dayPanelEvents.length !== 1 ? "s" : ""}</div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => { setQuickTask(selectedDate); setQtTitle(""); }}
+                  style={{ background: DS.accent + "18", border: `1px solid ${DS.accent}44`, color: DS.accent, borderRadius: DS.r.sm, padding: "5px 10px", cursor: "pointer", fontSize: DS.fs.xs, fontWeight: DS.fw.semi }}>+ Task</button>
+                <button onClick={() => setSelectedDate(null)}
+                  style={{ background: DS.surface, border: `1px solid ${DS.border}`, color: DS.textSub, borderRadius: DS.r.sm, padding: "5px 10px", cursor: "pointer", fontSize: DS.fs.xs }}>Close</button>
+              </div>
+            </div>
+            <div style={{ padding: "10px 0", maxHeight: 420, overflowY: "auto" }}>
+              {dayPanelEvents.length === 0 ? (
+                <div style={{ padding: "24px 16px", textAlign: "center", color: DS.textFaint, fontSize: DS.fs.sm }}>No events — click "+ Task" to add one</div>
+              ) : (
+                dayPanelEvents.map((ev, i) => {
+                  const col = EVENT_META[ev.kind]?.color || DS.accent;
+                  const gcalDate = selectedDate.replace(/-/g, "");
+                  const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(ev.label)}&dates=${gcalDate}/${gcalDate}&details=${encodeURIComponent(`CRE OS — ${ev.kind}`)}`;
+                  return (
+                    <div key={i} style={{ padding: "10px 16px", borderBottom: i < dayPanelEvents.length - 1 ? `1px solid ${DS.border}` : "none", display: "flex", gap: 10, alignItems: "flex-start" }}>
+                      <div style={{ width: 3, borderRadius: 2, background: col, alignSelf: "stretch", flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ color: DS.text, fontSize: DS.fs.sm, fontWeight: DS.fw.semi, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.label}</div>
+                        <div style={{ color: col, fontSize: DS.fs.xs, marginTop: 2, fontWeight: DS.fw.semi }}>{ev.kind}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                        <a href={gcalUrl} target="_blank" rel="noopener noreferrer"
+                          style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, borderRadius: DS.r.sm, padding: "3px 8px", cursor: "pointer", fontSize: DS.fs.xs, textDecoration: "none", display: "inline-block", lineHeight: "1.6" }} title="Add to Google Calendar">GCal</a>
+                        <button onClick={() => { onNavigate(ev.tab); setSelectedDate(null); }}
+                          style={{ background: "none", border: `1px solid ${DS.border}`, color: DS.textSub, borderRadius: DS.r.sm, padding: "3px 8px", cursor: "pointer", fontSize: DS.fs.xs }}>Open</button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Upcoming 14 days */}
+      {upcoming.length > 0 && (
+        <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "14px 18px" }}>
+          <div style={{ color: DS.textMute, fontSize: DS.fs.xs, fontWeight: DS.fw.black, letterSpacing: "1px", marginBottom: 12 }}>NEXT 14 DAYS</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            {upcoming.map((day, di) => (
+              <div key={di} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "8px 0", borderBottom: di < upcoming.length - 1 ? `1px solid ${DS.border}` : "none" }}>
+                <div style={{ width: 80, flexShrink: 0 }}>
+                  <div style={{ color: day.date === todayStr ? DS.accent : DS.textSub, fontSize: DS.fs.xs, fontWeight: DS.fw.bold }}>{day.label}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", flex: 1 }}>
+                  {day.events.map((ev, ei) => {
+                    const col = EVENT_META[ev.kind]?.color || DS.accent;
+                    return (
+                      <div key={ei} onClick={() => { setSelectedDate(day.date); setMonth(new Date(day.date + "T00:00:00").getMonth()); setYear(new Date(day.date + "T00:00:00").getFullYear()); }}
+                        style={{ background: col + "18", color: col, border: `1px solid ${col}33`, borderRadius: DS.r.sm, padding: "3px 10px", fontSize: DS.fs.xs, fontWeight: DS.fw.semi, cursor: "pointer", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={ev.label}>
+                        {ev.label}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quick task modal */}
+      {quickTask && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000066", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setQuickTask(null)}>
+          <div style={{ background: DS.panel, border: `1px solid ${DS.border}`, borderRadius: DS.r.lg, padding: "20px 24px", width: 340 }} onClick={e => e.stopPropagation()}>
+            <div style={{ color: DS.text, fontWeight: DS.fw.bold, fontSize: DS.fs.md, marginBottom: 4 }}>Add Task</div>
+            <div style={{ color: DS.textMute, fontSize: DS.fs.xs, marginBottom: 14 }}>Due: {(() => { const d = new Date(quickTask + "T00:00:00"); return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; })()}</div>
+            <input autoFocus value={qtTitle} onChange={e => setQtTitle(e.target.value)} onKeyDown={e => { if (e.key === "Enter") saveQuickTask(); if (e.key === "Escape") setQuickTask(null); }}
+              placeholder="Task title..." style={{ width: "100%", background: DS.bg, border: `1px solid ${DS.border}`, borderRadius: DS.r.sm, padding: "9px 12px", color: DS.text, fontSize: DS.fs.sm, outline: "none", boxSizing: "border-box", marginBottom: 12 }} />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setQuickTask(null)} style={{ background: DS.surface, border: `1px solid ${DS.border}`, color: DS.textSub, borderRadius: DS.r.sm, padding: "7px 16px", cursor: "pointer", fontSize: DS.fs.sm }}>Cancel</button>
+              <button onClick={saveQuickTask} style={{ background: DS.accent, border: "none", color: "#0a0f1a", borderRadius: DS.r.sm, padding: "7px 16px", cursor: "pointer", fontSize: DS.fs.sm, fontWeight: DS.fw.bold }}>Add Task</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -13812,7 +14009,7 @@ export default function PipelineDashboard() {
           {activeTab === "deal-room" && <ErrorBoundary key="deal-room"><DealRoomTab deals={deals} contacts={contacts} onNavigate={setActiveTab} setDeals={setDeals} /></ErrorBoundary>}
           {activeTab === "living-property" && <ErrorBoundary key="living-property"><LivingPropertyTab properties={properties} setProperties={setProperties} deals={deals} contacts={contacts} comps={comps} leaseRadar={leaseRadar} submarketList={submarketList} onNavigate={setActiveTab} /></ErrorBoundary>}
           {activeTab === "help" && <ErrorBoundary key="help"><HelpTab /></ErrorBoundary>}
-          {activeTab === "calendar" && <ErrorBoundary key="calendar"><CalendarTab deals={deals} tasks={tasks} listings={listings} onNavigate={setActiveTab} /></ErrorBoundary>}
+          {activeTab === "calendar" && <ErrorBoundary key="calendar"><CalendarTab deals={deals} tasks={tasks} setTasks={setTasks} listings={listings} leaseRadar={leaseRadar} onNavigate={setActiveTab} /></ErrorBoundary>}
           {activeTab === "lease-radar" && <ErrorBoundary key="lease-radar"><LeaseRadarTab deals={deals} contacts={contacts} onNavigate={setActiveTab} leaseRadar={leaseRadar} setLeaseRadar={setLeaseRadar} setDeals={setDeals} submarketList={submarketList} /></ErrorBoundary>}
 
           {/* ── UNDERWRITING TAB ── */}
